@@ -7,6 +7,8 @@
     "build": "bun build --compile --target bun --outfile server src/index.ts"
   },
   "dependencies": {
+    "@elysia/eden": "^1.4.10",
+    "@elysia/jwt": "^1.4.2",
     "@elysia/static": "^1.4.11",
     "@mantine/carousel": "^9.2.1",
     "@mantine/charts": "^9.2.1",
@@ -21,6 +23,7 @@
     "@mantine/nprogress": "^9.2.1",
     "@mantine/spotlight": "^9.2.1",
     "@mantine/tiptap": "^9.2.1",
+    "@phosphor-icons/react": "^2.1.10",
     "@tiptap/extension-link": "^3.23.4",
     "@tiptap/pm": "^3.23.4",
     "@tiptap/react": "^3.23.4",
