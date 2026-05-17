@@ -3,12 +3,22 @@
   "version": "1.0.50",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun run --watch src/index.ts",
+    "build": "bun build --compile --target bun --outfile server src/index.ts"
   },
   "dependencies": {
-    "elysia": "latest"
+    "@elysia/static": "^1.4.11",
+    "clsx": "^2.1.1",
+    "elysia": "latest",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "bun-plugin-tailwind": "^0.1.2",
     "bun-types": "latest"
   },
   "module": "src/index.js"

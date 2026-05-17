@@ -1,0 +1,18 @@
+{
+	"editor.formatOnSave": true,
+	"editor.tabSize": 2,
+	"editor.detectIndentation": false,
+	"editor.indentSize": 2,
+	"editor.insertSpaces": true,
+	"files.trimTrailingWhitespace": true,
+	"files.insertFinalNewline": true,
+	"editor.defaultFormatter": "biomejs.biome",
+	// "files.exclude": {
+	//   "**/.git": true,
+	//   "**/.DS_Store": true,
+	//   "**/node_modules": true
+	// },
+	"editor.codeActionsOnSave": {
+		"source.fixAll.biome": "explicit",
+	},
+}
