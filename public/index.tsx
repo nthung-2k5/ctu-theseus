@@ -1,3 +1,4 @@
+import { Button, MantineProvider, Title } from '@mantine/core'
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
@@ -9,13 +10,17 @@ function App() {
 
   return (
     <main>
-      <h2>{count}</h2>
-      <button type='button' onClick={increase}>
+      <Title order={2}>{count}</Title>
+      <Button type="button" onClick={increase}>
         Increase
-      </button>
+      </Button>
     </main>
   )
 }
 
 const root = createRoot(document.getElementById('root')!)
-root.render(<App />)
+root.render(
+  <MantineProvider>
+    <App />
+  </MantineProvider>,
+)

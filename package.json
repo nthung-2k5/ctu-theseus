@@ -8,10 +8,31 @@
   },
   "dependencies": {
     "@elysia/static": "^1.4.11",
+    "@mantine/carousel": "^9.2.1",
+    "@mantine/charts": "^9.2.1",
+    "@mantine/code-highlight": "^9.2.1",
+    "@mantine/core": "^9.2.1",
+    "@mantine/dates": "^9.2.1",
+    "@mantine/dropzone": "^9.2.1",
+    "@mantine/form": "^9.2.1",
+    "@mantine/hooks": "^9.2.1",
+    "@mantine/modals": "^9.2.1",
+    "@mantine/notifications": "^9.2.1",
+    "@mantine/nprogress": "^9.2.1",
+    "@mantine/spotlight": "^9.2.1",
+    "@mantine/tiptap": "^9.2.1",
+    "@tiptap/extension-link": "^3.23.4",
+    "@tiptap/pm": "^3.23.4",
+    "@tiptap/react": "^3.23.4",
+    "@tiptap/starter-kit": "^3.23.4",
     "clsx": "^2.1.1",
+    "dayjs": "^1.11.20",
     "elysia": "latest",
+    "embla-carousel": "8.5.2",
+    "embla-carousel-react": "8.5.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "recharts": "^3.8.1",
     "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
@@ -19,7 +40,10 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "bun-plugin-tailwind": "^0.1.2",
-    "bun-types": "latest"
+    "bun-types": "latest",
+    "postcss": "^8.5.14",
+    "postcss-preset-mantine": "^1.18.0",
+    "postcss-simple-vars": "^7.0.1"
   },
   "module": "src/index.js"
 }
