@@ -1,15 +1,34 @@
-# Elysia with Bun runtime
+# Luận văn tốt nghiệp Đại học Cần Thơ
 
-## Getting Started
-To get started with this template, simply paste this command into your terminal:
-```bash
-bun create elysia ./elysia-example
-```
+- Họ tên: Nguyễn Trường Hưng
+- MSSV: ********
+- Ngành: Kỹ thuật phần mềm K49
 
-## Development
-To start the development server run:
+# Đề tài
+
+
+# Công nghệ sử dụng
+
+## Backend
+
+- Bun: Runtime môi trường và trình quản lý gói
+- ElysiaJS: Framework web
+- TypeScript: Ngôn ngữ lập trình
+
+## Frontend
+
+- React: Thư viện giao diện người dùng
+- Zustand: Quản lý trạng thái
+- Wouter: Thư viện định tuyến
+- Tailwindcss: CSS Framework
+- Mantine UI: Component UI
+
+## Hướng dẫn chạy
+
 ```bash
+# Cài dependencies
+bun install
+
+# Chạy server (port 3000)
 bun run dev
 ```
-
-Open http://localhost:3000/ with your browser to see the result.
