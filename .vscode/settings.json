@@ -1,18 +1,33 @@
 {
-	"editor.formatOnSave": true,
-	"editor.tabSize": 2,
-	"editor.detectIndentation": false,
-	"editor.indentSize": 2,
-	"editor.insertSpaces": true,
-	"files.trimTrailingWhitespace": true,
-	"files.insertFinalNewline": true,
-	"editor.defaultFormatter": "biomejs.biome",
-	// "files.exclude": {
-	//   "**/.git": true,
-	//   "**/.DS_Store": true,
-	//   "**/node_modules": true
-	// },
-	"editor.codeActionsOnSave": {
-		"source.fixAll.biome": "explicit",
-	},
+  "editor.formatOnSave": true,
+  "editor.tabSize": 2,
+  "editor.detectIndentation": false,
+  "editor.indentSize": 2,
+  "editor.insertSpaces": true,
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  // "files.exclude": {
+  //   "**/.git": true,
+  //   "**/.DS_Store": true,
+  //   "**/node_modules": true
+  // },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.biome": "explicit",
+  },
+  "python.pyrefly.typeCheckingMode": "strict",
+  "[python]": {
+    "diffEditor.ignoreTrimWhitespace": false,
+    "editor.defaultColorDecorators": "never",
+    "gitlens.codeLens.symbolScopes": [
+      "!Module"
+    ],
+    "editor.tabSize": 4,
+    "editor.indentSize": 4
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome",
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  }
 }
