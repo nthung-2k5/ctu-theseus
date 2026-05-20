@@ -1,2 +1,79 @@
+@import url("https://fonts.googleapis.com/css2?family=K2D:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800&family=Readex+Pro:wght@160..700&display=swap");
+
 @import "tailwindcss";
 @import "@mantine/core/styles.css";
+@import "@mantine/notifications/styles.css";
+@import "@mantine/dropzone/styles.css";
+@import "@mantine/charts/styles.css";
+@import "@mantine/spotlight/styles.css";
+
+/* ---------- Base resets ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: "Readex Pro", sans-serif;
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--mantine-color-body);
+  color: var(--mantine-color-text);
+}
+
+/* ---------- Title font override ---------- */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.mantine-Title-root {
+  font-family: "K2D", sans-serif;
+}
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--mantine-color-dark-4);
+  border-radius: 999px;
+}
+
+/* ---------- Custom utility layers ---------- */
+@layer components {
+  .page-container {
+    max-width: 1440px;
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+  }
+
+  .card-elevated {
+    background: var(--mantine-color-body);
+    border: 1px solid var(--mantine-color-dark-4);
+    border-radius: var(--mantine-radius-md);
+    transition:
+      box-shadow 150ms ease,
+      transform 150ms ease;
+  }
+
+  .card-elevated:hover {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    transform: translateY(-2px);
+  }
+}

@@ -212,3 +212,9 @@ poetry.toml
 
 # LSP config files
 pyrightconfig.json
+
+# specific folders
+!public/lib/
+!src/lib/
+
+drizzle/

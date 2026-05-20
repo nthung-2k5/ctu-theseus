@@ -1,0 +1,122 @@
+import {
+  ActionIcon,
+  Avatar,
+  Box,
+  Divider,
+  Group,
+  AppShell as MantineAppShell,
+  Menu,
+  NavLink,
+  ScrollArea,
+  Stack,
+  Text,
+  Title,
+  UnstyledButton,
+} from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
+import { CaretDownIcon, GearIcon, HouseIcon, ListIcon, SignOutIcon, UserIcon } from '@phosphor-icons/react'
+import { authClient } from '@public/lib/auth'
+import type { ReactNode } from 'react'
+import { useLocation } from 'wouter'
+
+interface AppShellProps {
+  children: ReactNode
+}
+
+const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
+
+export function AppShell({ children }: AppShellProps) {
+  const [location, setLocation] = useLocation()
+  const [mobileOpened, { toggle: toggleMobile }] = useDisclosure()
+  const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
+  const { data: session } = authClient.useSession()
+
+  const handleLogout = async () => {
+    await authClient.signOut()
+    setLocation('/login')
+  }
+
+  return (
+    <MantineAppShell
+      header={{ height: 56 }}
+      navbar={{
+        width: 260,
+        breakpoint: 'sm',
+        collapsed: { mobile: !mobileOpened, desktop: !desktopOpened },
+      }}
+      padding="lg"
+    >
+      {/* ─── Header ─── */}
+      <MantineAppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Group gap="sm">
+            <ActionIcon variant="subtle" color="gray" hiddenFrom="sm" onClick={toggleMobile}>
+              <ListIcon size={20} />
+            </ActionIcon>
+            <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={toggleDesktop}>
+              <ListIcon size={20} />
+            </ActionIcon>
+            <Title order={4} c="primary">
+              CTU Theseus
+            </Title>
+          </Group>
+
+          <Menu shadow="md" width={200} position="bottom-end">
+            <Menu.Target>
+              <UnstyledButton>
+                <Group gap="xs">
+                  <Avatar size="sm" radius="xl" color="primary">
+                    {session?.user?.name?.[0]?.toUpperCase() ?? 'U'}
+                  </Avatar>
+                  <Text size="sm" fw={500} visibleFrom="sm">
+                    {session?.user?.name ?? 'User'}
+                  </Text>
+                  <CaretDownIcon size={14} />
+                </Group>
+              </UnstyledButton>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>Account</Menu.Label>
+              <Menu.Item leftSection={<UserIcon size={16} />}>Profile</Menu.Item>
+              <Menu.Item leftSection={<GearIcon size={16} />}>Settings</Menu.Item>
+              <Menu.Divider />
+              <Menu.Item leftSection={<SignOutIcon size={16} />} color="red" onClick={handleLogout}>
+                Sign out
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
+      </MantineAppShell.Header>
+
+      {/* ─── Navbar ─── */}
+      <MantineAppShell.Navbar p="sm">
+        <MantineAppShell.Section grow component={ScrollArea} scrollbarSize={4}>
+          <Stack gap={4}>
+            {NAV_ITEMS.map((item) => (
+              <NavLink
+                key={item.path}
+                label={item.label}
+                leftSection={<item.icon size={20} />}
+                active={location === item.path}
+                onClick={() => setLocation(item.path)}
+                variant="light"
+              />
+            ))}
+          </Stack>
+        </MantineAppShell.Section>
+
+        <MantineAppShell.Section>
+          <Divider my="xs" />
+          <Box px="xs" py={4}>
+            <Text size="xs" c="dimmed">
+              CTU Theseus v0.1
+            </Text>
+          </Box>
+        </MantineAppShell.Section>
+      </MantineAppShell.Navbar>
+
+      {/* ─── Main ─── */}
+      <MantineAppShell.Main>{children}</MantineAppShell.Main>
+    </MantineAppShell>
+  )
+}

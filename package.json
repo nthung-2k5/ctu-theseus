@@ -4,9 +4,14 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build --compile --target bun --outfile server src/index.ts"
+    "build": "bun build --compile --target bun --outfile server src/index.ts",
+    "db:generate": "bunx drizzle-kit generate",
+    "db:migrate": "bunx drizzle-kit migrate",
+    "db:push": "bunx drizzle-kit push",
+    "db:studio": "bunx drizzle-kit studio"
   },
   "dependencies": {
+    "@better-auth/drizzle-adapter": "^1.6.11",
     "@elysia/eden": "^1.4.10",
     "@elysia/jwt": "^1.4.2",
     "@elysia/static": "^1.4.11",
@@ -28,15 +33,20 @@
     "@tiptap/pm": "^3.23.4",
     "@tiptap/react": "^3.23.4",
     "@tiptap/starter-kit": "^3.23.4",
+    "better-auth": "^1.6.11",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.20",
+    "drizzle-orm": "^0.45.2",
     "elysia": "latest",
     "embla-carousel": "8.5.2",
     "embla-carousel-react": "8.5.2",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "^3.8.1",
-    "tailwindcss": "^4.3.0"
+    "redis": "^5.12.1",
+    "tailwindcss": "^4.3.0",
+    "wouter": "^3.9.0",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
@@ -44,6 +54,7 @@
     "@types/react-dom": "^19.2.3",
     "bun-plugin-tailwind": "^0.1.2",
     "bun-types": "latest",
+    "drizzle-kit": "^0.31.10",
     "postcss": "^8.5.14",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1"

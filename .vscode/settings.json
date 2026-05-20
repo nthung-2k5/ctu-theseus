@@ -12,20 +12,18 @@
   //   "**/node_modules": true
   // },
   "editor.codeActionsOnSave": {
-    "source.fixAll.biome": "explicit",
+    "source.fixAll.biome": "explicit"
   },
   "python.pyrefly.typeCheckingMode": "strict",
   "[python]": {
     "diffEditor.ignoreTrimWhitespace": false,
     "editor.defaultColorDecorators": "never",
-    "gitlens.codeLens.symbolScopes": [
-      "!Module"
-    ],
+    "gitlens.codeLens.symbolScopes": ["!Module"],
     "editor.tabSize": 4,
     "editor.indentSize": 4
   },
   "[typescript]": {
-    "editor.defaultFormatter": "biomejs.biome",
+    "editor.defaultFormatter": "biomejs.biome"
   },
   "[typescriptreact]": {
     "editor.defaultFormatter": "biomejs.biome"
