@@ -1,4 +1,4 @@
-import { relations, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   check,
@@ -94,25 +94,6 @@ export const verifications = pgTable(
   },
   (table) => [index('verifications_identifier_idx').on(table.identifier)],
 )
-
-export const usersRelations = relations(users, ({ many }) => ({
-  sessions: many(sessions),
-  accounts: many(accounts),
-}))
-
-export const sessionsRelations = relations(sessions, ({ one }) => ({
-  users: one(users, {
-    fields: [sessions.userId],
-    references: [users.id],
-  }),
-}))
-
-export const accountsRelations = relations(accounts, ({ one }) => ({
-  users: one(users, {
-    fields: [accounts.userId],
-    references: [users.id],
-  }),
-}))
 
 /* ------------------------------------------------------------------ */
 /*  Projects                                                          */
@@ -270,12 +251,3 @@ export const trainingMetrics = pgTable(
   },
   (table) => [primaryKey({ columns: [table.trainingRunId, table.epoch] })],
 )
-
-export const datasetsRelations = relations(datasets, ({ one, many }) => ({
-  project: one(projects, {
-    fields: [datasets.projectId],
-    references: [projects.id],
-  }),
-  images: many(datasetImages),
-  trainingRuns: many(trainingRuns),
-}))
