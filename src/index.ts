@@ -1,4 +1,5 @@
 import { staticPlugin } from '@elysia/static'
+import { projectRoutes } from '@server/routes/projects'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
 
@@ -16,6 +17,9 @@ const app = new Elysia()
   )
   /* ── Authentication ── */
   .mount(auth.handler)
+  /* ── API Routes ── */
+  .use(projectRoutes)
+  /* ── SPA Fallback ── */
   // .get('/*', index)
   .listen(3000)
 

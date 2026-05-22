@@ -14,10 +14,23 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { CaretDownIcon, GearIcon, HouseIcon, ListIcon, SignOutIcon, UserIcon } from '@phosphor-icons/react'
+import {
+  BrainIcon,
+  CaretDownIcon,
+  CrosshairIcon,
+  DatabaseIcon,
+  GearIcon,
+  HouseIcon,
+  ListIcon,
+  MagicWandIcon,
+  SignOutIcon,
+  TagIcon,
+  UserIcon,
+} from '@phosphor-icons/react'
 import { authClient } from '@public/lib/auth'
+import { useProjectStore } from '@public/store/useProjectStore'
 import type { ReactNode } from 'react'
-import { useLocation } from 'wouter'
+import { Link, useLocation } from 'wouter'
 
 interface AppShellProps {
   children: ReactNode
@@ -25,15 +38,24 @@ interface AppShellProps {
 
 const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
 
+const PROJECT_NAV_ITEMS = [
+  { label: 'Overview', icon: DatabaseIcon, path: '' },
+  { label: 'Dataset', icon: DatabaseIcon, path: '/dataset' },
+  { label: 'Labeling', icon: TagIcon, path: '/labeling' },
+  { label: 'Augmentation', icon: MagicWandIcon, path: '/augmentation' },
+  { label: 'Training', icon: BrainIcon, path: '/training' },
+  { label: 'Inference', icon: CrosshairIcon, path: '/inference' },
+]
+
 export function AppShell({ children }: AppShellProps) {
   const [location, setLocation] = useLocation()
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure()
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
   const { data: session } = authClient.useSession()
+  const activeProject = useProjectStore((s) => s.activeProject)
 
   const handleLogout = async () => {
     await authClient.signOut()
-    setLocation('/login')
   }
 
   return (
@@ -56,9 +78,21 @@ export function AppShell({ children }: AppShellProps) {
             <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={toggleDesktop}>
               <ListIcon size={20} />
             </ActionIcon>
-            <Title order={4} c="primary">
-              CTU Theseus
-            </Title>
+            <Link href='/'>
+              <Title order={4} c="primary">
+                CTU Theseus
+              </Title>
+            </Link>
+            {activeProject && (
+              <>
+                <Text size="sm" c="dimmed">
+                  /
+                </Text>
+                <Text size="sm" fw={500}>
+                  {activeProject.name}
+                </Text>
+              </>
+            )}
           </Group>
 
           <Menu shadow="md" width={200} position="bottom-end">
@@ -92,16 +126,35 @@ export function AppShell({ children }: AppShellProps) {
       <MantineAppShell.Navbar p="sm">
         <MantineAppShell.Section grow component={ScrollArea} scrollbarSize={4}>
           <Stack gap={4}>
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.path}
-                label={item.label}
-                leftSection={<item.icon size={20} />}
-                active={location === item.path}
-                onClick={() => setLocation(item.path)}
-                variant="light"
-              />
-            ))}
+            {!activeProject ? (
+              NAV_ITEMS.map((item) => (
+                <NavLink
+                  key={item.path}
+                  label={item.label}
+                  leftSection={<item.icon size={20} />}
+                  active={location === item.path}
+                  onClick={() => setLocation(item.path)}
+                  variant="light"
+                />
+              ))
+            ) : (
+              <>
+                <Divider my="xs" label="Project" labelPosition="left" />
+                {PROJECT_NAV_ITEMS.map((item) => {
+                  const fullPath = `/project/${activeProject.id}${item.path}`
+                  return (
+                    <NavLink
+                      key={item.path}
+                      label={item.label}
+                      leftSection={<item.icon size={20} />}
+                      active={location === fullPath}
+                      onClick={() => setLocation(fullPath)}
+                      variant="light"
+                    />
+                  )
+                })}
+              </>
+            )}
           </Stack>
         </MantineAppShell.Section>
 
