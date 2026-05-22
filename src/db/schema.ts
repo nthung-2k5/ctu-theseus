@@ -18,7 +18,7 @@ import {
 /*  Users                                                             */
 /* ------------------------------------------------------------------ */
 export const users = pgTable('users', {
-  id: uuid('id').primaryKey().default(sql`uuidv7()`), // Wait until DrizzleORM merges PR#5722
+  id: uuid('id').primaryKey().default(sql`uuidv7()`), // Wait until DrizzleORM merges PR#5722 (https://github.com/drizzle-team/drizzle-orm/pull/5722)
   name: text('name').notNull(),
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').default(false).notNull(),

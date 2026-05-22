@@ -1,7 +1,5 @@
 import { auth } from '@server/auth'
 import { db } from '@server/db'
-import { projects } from '@server/db/schema'
-import { eq } from 'drizzle-orm'
 import Elysia, { t } from 'elysia'
 
 export const betterAuth = new Elysia({ name: 'better-auth' })
@@ -25,7 +23,9 @@ export const betterAuth = new Elysia({ name: 'better-auth' })
     }),
     async resolve({ status, params, user }) {
       const project = await db.query.projects.findFirst({
-        where: eq(projects.id, params.projectId),
+        where: {
+          id: params.projectId
+        },
       })
       if (!project) return status(404, 'Project not found')
       if (project.userId !== user.id) return status(403, 'Unauthorized')
