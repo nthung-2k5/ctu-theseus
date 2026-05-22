@@ -29,9 +29,10 @@ import {
   UserIcon,
 } from '@phosphor-icons/react'
 import { authClient } from '@public/lib/auth'
+import type { Project } from '@public/store/types'
 import { useProjectStore } from '@public/store/useProjectStore'
-import { type ReactNode, useEffect } from 'react'
-import { Link, useLocation, useParams } from 'wouter'
+import type { ReactNode } from 'react'
+import { Link, useLocation } from 'wouter'
 
 interface AppShellProps {
   children: ReactNode
@@ -42,11 +43,36 @@ const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
 const PROJECT_NAV_ITEMS = [
   { label: 'Overview', icon: DatabaseIcon, path: '' },
   { label: 'Classes', icon: TagChevronIcon, path: '/classes' },
-  { label: 'Dataset', icon: DatabaseIcon, path: '/dataset' },
-  { label: 'Labeling', icon: TagIcon, path: '/labeling' },
-  { label: 'Augmentation', icon: MagicWandIcon, path: '/augmentation' },
-  { label: 'Training', icon: BrainIcon, path: '/training' },
-  { label: 'Inference', icon: CrosshairIcon, path: '/inference' },
+  {
+    label: 'Dataset',
+    icon: DatabaseIcon,
+    path: '/dataset',
+    disabled: (project: Project) => project.classCount === 0,
+  },
+  {
+    label: 'Labeling',
+    icon: TagIcon,
+    path: '/labeling',
+    disabled: (project: Project) => project.imageCount === 0,
+  },
+  {
+    label: 'Augmentation',
+    icon: MagicWandIcon,
+    path: '/augmentation',
+    disabled: (project: Project) => project.imageCount === 0,
+  },
+  {
+    label: 'Training',
+    icon: BrainIcon,
+    path: '/training',
+    disabled: (project: Project) => project.imageCount === 0,
+  },
+  {
+    label: 'Inference',
+    icon: CrosshairIcon,
+    path: '/inference',
+    disabled: (project: Project) => project.versionCount === 0,
+  },
 ]
 
 export function AppShell({ children }: AppShellProps) {
@@ -153,6 +179,7 @@ export function AppShell({ children }: AppShellProps) {
                       active={location === fullPath}
                       onClick={() => setLocation(fullPath)}
                       variant="light"
+                      disabled={item.disabled?.(activeProject)}
                     />
                   )
                 })}
