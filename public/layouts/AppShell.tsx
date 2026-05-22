@@ -41,8 +41,8 @@ const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
 
 const PROJECT_NAV_ITEMS = [
   { label: 'Overview', icon: DatabaseIcon, path: '' },
-  { label: 'Dataset', icon: DatabaseIcon, path: '/dataset' },
   { label: 'Classes', icon: TagChevronIcon, path: '/classes' },
+  { label: 'Dataset', icon: DatabaseIcon, path: '/dataset' },
   { label: 'Labeling', icon: TagIcon, path: '/labeling' },
   { label: 'Augmentation', icon: MagicWandIcon, path: '/augmentation' },
   { label: 'Training', icon: BrainIcon, path: '/training' },
