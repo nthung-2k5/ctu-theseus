@@ -20,7 +20,6 @@ import { FolderSimpleIcon, PencilSimpleIcon, PlusIcon } from '@phosphor-icons/re
 import { api } from '@public/lib/api'
 import { assert } from '@public/lib/assert'
 import { useEdenMutation, useEdenQuery } from '@public/lib/eden-query'
-import type { Project } from '@public/store/types'
 import { useProjectStore } from '@public/store/useProjectStore'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
@@ -37,8 +36,8 @@ const CreateProjectModal = () => {
   const queryClient = useQueryClient()
 
   const createProject = useEdenMutation(api.projects.post, {
-    onSuccess: ({ project }) => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
+    onSuccess: async ({ project }) => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
       notifications.show({ title: 'Project created', message: `"${project.name}" is ready`, color: 'green' })
       modals.closeAll()
     },
@@ -76,9 +75,17 @@ const CreateProjectModal = () => {
   )
 }
 
-const UpdateProjectModal = ({ project }: { project: Project }) => {
+const UpdateProjectModal = ({
+  projectId,
+  projectName,
+  projectDescription,
+}: {
+  projectId: string
+  projectName: string
+  projectDescription: string | null
+}) => {
   const form = useForm({
-    initialValues: { name: project.name, description: project.description },
+    initialValues: { name: projectName, description: projectDescription },
     validate: {
       name: (v) => (v.trim().length > 0 ? null : 'Project name is required'),
     },
@@ -86,9 +93,9 @@ const UpdateProjectModal = ({ project }: { project: Project }) => {
 
   const queryClient = useQueryClient()
 
-  const updateProject = useEdenMutation(api.projects({ projectId: project.id }).patch, {
-    onSuccess: ({ project }) => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
+  const updateProject = useEdenMutation(api.projects({ projectId }).patch, {
+    onSuccess: async ({ project }) => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] })
       notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
       modals.closeAll()
     },
@@ -139,8 +146,8 @@ export function DashboardPage() {
     setActiveProject(null)
   }, [setActiveProject])
 
-  const openProject = (project: Project) => {
-    setLocation(`/project/${project.id}`)
+  const openProject = (projectId: string) => {
+    setLocation(`/project/${projectId}`)
   }
 
   const openCreateProjectModal = () => {
@@ -151,12 +158,19 @@ export function DashboardPage() {
     })
   }
 
-  const openUpdateProjectModal = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>, project: Project) => {
+  const openUpdateProjectModal = (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
+    projectId: string,
+    projectName: string,
+    projectDescription: string | null,
+  ) => {
     e.stopPropagation()
     modals.open({
       title: 'Edit project',
       centered: true,
-      children: <UpdateProjectModal project={project} />,
+      children: (
+        <UpdateProjectModal projectId={projectId} projectName={projectName} projectDescription={projectDescription} />
+      ),
     })
   }
 
@@ -203,7 +217,7 @@ export function DashboardPage() {
               radius="md"
               className="card-elevated"
               style={{ cursor: 'pointer' }}
-              onClick={() => openProject(project)}
+              onClick={() => openProject(project.id)}
             >
               <Stack gap="sm">
                 <Group justify="space-between">
@@ -212,7 +226,11 @@ export function DashboardPage() {
                     <Badge variant="light" color="primary" size="sm">
                       Active
                     </Badge>
-                    <ActionIcon variant="subtle" color="gray" onClick={(e) => openUpdateProjectModal(e, project)}>
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      onClick={(e) => openUpdateProjectModal(e, project.id, project.name, project.description)}
+                    >
                       <PencilSimpleIcon size={16} />
                     </ActionIcon>
                   </Group>

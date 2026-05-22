@@ -24,13 +24,14 @@ import {
   ListIcon,
   MagicWandIcon,
   SignOutIcon,
+  TagChevronIcon,
   TagIcon,
   UserIcon,
 } from '@phosphor-icons/react'
 import { authClient } from '@public/lib/auth'
 import { useProjectStore } from '@public/store/useProjectStore'
-import type { ReactNode } from 'react'
-import { Link, useLocation } from 'wouter'
+import { type ReactNode, useEffect } from 'react'
+import { Link, useLocation, useParams } from 'wouter'
 
 interface AppShellProps {
   children: ReactNode
@@ -41,6 +42,7 @@ const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
 const PROJECT_NAV_ITEMS = [
   { label: 'Overview', icon: DatabaseIcon, path: '' },
   { label: 'Dataset', icon: DatabaseIcon, path: '/dataset' },
+  { label: 'Classes', icon: TagChevronIcon, path: '/classes' },
   { label: 'Labeling', icon: TagIcon, path: '/labeling' },
   { label: 'Augmentation', icon: MagicWandIcon, path: '/augmentation' },
   { label: 'Training', icon: BrainIcon, path: '/training' },
@@ -49,6 +51,7 @@ const PROJECT_NAV_ITEMS = [
 
 export function AppShell({ children }: AppShellProps) {
   const [location, setLocation] = useLocation()
+
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure()
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
   const { data: session } = authClient.useSession()
@@ -78,7 +81,7 @@ export function AppShell({ children }: AppShellProps) {
             <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={toggleDesktop}>
               <ListIcon size={20} />
             </ActionIcon>
-            <Link href='/'>
+            <Link href="/">
               <Title order={4} c="primary">
                 CTU Theseus
               </Title>

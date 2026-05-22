@@ -31,26 +31,19 @@ export const relations = defineRelations(schema, (r) => ({
   },
   projects: {
     datasetClasses: r.many.datasetClasses(),
-    datasets: r.many.datasets(),
+    datasetImages: r.many.datasetImages(),
+    trainingRuns: r.many.trainingRuns(),
     users: r.one.users({
       from: r.projects.userId,
       to: r.users.id,
     }),
   },
   datasetImages: {
-    datasets: r.one.datasets({
-      from: r.datasetImages.datasetId,
-      to: r.datasets.id,
-    }),
-    datasetClasses: r.many.datasetClasses(),
-  },
-  datasets: {
-    datasetImages: r.many.datasetImages(),
     projects: r.one.projects({
-      from: r.datasets.projectId,
+      from: r.datasetImages.projectId,
       to: r.projects.id,
     }),
-    trainingRuns: r.many.trainingRuns(),
+    datasetClasses: r.many.datasetClasses(),
   },
   trainingMetrics: {
     trainingRuns: r.one.trainingRuns({
@@ -60,9 +53,9 @@ export const relations = defineRelations(schema, (r) => ({
   },
   trainingRuns: {
     trainingMetrics: r.many.trainingMetrics(),
-    datasets: r.one.datasets({
-      from: r.trainingRuns.datasetId,
-      to: r.datasets.id,
+    projects: r.one.projects({
+      from: r.trainingRuns.projectId,
+      to: r.projects.id,
     }),
   },
 }))

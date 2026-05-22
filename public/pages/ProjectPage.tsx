@@ -29,12 +29,10 @@ import {
 } from '@phosphor-icons/react'
 import { api } from '@public/lib/api'
 import { assert } from '@public/lib/assert'
-import { useEdenMutation, useEdenQuery } from '@public/lib/eden-query'
+import { useEdenMutation } from '@public/lib/eden-query'
 import type { Project } from '@public/store/types'
-import { useDatasetStore } from '@public/store/useDatasetStore'
 import { useProjectStore } from '@public/store/useProjectStore'
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
 import { useLocation, useParams } from 'wouter'
 
 const WORKFLOW_STEPS = [
@@ -123,18 +121,7 @@ const UpdateProjectModal = ({ project }: { project: Project }) => {
 export function ProjectPage() {
   const params = useParams<{ id: string }>()
   const [, setLocation] = useLocation()
-  const classes = useDatasetStore((s) => s.classes)
-  const images = useDatasetStore((s) => s.images)
   const activeProject = useProjectStore((s) => s.activeProject)
-  const setActiveProject = useProjectStore((s) => s.setActiveProject)
-
-  const { data: project, isSuccess } = useEdenQuery(['projects', params.id], api.projects({ projectId: params.id }).get)
-
-  useEffect(() => {
-    if (isSuccess && project) {
-      setActiveProject(project.project)
-    }
-  }, [project, isSuccess, setActiveProject])
 
   const handleEditClick = () => {
     assert(activeProject)
@@ -172,10 +159,10 @@ export function ProjectPage() {
               </ThemeIcon>
               <div>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Datasets
+                  Dataset Images
                 </Text>
                 <Text size="xl" fw={700}>
-                  {images.length}
+                  {activeProject?.imageCount}
                 </Text>
               </div>
             </Group>
@@ -190,7 +177,7 @@ export function ProjectPage() {
                   Classes
                 </Text>
                 <Text size="xl" fw={700}>
-                  {classes.length}
+                  {activeProject?.classCount}
                 </Text>
               </div>
             </Group>
@@ -205,7 +192,7 @@ export function ProjectPage() {
                   Versions
                 </Text>
                 <Text size="xl" fw={700}>
-                  0
+                  {activeProject?.versionCount}
                 </Text>
               </div>
             </Group>

@@ -5,13 +5,11 @@
 import type { Treaty } from '@elysia/eden'
 import type { api } from '@public/lib/api'
 
-export type Project = Treaty.Data<typeof api.projects.get>['projects'][number]
+export type Project = Treaty.Data<ReturnType<typeof api.projects>['get']>['project']
 
-export interface DatasetClass {
-  id: string
-  name: string
-  color: string
-}
+export type DatasetClass = NonNullable<
+  Treaty.Data<ReturnType<ReturnType<typeof api.projects>['classes']['get']>>['classes']
+>[number]
 
 export interface BoundingBox {
   id: string

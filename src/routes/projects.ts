@@ -1,7 +1,7 @@
 import { db } from '@server/db'
-import { datasetClasses, datasets, projects } from '@server/db/schema'
-import { and, eq } from 'drizzle-orm'
-import { Elysia, NotFoundError, t } from 'elysia'
+import { datasetClasses, datasetImages, projects, trainingRuns } from '@server/db/schema'
+import { and, count, eq } from 'drizzle-orm'
+import { Elysia, NotFoundError, status, t } from 'elysia'
 import { betterAuth } from './auth'
 
 export const projectRoutes = new Elysia({ prefix: '/api/projects' })
@@ -31,10 +31,11 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
   .get(
     '/:projectId',
     async ({ project }) => {
-      const datasetCount = await db.$count(datasets, eq(datasets.projectId, project.id))
+      const imageCount = await db.$count(datasetImages, eq(datasetImages.projectId, project.id))
       const classCount = await db.$count(datasetClasses, eq(datasetClasses.projectId, project.id))
+      const versionCount = await db.$count(trainingRuns, eq(trainingRuns.projectId, project.id))
 
-      return { project: { ...project, datasetCount, classCount } }
+      return { project: { ...project, imageCount, classCount, versionCount } }
     },
     {
       projectBelongToUser: true,
@@ -57,7 +58,7 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
     {
       body: t.Object({
         name: t.String({ minLength: 1 }),
-        description: t.Optional(t.String()),
+        description: t.Nullable(t.String()),
       }),
       auth: true,
     },
@@ -72,7 +73,7 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
       projectBelongToUser: true,
       body: t.Object({
         name: t.Optional(t.String({ minLength: 1 })),
-        description: t.Optional(t.Nullable(t.String())),
+        description: t.MaybeEmpty(t.String()),
       }),
     },
   )
@@ -84,7 +85,7 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
         .where(and(eq(projects.id, params.projectId), eq(projects.userId, user.id)))
         .returning()
       if (deleted.length === 0) return new NotFoundError('Project not found')
-      return { success: true }
+      return status(204)
     },
     { auth: true },
   )

@@ -135,44 +135,22 @@ export const datasetClasses = pgTable(
 )
 
 /* ------------------------------------------------------------------ */
-/*  Datasets                                                          */
-/* ------------------------------------------------------------------ */
-export const datasets = pgTable(
-  'datasets',
-  {
-    id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    projectId: uuid('project_id')
-      .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
-    name: text('name').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true })
-      .$onUpdate(() => new Date())
-      .notNull(),
-  },
-  (table) => [
-    index('datasets_projectId_idx').on(table.projectId),
-    unique('datasets_projectId_name_key').on(table.projectId, table.name),
-  ],
-)
-
-/* ------------------------------------------------------------------ */
 /*  Dataset Images                                                    */
 /* ------------------------------------------------------------------ */
 export const datasetImages = pgTable(
   'dataset_images',
   {
     id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    datasetId: uuid('dataset_id')
+    projectId: uuid('project_id')
       .notNull()
-      .references(() => datasets.id, { onDelete: 'cascade' }),
+      .references(() => projects.id, { onDelete: 'cascade' }),
     filename: text('filename').notNull(),
     path: text('path').notNull(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('datasetImages_datasetId_idx').on(table.datasetId)],
+  (table) => [index('datasetImages_projectId_idx').on(table.projectId)],
 )
 
 /* ------------------------------------------------------------------ */
@@ -206,9 +184,9 @@ export const trainingRuns = pgTable(
   'training_runs',
   {
     id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    datasetId: uuid('dataset_id')
+    projectId: uuid('project_id')
       .notNull()
-      .references(() => datasets.id, { onDelete: 'cascade' }),
+      .references(() => projects.id, { onDelete: 'cascade' }),
     taskId: text('task_id'),
     modelId: text('model_id').notNull(),
     variantId: text('variant_id').notNull(),
@@ -228,7 +206,7 @@ export const trainingRuns = pgTable(
       .notNull(),
   },
   (table) => [
-    index('trainingRuns_datasetId_idx').on(table.datasetId),
+    index('trainingRuns_projectId_idx').on(table.projectId),
     check('split_config_check', sql`${table.train} + ${table.validate} + ${table.test} = 100`),
   ],
 )
