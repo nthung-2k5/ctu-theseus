@@ -25,8 +25,8 @@ export const relations = defineRelations(schema, (r) => ({
       to: r.projects.id,
     }),
     datasetImages: r.many.datasetImages({
-      from: r.datasetClasses.id.through(r.labels.classId),
-      to: r.datasetImages.id.through(r.labels.imageId),
+      from: r.datasetClasses.id,
+      to: r.datasetImages.classId,
     }),
   },
   projects: {

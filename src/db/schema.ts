@@ -144,36 +144,41 @@ export const datasetImages = pgTable(
     projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
+    classId: uuid('class_id')
+      .references(() => datasetClasses.id, { onDelete: 'set null' }),
     filename: text('filename').notNull(),
     path: text('path').notNull(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index('datasetImages_projectId_idx').on(table.projectId)],
+  (table) => [
+    index('datasetImages_projectId_idx').on(table.projectId),
+    index('datasetImages_classId_idx').on(table.classId),
+  ],
 )
 
 /* ------------------------------------------------------------------ */
 /*  Bounding Box Labels                                               */
 /* ------------------------------------------------------------------ */
-export const labels = pgTable(
-  'labels',
-  {
-    id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    imageId: uuid('image_id')
-      .notNull()
-      .references(() => datasetImages.id, { onDelete: 'cascade' }),
-    classId: uuid('class_id')
-      .notNull()
-      .references(() => datasetClasses.id, { onDelete: 'cascade' }),
-    // Note: the coordinates are normalized [0, 1], x and y are the center of the bounding box (YOLO format)
-    x: real('x').notNull(),
-    y: real('y').notNull(),
-    width: real('width').notNull(),
-    height: real('height').notNull(),
-  },
-  (table) => [index('labels_imageId_idx').on(table.imageId), index('labels_classId_idx').on(table.classId)],
-)
+// export const labels = pgTable(
+//   'labels',
+//   {
+//     id: uuid('id').primaryKey().default(sql`uuidv7()`),
+//     imageId: uuid('image_id')
+//       .notNull()
+//       .references(() => datasetImages.id, { onDelete: 'cascade' }),
+//     classId: uuid('class_id')
+//       .notNull()
+//       .references(() => datasetClasses.id, { onDelete: 'cascade' }),
+//     // Note: the coordinates are normalized [0, 1], x and y are the center of the bounding box (YOLO format)
+//     x: real('x').notNull(),
+//     y: real('y').notNull(),
+//     width: real('width').notNull(),
+//     height: real('height').notNull(),
+//   },
+//   (table) => [index('labels_imageId_idx').on(table.imageId), index('labels_classId_idx').on(table.classId)],
+// )
 
 export const trainingStatusEnum = pgEnum('training_status', ['queued', 'training', 'completed', 'failed'])
 

@@ -49,12 +49,12 @@ const PROJECT_NAV_ITEMS = [
     path: '/dataset',
     disabled: (project: Project) => project.classCount === 0,
   },
-  {
-    label: 'Labeling',
-    icon: TagIcon,
-    path: '/labeling',
-    disabled: (project: Project) => project.imageCount === 0,
-  },
+  // {
+  //   label: 'Labeling',
+  //   icon: TagIcon,
+  //   path: '/labeling',
+  //   disabled: (project: Project) => project.imageCount === 0,
+  // },
   {
     label: 'Augmentation',
     icon: MagicWandIcon,
