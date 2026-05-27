@@ -15,6 +15,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
+  ArrowLeftIcon,
   BrainIcon,
   CaretDownIcon,
   CrosshairIcon,
@@ -22,10 +23,9 @@ import {
   GearIcon,
   HouseIcon,
   ListIcon,
-  MagicWandIcon,
   SignOutIcon,
   TagChevronIcon,
-  TagIcon,
+  UploadIcon,
   UserIcon,
 } from '@phosphor-icons/react'
 import { authClient } from '@public/lib/auth'
@@ -44,6 +44,12 @@ const PROJECT_NAV_ITEMS = [
   { label: 'Overview', icon: DatabaseIcon, path: '' },
   { label: 'Classes', icon: TagChevronIcon, path: '/classes' },
   {
+    label: 'Upload',
+    icon: UploadIcon,
+    path: '/upload',
+    disabled: (project: Project) => project.classCount === 0,
+  },
+  {
     label: 'Dataset',
     icon: DatabaseIcon,
     path: '/dataset',
@@ -55,12 +61,6 @@ const PROJECT_NAV_ITEMS = [
   //   path: '/labeling',
   //   disabled: (project: Project) => project.imageCount === 0,
   // },
-  {
-    label: 'Augmentation',
-    icon: MagicWandIcon,
-    path: '/augmentation',
-    disabled: (project: Project) => project.imageCount === 0,
-  },
   {
     label: 'Training',
     icon: BrainIcon,
@@ -168,6 +168,12 @@ export function AppShell({ children }: AppShellProps) {
               ))
             ) : (
               <>
+                <NavLink
+                  label="Back to Dashboard"
+                  leftSection={<ArrowLeftIcon size={20} />}
+                  onClick={() => setLocation('/')}
+                  variant="light"
+                />
                 <Divider my="xs" label="Project" labelPosition="left" />
                 {PROJECT_NAV_ITEMS.map((item) => {
                   const fullPath = `/project/${activeProject.id}${item.path}`
