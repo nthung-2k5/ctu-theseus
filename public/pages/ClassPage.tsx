@@ -26,36 +26,26 @@ import { useProjectStore } from '@public/store/useProjectStore'
 import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'wouter'
 
-/* ------------------------------------------------------------------ */
-/*  Page                                                               */
-/* ------------------------------------------------------------------ */
-
 export const ClassPage = () => {
   const params = useParams<{ id: string }>()
   const projectId = params.id
   const activeProject = useProjectStore((s) => s.activeProject)
   const queryClient = useQueryClient()
 
-  const { data, isLoading } = useEdenQuery(
-    ['projects', projectId, 'classes'],
-    api.projects({ projectId }).classes.get,
-  )
+  const { data, isLoading } = useEdenQuery(['projects', projectId, 'classes'], api.projects({ projectId }).classes.get)
 
   const classes = data?.classes ?? []
 
   /* ── Delete mutation ── */
-  const deleteClass = useEdenMutation(
-    (classId: string) => api.classes({ classId }).delete(),
-    {
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: ['projects', projectId] })
-        notifications.show({ title: 'Class deleted', message: 'The class has been removed', color: 'green' })
-      },
-      onError: () => {
-        notifications.show({ title: 'Error', message: 'Failed to delete class', color: 'red' })
-      },
+  const deleteClass = useEdenMutation((classId: string) => api.classes({ classId }).delete(), {
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects', projectId] })
+      notifications.show({ title: 'Class deleted', message: 'The class has been removed', color: 'green' })
     },
-  )
+    onError: () => {
+      notifications.show({ title: 'Error', message: 'Failed to delete class', color: 'red' })
+    },
+  })
 
   /* ── Modal openers ── */
   const openCreateModal = () => {
@@ -150,6 +140,7 @@ export const ClassPage = () => {
                 <Table.Tr>
                   <Table.Th>Color</Table.Th>
                   <Table.Th>Name</Table.Th>
+                  <Table.Th>Count</Table.Th>
                   <Table.Th style={{ width: 96 }} />
                 </Table.Tr>
               </Table.Thead>
@@ -164,6 +155,7 @@ export const ClassPage = () => {
                         {cls.name}
                       </Text>
                     </Table.Td>
+                    <Table.Td>{cls.imageCount}</Table.Td>
                     <Table.Td>
                       <Group gap={4} justify="flex-end">
                         <Tooltip label="Edit class" withArrow>

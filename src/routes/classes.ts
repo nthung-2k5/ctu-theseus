@@ -1,5 +1,5 @@
 import { db } from '@server/db'
-import { datasetClasses } from '@server/db/schema'
+import { datasetClasses, datasetImages } from '@server/db/schema'
 import { eq } from 'drizzle-orm'
 import { Elysia, NotFoundError, status, t } from 'elysia'
 import { betterAuth } from './auth'
@@ -15,7 +15,10 @@ export const classesRoutes = new Elysia({ prefix: '/api' })
         },
         orderBy: {
           name: 'asc',
-        }
+        },
+        extras: {
+          imageCount: (table) => db.$count(datasetImages, eq(datasetImages.classId, table.id)),
+        },
       })
 
       return { classes: rows }
