@@ -1,6 +1,5 @@
 import { Center, Loader, Stack, Text } from '@mantine/core'
-import { api } from '@public/lib/api'
-import { useEdenQuery } from '@public/lib/eden-query'
+import { useProjectDetail } from '@public/queries/project'
 import { useProjectStore } from '@public/store/useProjectStore'
 import { type PropsWithChildren, useEffect } from 'react'
 import { useParams } from 'wouter'
@@ -9,11 +8,7 @@ export const ProjectProvider = ({ children }: PropsWithChildren) => {
   const params = useParams<{ id: string }>()
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
 
-  const {
-    data: project,
-    isLoading,
-    isSuccess,
-  } = useEdenQuery(['projects', params.id], api.projects({ projectId: params.id }).get)
+  const { data: project, isLoading, isSuccess } = useProjectDetail(params.id)
 
   useEffect(() => {
     return () => setActiveProject(null)

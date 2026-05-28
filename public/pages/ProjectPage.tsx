@@ -30,9 +30,9 @@ import {
 import { api } from '@public/lib/api'
 import { assert } from '@public/lib/assert'
 import { useEdenMutation } from '@public/lib/eden-query'
+import { queries } from '@public/queries'
 import type { Project } from '@public/store/types'
 import { useProjectStore } from '@public/store/useProjectStore'
-import { useQueryClient } from '@tanstack/react-query'
 import { useLocation, useParams } from 'wouter'
 
 const WORKFLOW_STEPS = [
@@ -75,12 +75,10 @@ const UpdateProjectModal = ({ project }: { project: Project }) => {
     },
   })
 
-  const queryClient = useQueryClient()
-
-  const updateProject = useEdenMutation(api.projects({ projectId: project.id }).patch, {
+  const updateProject = useEdenMutation(api.projects({ projectId: project.id }).patch, [queries.projects.all.queryKey, queries.projects.detail(project.id).queryKey], {
     onSuccess: ({ project }) => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] })
       notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
+      form.reset()
       modals.closeAll()
     },
     onError: (error) => {
@@ -90,9 +88,6 @@ const UpdateProjectModal = ({ project }: { project: Project }) => {
         message: error.status === 404 ? error.value : (error.value?.message ?? 'Failed to update project'),
         color: 'red',
       })
-    },
-    onSettled: () => {
-      form.reset()
     },
   })
 

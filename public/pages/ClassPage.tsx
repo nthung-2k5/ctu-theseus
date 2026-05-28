@@ -20,32 +20,35 @@ import { PencilSimpleIcon, PlusIcon, TagIcon, TrashIcon } from '@phosphor-icons/
 import { CreateClassModal } from '@public/components/classes/CreateClassModal'
 import { EditClassModal } from '@public/components/classes/EditClassModal'
 import { api } from '@public/lib/api'
-import { useEdenMutation, useEdenQuery } from '@public/lib/eden-query'
+import { useEdenMutation } from '@public/lib/eden-query'
+import { queries } from '@public/queries'
+import { useProjectClasses } from '@public/queries/project'
 import type { DatasetClass } from '@public/store/types'
 import { useProjectStore } from '@public/store/useProjectStore'
-import { useQueryClient } from '@tanstack/react-query'
 import { useParams } from 'wouter'
 
 export const ClassPage = () => {
   const params = useParams<{ id: string }>()
   const projectId = params.id
   const activeProject = useProjectStore((s) => s.activeProject)
-  const queryClient = useQueryClient()
 
-  const { data, isLoading } = useEdenQuery(['projects', projectId, 'classes'], api.projects({ projectId }).classes.get)
+  const { data, isLoading } = useProjectClasses(projectId)
 
   const classes = data?.classes ?? []
 
   /* ── Delete mutation ── */
-  const deleteClass = useEdenMutation((classId: string) => api.classes({ classId }).delete(), {
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['projects', projectId] })
-      notifications.show({ title: 'Class deleted', message: 'The class has been removed', color: 'green' })
+  const deleteClass = useEdenMutation(
+    (classId: string) => api.classes({ classId }).delete(),
+    [queries.projects.detail(projectId).queryKey, queries.projects.classes(projectId).queryKey],
+    {
+      onSuccess: async () => {
+        notifications.show({ title: 'Class deleted', message: 'The class has been removed', color: 'green' })
+      },
+      onError: () => {
+        notifications.show({ title: 'Error', message: 'Failed to delete class', color: 'red' })
+      },
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to delete class', color: 'red' })
-    },
-  })
+  )
 
   /* ── Modal openers ── */
   const openCreateModal = () => {

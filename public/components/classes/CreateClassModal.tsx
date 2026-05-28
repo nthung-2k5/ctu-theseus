@@ -4,7 +4,7 @@ import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import { api } from '@public/lib/api'
 import { useEdenMutation } from '@public/lib/eden-query'
-import { useQueryClient } from '@tanstack/react-query'
+import { queries } from '@public/queries'
 
 const PRESET_COLORS = ['#e03131', '#2f9e44', '#1971c2', '#f08c00', '#9c36b5', '#0c8599', '#e8590c', '#6741d9']
 
@@ -14,8 +14,6 @@ interface CreateClassModalProps {
 }
 
 export const CreateClassModal = ({ projectId, existingCount }: CreateClassModalProps) => {
-  const queryClient = useQueryClient()
-
   const form = useForm({
     initialValues: {
       name: '',
@@ -27,25 +25,28 @@ export const CreateClassModal = ({ projectId, existingCount }: CreateClassModalP
     },
   })
 
-  const createClass = useEdenMutation(api.projects({ projectId }).classes.post, {
-    onSuccess: async ({ class: cls }) => {
-      await queryClient.invalidateQueries({ queryKey: ['projects', projectId] })
-      notifications.show({
-        title: 'Class created',
-        message: `"${cls.name}" has been added`,
-        color: 'green',
-      })
-      modals.closeAll()
+  const createClass = useEdenMutation(
+    api.projects({ projectId }).classes.post,
+    [queries.projects.detail(projectId).queryKey, queries.projects.classes(projectId).queryKey],
+    {
+      onSuccess: async ({ class: cls }) => {
+        notifications.show({
+          title: 'Class created',
+          message: `"${cls.name}" has been added`,
+          color: 'green',
+        })
+        form.reset()
+        modals.closeAll()
+      },
+      onError: (error) => {
+        notifications.show({
+          title: 'Error',
+          message: typeof error.value === 'string' ? error.value : (error.value?.message ?? 'Failed to create class'),
+          color: 'red',
+        })
+      },
     },
-    onError: (error) => {
-      notifications.show({
-        title: 'Error',
-        message: typeof error.value === 'string' ? error.value : (error.value?.message ?? 'Failed to create class'),
-        color: 'red',
-      })
-    },
-    onSettled: () => form.reset(),
-  })
+  )
 
   return (
     <form onSubmit={form.onSubmit((values) => createClass.mutate(values))}>

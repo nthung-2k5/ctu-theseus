@@ -5,8 +5,8 @@ import { notifications } from '@mantine/notifications'
 import { api } from '@public/lib/api'
 import { assert } from '@public/lib/assert'
 import { useEdenMutation } from '@public/lib/eden-query'
+import { queries } from '@public/queries'
 import type { DatasetClass } from '@public/store/types'
-import { useQueryClient } from '@tanstack/react-query'
 
 interface EditClassModalProps {
   projectId: string
@@ -14,8 +14,6 @@ interface EditClassModalProps {
 }
 
 export const EditClassModal = ({ projectId, cls }: EditClassModalProps) => {
-  const queryClient = useQueryClient()
-
   const form = useForm({
     initialValues: {
       name: cls.name,
@@ -27,31 +25,34 @@ export const EditClassModal = ({ projectId, cls }: EditClassModalProps) => {
     },
   })
 
-  const updateClass = useEdenMutation(api.classes({ classId: cls.id }).patch, {
-    onSuccess: async ({ class: updated }) => {
-      await queryClient.invalidateQueries({ queryKey: ['projects', projectId] })
-      notifications.show({
-        title: 'Class updated',
-        message: `"${updated.name}" has been updated`,
-        color: 'green',
-      })
-      modals.closeAll()
+  const updateClass = useEdenMutation(
+    api.classes({ classId: cls.id }).patch,
+    [queries.projects.classes(projectId).queryKey],
+    {
+      onSuccess: async ({ class: updated }) => {
+        notifications.show({
+          title: 'Class updated',
+          message: `"${updated.name}" has been updated`,
+          color: 'green',
+        })
+        form.reset()
+        modals.closeAll()
+      },
+      onError: (error) => {
+        assert(error.status === 404 || error.status === 422)
+        notifications.show({
+          title: 'Error',
+          message:
+            error.status === 404
+              ? typeof error.value === 'string'
+                ? error.value
+                : 'Class not found'
+              : (error.value?.message ?? 'Failed to update class'),
+          color: 'red',
+        })
+      },
     },
-    onError: (error) => {
-      assert(error.status === 404 || error.status === 422)
-      notifications.show({
-        title: 'Error',
-        message:
-          error.status === 404
-            ? typeof error.value === 'string'
-              ? error.value
-              : 'Class not found'
-            : (error.value?.message ?? 'Failed to update class'),
-        color: 'red',
-      })
-    },
-    onSettled: () => form.reset(),
-  })
+  )
 
   return (
     <form onSubmit={form.onSubmit((values) => updateClass.mutate(values))}>

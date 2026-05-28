@@ -19,9 +19,10 @@ import { notifications } from '@mantine/notifications'
 import { FolderSimpleIcon, PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react'
 import { api } from '@public/lib/api'
 import { assert } from '@public/lib/assert'
-import { useEdenMutation, useEdenQuery } from '@public/lib/eden-query'
+import { useEdenMutation } from '@public/lib/eden-query'
+import { queries } from '@public/queries'
+import { useProjects } from '@public/queries/project'
 import { useProjectStore } from '@public/store/useProjectStore'
-import { useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useLocation } from 'wouter'
 
@@ -33,12 +34,10 @@ const CreateProjectModal = () => {
     },
   })
 
-  const queryClient = useQueryClient()
-
-  const createProject = useEdenMutation(api.projects.post, {
+  const createProject = useEdenMutation(api.projects.post, [queries.projects.all.queryKey], {
     onSuccess: async ({ project }) => {
-      await queryClient.invalidateQueries({ queryKey: ['projects'] })
       notifications.show({ title: 'Project created', message: `"${project.name}" is ready`, color: 'green' })
+      form.reset()
       modals.closeAll()
     },
     onError: (error) => {
@@ -47,9 +46,6 @@ const CreateProjectModal = () => {
         message: typeof error.value === 'string' ? error.value : (error.value?.message ?? 'Failed to create project'),
         color: 'red',
       })
-    },
-    onSettled: () => {
-      form.reset()
     },
   })
 
@@ -91,12 +87,10 @@ const UpdateProjectModal = ({
     },
   })
 
-  const queryClient = useQueryClient()
-
-  const updateProject = useEdenMutation(api.projects({ projectId }).patch, {
+  const updateProject = useEdenMutation(api.projects({ projectId }).patch, [queries.projects.all.queryKey], {
     onSuccess: async ({ project }) => {
-      await queryClient.invalidateQueries({ queryKey: ['projects'] })
       notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
+      form.reset()
       modals.closeAll()
     },
     onError: (error) => {
@@ -106,9 +100,6 @@ const UpdateProjectModal = ({
         message: error.status === 404 ? error.value : (error.value?.message ?? 'Failed to update project'),
         color: 'red',
       })
-    },
-    onSettled: () => {
-      form.reset()
     },
   })
 
@@ -137,7 +128,7 @@ const UpdateProjectModal = ({
 export function DashboardPage() {
   const [, setLocation] = useLocation()
 
-  const { data, isLoading } = useEdenQuery(['projects'], api.projects.get)
+  const { data, isLoading } = useProjects()
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
 
   const projects = data?.projects ?? []
