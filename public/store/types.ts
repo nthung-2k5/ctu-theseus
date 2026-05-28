@@ -21,12 +21,11 @@ export interface BoundingBox {
   height: number
 }
 
-export interface DatasetImage {
-  id: string
-  filename: string
-  url: string
-  labels: BoundingBox[]
-}
+export type DatasetImage = NonNullable<
+  Treaty.Data<ReturnType<ReturnType<typeof api.projects>['images']['get']>>['images'][number]
+>
+
+export type DatasetSplitValue = 'train' | 'validation' | 'test'
 
 export interface SplitConfig {
   train: number

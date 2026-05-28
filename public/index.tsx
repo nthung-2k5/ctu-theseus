@@ -8,15 +8,17 @@ import '@public/global.css'
 import { ModalsProvider } from '@mantine/modals'
 import { AuthGuard } from '@public/components/AuthGuard'
 import { GuestGuard } from '@public/components/GuestGuard'
+import { ProjectProvider } from '@public/components/ProjectContext'
 import { AppShell } from '@public/layouts/AppShell'
 import { ClassPage } from '@public/pages/ClassPage'
 import { DashboardPage } from '@public/pages/DashboardPage'
+import { DatasetPage } from '@public/pages/DatasetPage'
 import { LoginPage } from '@public/pages/LoginPage'
 import { ProjectPage } from '@public/pages/ProjectPage'
 import { RegisterPage } from '@public/pages/RegisterPage'
+import { UploadDatasetPage } from '@public/pages/UploadDatasetPage'
 import { theme } from '@public/theme'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProjectProvider } from './components/ProjectContext'
 
 const queryClient = new QueryClient()
 
@@ -50,6 +52,8 @@ function App() {
                         <ProjectProvider>
                           <Route path="/" component={ProjectPage} />
                           <Route path="/classes" component={ClassPage} />
+                          <Route path="/upload" component={UploadDatasetPage} />
+                          <Route path="/dataset" component={DatasetPage} />
                         </ProjectProvider>
                       </Route>
                     </Switch>

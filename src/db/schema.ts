@@ -134,6 +134,8 @@ export const datasetClasses = pgTable(
   ],
 )
 
+export const splitEnum = pgEnum('dataset_split', ['train', 'validation', 'test'])
+
 /* ------------------------------------------------------------------ */
 /*  Dataset Images                                                    */
 /* ------------------------------------------------------------------ */
@@ -150,6 +152,7 @@ export const datasetImages = pgTable(
     path: text('path').notNull(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
+    split: splitEnum(),
     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
