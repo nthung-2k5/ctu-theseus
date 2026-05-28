@@ -39,9 +39,9 @@ export const ClassPage = () => {
   /* ── Delete mutation ── */
   const deleteClass = useEdenMutation(
     (classId: string) => api.classes({ classId }).delete(),
-    [queries.projects.detail(projectId).queryKey, queries.projects.classes(projectId).queryKey],
+    [queries.projects.detail(projectId)._ctx.summary.queryKey, queries.projects.detail(projectId)._ctx.classes.queryKey],
     {
-      onSuccess: async () => {
+      onSuccess: () => {
         notifications.show({ title: 'Class deleted', message: 'The class has been removed', color: 'green' })
       },
       onError: () => {

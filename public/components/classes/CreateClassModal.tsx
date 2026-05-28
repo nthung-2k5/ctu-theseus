@@ -27,7 +27,10 @@ export const CreateClassModal = ({ projectId, existingCount }: CreateClassModalP
 
   const createClass = useEdenMutation(
     api.projects({ projectId }).classes.post,
-    [queries.projects.detail(projectId).queryKey, queries.projects.classes(projectId).queryKey],
+    [
+      queries.projects.detail(projectId)._ctx.summary.queryKey,
+      queries.projects.detail(projectId)._ctx.classes.queryKey,
+    ],
     {
       onSuccess: async ({ class: cls }) => {
         notifications.show({

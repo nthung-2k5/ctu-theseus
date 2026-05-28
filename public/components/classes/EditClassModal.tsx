@@ -27,7 +27,7 @@ export const EditClassModal = ({ projectId, cls }: EditClassModalProps) => {
 
   const updateClass = useEdenMutation(
     api.classes({ classId: cls.id }).patch,
-    [queries.projects.classes(projectId).queryKey],
+    [queries.projects.detail(projectId)._ctx.classes.queryKey],
     {
       onSuccess: async ({ class: updated }) => {
         notifications.show({

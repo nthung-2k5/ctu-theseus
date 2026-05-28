@@ -1,6 +1,6 @@
 import { db } from '@server/db'
 import { datasetClasses, datasetImages, projects, trainingRuns } from '@server/db/schema'
-import { and, count, eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { Elysia, NotFoundError, status, t } from 'elysia'
 import { betterAuth } from './auth'
 
