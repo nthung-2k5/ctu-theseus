@@ -16,6 +16,7 @@ import { DatasetPage } from '@public/pages/DatasetPage'
 import { LoginPage } from '@public/pages/LoginPage'
 import { ProjectPage } from '@public/pages/ProjectPage'
 import { RegisterPage } from '@public/pages/RegisterPage'
+import { TrainingPage } from '@public/pages/TrainingPage'
 import { UploadDatasetPage } from '@public/pages/UploadDatasetPage'
 import { theme } from '@public/theme'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -54,6 +55,7 @@ function App() {
                           <Route path="/classes" component={ClassPage} />
                           <Route path="/upload" component={UploadDatasetPage} />
                           <Route path="/dataset" component={DatasetPage} />
+                          <Route path="/training" component={TrainingPage} />
                         </ProjectProvider>
                       </Route>
                     </Switch>
