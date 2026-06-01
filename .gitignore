@@ -218,3 +218,5 @@ pyrightconfig.json
 !src/lib/
 
 drizzle/
+data/
+ai_mount/

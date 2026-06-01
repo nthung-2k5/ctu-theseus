@@ -1,0 +1,14 @@
+# ── .dockerignore ──
+node_modules
+.git
+.gitignore
+.vscode
+*.md
+biome.json
+__pycache__
+*.pyc
+.env
+.venv
+
+ai_mount
+drizzle

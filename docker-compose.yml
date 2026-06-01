@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────────────────
+# CTU Theseus - Docker Compose
+#
+# Usage:
+#   Infrastructure only (for local dev):
+#     docker compose up db redis -d
+#
+#   Full stack:
+#     docker compose up -d
+#
+#   Rebuild a specific service:
+#     docker compose up --build gateway -d
+# ─────────────────────────────────────────────────────────────────────
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  db:
+    image: postgres:18-alpine # UUID v7 is supported from PostgreSQL 18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: theseus
+      POSTGRES_PASSWORD: theseus
+      POSTGRES_DB: theseus
+    ports:
+      - "7196:5432" # Avoid conflict with local PostgreSQL
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U theseus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── ElysiaJS Gateway ──────────────────────────────────────────── (temporarily disabled)
+  # gateway:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.gateway
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     DATABASE_URL: postgres://theseus:theseus@db:5432/theseus
+  #     JWT_SECRET: ${JWT_SECRET:-theseus-production-secret}
+  #     AI_SERVICE_URL: http://ai_api:8000
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+  # ── FastAPI AI Service ──────────────────────────────────────────
+  ai_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.ai
+    restart: unless-stopped
+    image: theseus-ai:latest
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379
+      UPLOAD_DIR: /app/uploads
+      MODEL_DIR: /app/models
+      DATASET_DIR: /app/datasets
+      DATA_DIR: /app/data
+    volumes:
+      - ./ai_mount:/app
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Celery Worker ───────────────────────────────────────────────
+  ai_worker:
+    restart: unless-stopped
+    image: theseus-ai:latest
+    command: celery -A ai_service.worker worker --loglevel=info --concurrency=1
+    environment:
+      REDIS_URL: redis://redis:6379
+      UPLOAD_DIR: /app/uploads
+      MODEL_DIR: /app/models
+      DATASET_DIR: /app/datasets
+      DATA_DIR: /app/data
+    volumes:
+      - ./ai_mount:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
