@@ -2,6 +2,7 @@ import { staticPlugin } from '@elysia/static'
 import { classesRoutes } from '@server/routes/classes'
 import { datasetRoutes } from '@server/routes/datasets'
 import { projectRoutes } from '@server/routes/projects'
+import { trainingRoutes } from '@server/routes/training'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
 
@@ -21,7 +22,6 @@ const app = new Elysia()
     await staticPlugin({
       prefix: '/data',
       assets: 'data',
-      alwaysStatic: true,
     }),
   )
   /* ── Authentication ── */
@@ -30,9 +30,13 @@ const app = new Elysia()
   .use(projectRoutes)
   .use(classesRoutes)
   .use(datasetRoutes)
+  .use(trainingRoutes)
   /* ── SPA Fallback ── */
   // .get('/*', index)
-  .listen(3000)
+  .listen({
+     port: 3000,
+     hostname: '0.0.0.0'
+  })
 
 console.log(`CTU Theseus server is running at http://${app.server?.hostname}:${app.server?.port}`)
 
