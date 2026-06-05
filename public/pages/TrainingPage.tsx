@@ -1,121 +1,58 @@
-import { Badge, Box, Button, Card, Grid, Group, ScrollArea, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { Badge, Box, Button, Card, Grid, Group, Loader, ScrollArea, Stack, Text, ThemeIcon, Title } from '@mantine/core'
 import { BrainIcon, PlusIcon } from '@phosphor-icons/react'
 import { CreateVersionPanel } from '@public/components/training/CreateVersionPanel'
-import {
-  createMockRuns,
-  getVariantLabel,
-  STATUS_COLORS,
-  type TrainingRunData,
-  type TrainingVersionConfig,
-} from '@public/components/training/constants'
+import { STATUS_COLORS } from '@public/components/training/constants'
 import { VersionDetailPanel } from '@public/components/training/VersionDetailPanel'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '@public/lib/api'
+import { useEdenMutation } from '@public/lib/eden-query'
+import { training, useTrainingRuns } from '@public/queries/training'
+import type { TrainingRunSummary, TrainingVersionConfig } from '@public/store/types'
+import { useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useParams } from 'wouter'
 
 export function TrainingPage() {
   const params = useParams<{ id: string }>()
   const projectId = params.id
 
-  const [runs, setRuns] = useState<TrainingRunData[]>(() => createMockRuns())
+  const queryClient = useQueryClient()
   const [selectedView, setSelectedView] = useState<'create' | string>('create')
-  const simulationsRef = useRef(new Map<string, ReturnType<typeof setInterval>>())
+
+  /* ── Fetch runs from API (polls while any run is active) ── */
+  const { data: runsData, isLoading } = useTrainingRuns(projectId)
+  const runs: TrainingRunSummary[] = runsData?.runs ?? []
 
   const selectedRun = selectedView !== 'create' ? runs.find((r) => r.id === selectedView) : undefined
 
-  /* ── Simulate training progress ── */
-  const simulateTraining = useCallback((runId: string) => {
-    let currentEpoch = 0
-    const k = 0.055
+  /* ── Start training mutation ── */
+  const startTraining = useEdenMutation(
+    (config: TrainingVersionConfig) => api.projects({ projectId }).train.post(config),
+    [training.runs(projectId).queryKey],
+  )
 
-    const interval = setInterval(() => {
-      setRuns((prev) => {
-        const run = prev.find((r) => r.id === runId)
-        if (!run || run.status !== 'training') {
-          clearInterval(interval)
-          simulationsRef.current.delete(runId)
-          return prev
-        }
+  /* ── Stop training mutation ── */
+  const stopTraining = useEdenMutation(
+    (runId: string) => api.runs({ runId }).stop.post(),
+    [training.runs(projectId).queryKey],
+  )
 
-        currentEpoch++
-        const t = currentEpoch
-        const newMetric = {
-          epoch: t,
-          trainLoss: +(2.5 * Math.exp(-k * t) + 0.14 + (Math.random() - 0.5) * 0.04).toFixed(4),
-          valLoss: +(2.8 * Math.exp(-(k - 0.01) * t) + 0.24 + (Math.random() - 0.5) * 0.06).toFixed(4),
-          accuracy: +Math.min(0.94, 0.28 + 0.66 * (1 - Math.exp(-0.08 * t)) + (Math.random() - 0.5) * 0.015).toFixed(4),
-          mAP: +Math.min(0.91, 0.22 + 0.62 * (1 - Math.exp(-0.07 * t)) + (Math.random() - 0.5) * 0.02).toFixed(4),
-        }
-
-        const isComplete = currentEpoch >= run.epochs
-
-        if (isComplete) {
-          clearInterval(interval)
-          simulationsRef.current.delete(runId)
-        }
-
-        return prev.map((r) =>
-          r.id !== runId
-            ? r
-            : {
-                ...r,
-                status: isComplete ? ('completed' as const) : ('training' as const),
-                metrics: [...r.metrics, newMetric],
-                ...(isComplete ? { completedAt: new Date() } : {}),
-              },
-        )
-      })
-    }, 800)
-
-    simulationsRef.current.set(runId, interval)
-  }, [])
-
-  /* ── Cleanup simulations on unmount ── */
-  useEffect(() => {
-    return () => {
-      for (const interval of simulationsRef.current.values()) clearInterval(interval)
-    }
-  }, [])
-
-  /* ── Start training handler ── */
+  /* ── Handlers ── */
   const handleStartTraining = (config: TrainingVersionConfig) => {
-    const label = getVariantLabel(config.modelId, config.variantId)
-    const existingCount = runs.filter((r) => r.variantId === config.variantId).length
-    const name = `${label} v${existingCount + 1}`
-
-    const newRun: TrainingRunData = {
-      ...config,
-      id: `run-${Date.now()}`,
-      name,
-      status: 'queued',
-      metrics: [],
-      createdAt: new Date(),
-    }
-
-    setRuns((prev) => [newRun, ...prev])
-    setSelectedView(newRun.id)
-
-    // Simulate: queued → training after 1.5s
-    setTimeout(() => {
-      setRuns((prev) => prev.map((r) => (r.id === newRun.id ? { ...r, status: 'training', startedAt: new Date() } : r)))
-      simulateTraining(newRun.id)
-    }, 1500)
+    startTraining.mutate(config, {
+      onSuccess: () => {
+        // Refetch runs to get the new run
+        queryClient.invalidateQueries({ queryKey: training.runs(projectId).queryKey })
+      },
+    })
   }
 
-  /* ── Stop training handler ── */
   const handleStopTraining = () => {
     if (!selectedRun) return
-    const interval = simulationsRef.current.get(selectedRun.id)
-    if (interval) {
-      clearInterval(interval)
-      simulationsRef.current.delete(selectedRun.id)
-    }
-    setRuns((prev) =>
-      prev.map((r) =>
-        r.id === selectedRun.id
-          ? { ...r, status: 'failed' as const, error: 'Training stopped by user', completedAt: new Date() }
-          : r,
-      ),
-    )
+    stopTraining.mutate(selectedRun.id, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: training.runs(projectId).queryKey })
+      },
+    })
   }
 
   return (
@@ -144,44 +81,54 @@ export function TrainingPage() {
 
               <ScrollArea h="calc(100vh - 260px)" offsetScrollbars>
                 <Stack gap="xs">
-                  {runs.map((run) => (
-                    <Card
-                      key={run.id}
-                      withBorder
-                      p="sm"
-                      radius="md"
-                      style={{
-                        cursor: 'pointer',
-                        outline:
-                          selectedView === run.id
-                            ? '2px solid var(--mantine-primary-color-5)'
-                            : '2px solid transparent',
-                        outlineOffset: -2,
-                      }}
-                      onClick={() => setSelectedView(run.id)}
-                    >
-                      <Group justify="space-between" wrap="nowrap">
-                        <div style={{ minWidth: 0 }}>
-                          <Text size="sm" fw={600} truncate="end">
-                            {run.name}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {run.createdAt.toLocaleDateString()}
-                          </Text>
-                        </div>
-                        <Badge size="xs" variant="light" color={STATUS_COLORS[run.status]} tt="capitalize">
-                          {run.status}
-                        </Badge>
-                      </Group>
-                      {run.status === 'completed' && run.metrics.length > 0 && (
-                        <Text size="xs" c="dimmed" mt={4}>
-                          Accuracy: {(run.metrics[run.metrics.length - 1].accuracy * 100).toFixed(1)}%
-                        </Text>
-                      )}
+                  {isLoading && (
+                    <Card withBorder p="md" radius="md" ta="center">
+                      <Loader size="sm" />
                     </Card>
-                  ))}
+                  )}
 
-                  {runs.length === 0 && (
+                  {runs.map((run, index) => {
+                    const versionNumber = runs.length - index
+                    const isActive = run.status === 'training' || run.status === 'queued' || run.status === 'preparing'
+
+                    return (
+                      <Card
+                        key={run.id}
+                        withBorder
+                        p="sm"
+                        radius="md"
+                        style={{
+                          cursor: 'pointer',
+                          outline:
+                            selectedView === run.id
+                              ? '2px solid var(--mantine-primary-color-5)'
+                              : '2px solid transparent',
+                          outlineOffset: -2,
+                        }}
+                        onClick={() => setSelectedView(run.id)}
+                      >
+                        <Group justify="space-between" wrap="nowrap">
+                          <div style={{ minWidth: 0 }}>
+                            <Text size="sm" fw={600} truncate="end">
+                              Version {versionNumber}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {run.modelName}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {new Date(run.createdAt).toLocaleDateString()}
+                            </Text>
+                          </div>
+                          <Badge size="xs" variant="light" color={STATUS_COLORS[run.status]} tt="capitalize">
+                            {isActive && <Loader size={8} color={STATUS_COLORS[run.status]} mr={4} />}
+                            {run.status}
+                          </Badge>
+                        </Group>
+                      </Card>
+                    )
+                  })}
+
+                  {!isLoading && runs.length === 0 && (
                     <Card withBorder p="md" radius="md" ta="center">
                       <Stack align="center" gap="xs">
                         <ThemeIcon size="xl" variant="light" color="gray" radius="xl">
@@ -208,7 +155,10 @@ export function TrainingPage() {
             ) : selectedRun ? (
               <VersionDetailPanel
                 run={selectedRun}
-                onStop={selectedRun.status === 'training' ? handleStopTraining : undefined}
+                versionNumber={runs.length - runs.indexOf(selectedRun)}
+                onStop={
+                  selectedRun.status === 'training' || selectedRun.status === 'queued' ? handleStopTraining : undefined
+                }
               />
             ) : (
               <Card withBorder p="xl" radius="md" ta="center">

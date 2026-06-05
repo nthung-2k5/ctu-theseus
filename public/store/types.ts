@@ -33,12 +33,12 @@ export interface SplitConfig {
   test: number
 }
 
-export interface AugmentationConfig {
-  id: string
-  name: string
-  enabled: boolean
-  params: Record<string, number | boolean | string>
-}
+// export interface AugmentationConfig {
+//   id: string
+//   name: string
+//   enabled: boolean
+//   params: Record<string, number | boolean | string>
+// }
 
 export interface TrainingConfig {
   modelId: string
@@ -58,3 +58,12 @@ export interface TrainingMetrics {
 }
 
 export type TrainingStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed'
+
+export type TrainingRunSummary = Treaty.Data<ReturnType<typeof api.projects>['runs']['get']>['runs'][number]
+
+export type TrainingRunDetail = Treaty.Data<ReturnType<typeof api.runs>['get']>
+
+export type TrainingRunStatus = Treaty.Data<ReturnType<typeof api.runs>['status']['get']>
+
+export type TrainingVersionConfig = Parameters<ReturnType<typeof api.projects>['train']['post']>[0]
+

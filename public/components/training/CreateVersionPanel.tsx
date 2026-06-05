@@ -2,8 +2,8 @@ import {
   Badge,
   Button,
   Card,
-  Checkbox,
   ColorSwatch,
+  Divider,
   Group,
   Modal,
   NumberInput,
@@ -19,43 +19,75 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { ChartPieIcon, CubeIcon, GearSixIcon, ImagesIcon, PlayIcon } from '@phosphor-icons/react'
+import { ChartPieIcon, CubeIcon, GearSixIcon, ImagesIcon, PlayIcon, QuestionIcon } from '@phosphor-icons/react'
 import { useProjectClasses, useProjectDatasetStats } from '@public/queries/project'
+import type { TrainingVersionConfig } from '@public/store/types'
 import { useState } from 'react'
-import {
-  AUGMENTATION_OPTIONS,
-  buildDefaultOptionState,
-  MODEL_FAMILIES,
-  type OptionDef,
-  type OptionState,
-  PREPROCESSING_OPTIONS,
-  type TrainingVersionConfig,
-} from './constants'
+import { MODEL_FAMILIES } from './constants'
+
+function LabelWithTooltip({ label, tooltip }: { label: string; tooltip: string }) {
+  return (
+    <Group gap={4} wrap="nowrap">
+      <Text size="sm" fw={500}>
+        {label}
+      </Text>
+      <Tooltip label={tooltip} multiline w={260} withArrow position="top">
+        <ThemeIcon variant="subtle" color="dimmed" size="xs" radius="xl" style={{ cursor: 'help' }}>
+          <QuestionIcon size={12} />
+        </ThemeIcon>
+      </Tooltip>
+    </Group>
+  )
+}
 
 interface CreateVersionPanelProps {
   projectId: string
   onStartTraining: (config: TrainingVersionConfig) => void
 }
 
+const MODEL_SELECT_DATA = MODEL_FAMILIES.map((f) => ({
+  group: f.name,
+  items: f.variants.map((v) => ({ value: v.id, label: v.label })),
+}))
+
+/** Find the family a variant belongs to */
+function findFamily(variantId: string) {
+  return MODEL_FAMILIES.find((f) => f.variants.some((v) => v.id === variantId))
+}
+
 export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersionPanelProps) {
   /* ── Model state ── */
-  const [modelId, setModelId] = useState(MODEL_FAMILIES[0].id)
   const [variantId, setVariantId] = useState('')
 
-  /* ── Hyperparams state ── */
+  /* ── Basic hyperparams state ── */
   const [epochs, setEpochs] = useState(50)
   const [batchSize, setBatchSize] = useState(16)
   const [learningRate, setLearningRate] = useState(0.001)
-  const [imageSize, setImageSize] = useState(224)
 
-  /* ── Preprocessing / Augmentation state ── */
-  const [preprocessing, setPreprocessing] = useState<OptionState>(() =>
-    buildDefaultOptionState(PREPROCESSING_OPTIONS, ['autoOrient']),
-  )
-  const [augmentation, setAugmentation] = useState<OptionState>(() => buildDefaultOptionState(AUGMENTATION_OPTIONS))
+  /* ── Advanced hyperparams state ── */
+  const [advancedMode, setAdvancedMode] = useState(false)
+
+  // Dataset
+  const [numWorkers, setNumWorkers] = useState(4)
+
+  // Model
+  const [pretrained, setPretrained] = useState(true)
+  const [dropRate, setDropRate] = useState(0.0)
+
+  // Optimization
+  const [optimizer, setOptimizer] = useState<'adamw' | 'adam' | 'sgd'>('adamw')
+  const [weightDecay, setWeightDecay] = useState(0.05)
+
+  // Schedule
+  const [scheduler, setScheduler] = useState<'cosine' | 'step' | 'linear'>('cosine')
+  const [warmupEpochs, setWarmupEpochs] = useState(5)
+
+  // Advanced features
+  const [useEma, setUseEma] = useState(true)
+  const [mixupAlpha, setMixupAlpha] = useState(0.8)
+  const [cutmixAlpha, setCutmixAlpha] = useState(1.0)
 
   /* ── Modals ── */
-  const [modelModalOpened, { open: openModelModal, close: closeModelModal }] = useDisclosure()
   const [hyperModalOpened, { open: openHyperModal, close: closeHyperModal }] = useDisclosure()
 
   /* ── Dataset info from API ── */
@@ -70,29 +102,7 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
     unassigned: statsData?.unassigned ?? 0,
   }
 
-  /* ── Derived ── */
-  const family = MODEL_FAMILIES.find((f) => f.id === modelId) ?? MODEL_FAMILIES[0]
-  const variantLabel = family.variants.find((v) => v.id === variantId)?.label
-
   /* ── Handlers ── */
-  const toggleOption = (type: 'preprocessing' | 'augmentation', optionId: string, enabled: boolean) => {
-    const setter = type === 'preprocessing' ? setPreprocessing : setAugmentation
-    setter((prev) => ({ ...prev, [optionId]: { ...prev[optionId], enabled } }))
-  }
-
-  const setOptionParam = (
-    type: 'preprocessing' | 'augmentation',
-    optionId: string,
-    key: string,
-    value: number | boolean,
-  ) => {
-    const setter = type === 'preprocessing' ? setPreprocessing : setAugmentation
-    setter((prev) => ({
-      ...prev,
-      [optionId]: { ...prev[optionId], params: { ...prev[optionId].params, [key]: value } },
-    }))
-  }
-
   const handleStart = () => {
     if (!variantId) {
       notifications.show({ title: 'Missing model', message: 'Please select a model variant', color: 'orange' })
@@ -102,53 +112,45 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
       notifications.show({ title: 'No images', message: 'Upload some images to your dataset first', color: 'orange' })
       return
     }
-    onStartTraining({ modelId, variantId, epochs, batchSize, learningRate, imageSize, preprocessing, augmentation })
-  }
 
-  /* ── Option card renderer ── */
-  const renderOptionCard = (opt: OptionDef, type: 'preprocessing' | 'augmentation', state: OptionState) => {
-    const s = state[opt.id]
-    if (!s) return null
-    const hasExpandedParams = s.enabled && opt.params.length > 0
+    const config: TrainingVersionConfig = {
+      dataset: {
+        batch_size: batchSize,
+        ...(advancedMode && { num_workers: numWorkers }),
+      },
+      model: {
+        architecture: variantId,
+        ...(advancedMode && { pretrained, drop_rate: dropRate }),
+      },
+      ...(advancedMode
+        ? {
+            optimization: {
+              optimizer,
+              learning_rate: learningRate,
+              weight_decay: weightDecay,
+            },
+            schedule: {
+              scheduler,
+              epochs,
+              warmup_epochs: warmupEpochs,
+            },
+            advanced_features: {
+              use_ema: useEma,
+              mixup_alpha: mixupAlpha,
+              cutmix_alpha: cutmixAlpha,
+            },
+          }
+        : {
+            optimization: {
+              learning_rate: learningRate,
+            },
+            schedule: {
+              epochs,
+            },
+          }),
+    }
 
-    return (
-      <Card key={opt.id} withBorder p="sm" radius="md">
-        <Group justify="space-between" mb={hasExpandedParams ? 'xs' : 0}>
-          <Text size="sm" fw={500}>
-            {opt.name}
-          </Text>
-          <Switch size="xs" checked={s.enabled} onChange={(e) => toggleOption(type, opt.id, e.currentTarget.checked)} />
-        </Group>
-        {hasExpandedParams && (
-          <Stack gap={6}>
-            {opt.params.map((p) => (
-              <Group key={p.key} gap="xs" wrap="nowrap">
-                {p.type === 'boolean' ? (
-                  <Checkbox
-                    label={p.label}
-                    size="xs"
-                    checked={s.params[p.key] as boolean}
-                    onChange={(e) => setOptionParam(type, opt.id, p.key, e.currentTarget.checked)}
-                  />
-                ) : (
-                  <NumberInput
-                    label={p.label}
-                    size="xs"
-                    value={s.params[p.key] as number}
-                    onChange={(v) => setOptionParam(type, opt.id, p.key, Number(v) || (p.default as number))}
-                    min={p.min}
-                    max={p.max}
-                    step={p.step ?? 1}
-                    suffix={p.suffix}
-                    style={{ flex: 1 }}
-                  />
-                )}
-              </Group>
-            ))}
-          </Stack>
-        )}
-      </Card>
-    )
+    onStartTraining(config)
   }
 
   return (
@@ -157,42 +159,29 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
       <div>
         <Title order={3}>Create New Version</Title>
         <Text size="sm" c="dimmed" mt={4}>
-          Configure model, preprocessing, and augmentation settings
+          Configure model and training settings
         </Text>
       </div>
 
       {/* ── Model & Hyperparameters ── */}
       <SimpleGrid cols={2} spacing="md">
-        {/* Model card */}
-        <Card
-          withBorder
-          p="md"
-          radius="md"
-          className="card-elevated"
-          style={{ cursor: 'pointer' }}
-          onClick={openModelModal}
-        >
-          <Group gap="sm" mb="xs">
-            <ThemeIcon variant="light" color="primary" size="md">
-              <CubeIcon size={18} />
-            </ThemeIcon>
-            <Text fw={600} size="sm">
-              Model
-            </Text>
-          </Group>
-          {variantId ? (
-            <>
-              <Text fw={500}>{variantLabel}</Text>
-              <Text size="xs" c="dimmed">
-                {family.name}
-              </Text>
-            </>
-          ) : (
-            <Text size="sm" c="dimmed">
-              Click to select model
-            </Text>
-          )}
-        </Card>
+        {/* Model select */}
+        <Select
+          label={
+            <Group gap="xs">
+              <ThemeIcon variant="light" color="primary" size="xs">
+                <CubeIcon size={14} />
+              </ThemeIcon>
+              <Text fw={600} size="sm">Model</Text>
+            </Group>
+          }
+          placeholder="Select a model"
+          data={MODEL_SELECT_DATA}
+          value={variantId || null}
+          onChange={(v) => setVariantId(v ?? '')}
+          searchable
+          nothingFoundMessage="No models found"
+        />
 
         {/* Hyperparams card */}
         <Card
@@ -210,6 +199,11 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
             <Text fw={600} size="sm">
               Hyperparameters
             </Text>
+            {advancedMode && (
+              <Badge size="xs" variant="light" color="violet">
+                Advanced
+              </Badge>
+            )}
           </Group>
           <SimpleGrid cols={2} spacing={4}>
             <Text size="xs" c="dimmed">
@@ -230,41 +224,17 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
                 {learningRate}
               </Text>
             </Text>
-            <Text size="xs" c="dimmed">
-              Size:{' '}
-              <Text span fw={500} inherit c="var(--mantine-color-text)">
-                {imageSize}px
+            {advancedMode && (
+              <Text size="xs" c="dimmed">
+                Optimizer:{' '}
+                <Text span fw={500} inherit c="var(--mantine-color-text)">
+                  {optimizer}
+                </Text>
               </Text>
-            </Text>
+            )}
           </SimpleGrid>
         </Card>
       </SimpleGrid>
-
-      {/* ── Preprocessing ── */}
-      <div>
-        <Group gap="xs" mb="sm">
-          <Title order={5}>Preprocessing</Title>
-          <Badge variant="light" size="sm">
-            {Object.values(preprocessing).filter((v) => v.enabled).length} active
-          </Badge>
-        </Group>
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
-          {PREPROCESSING_OPTIONS.map((opt) => renderOptionCard(opt, 'preprocessing', preprocessing))}
-        </SimpleGrid>
-      </div>
-
-      {/* ── Augmentation ── */}
-      <div>
-        <Group gap="xs" mb="sm">
-          <Title order={5}>Augmentation</Title>
-          <Badge variant="light" size="sm">
-            {Object.values(augmentation).filter((v) => v.enabled).length} active
-          </Badge>
-        </Group>
-        <SimpleGrid cols={{ base: 2, sm: 3, md: 4 }} spacing="sm">
-          {AUGMENTATION_OPTIONS.map((opt) => renderOptionCard(opt, 'augmentation', augmentation))}
-        </SimpleGrid>
-      </div>
 
       {/* ── Dataset Overview ── */}
       <div>
@@ -373,69 +343,152 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
         Start Training
       </Button>
 
-      {/* ── Model Selection Modal ── */}
-      <Modal opened={modelModalOpened} onClose={closeModelModal} title="Select Model" size="lg" centered>
-        <Stack gap="md">
-          <Select
-            label="Architecture"
-            data={MODEL_FAMILIES.map((f) => ({ value: f.id, label: f.name }))}
-            value={modelId}
-            onChange={(v) => {
-              if (v) {
-                setModelId(v)
-                setVariantId('')
-              }
-            }}
-          />
-          <Select
-            label="Variant"
-            placeholder="Choose variant"
-            data={family.variants.map((v) => ({ value: v.id, label: v.label }))}
-            value={variantId}
-            onChange={(v) => {
-              if (v) setVariantId(v)
-            }}
-          />
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={closeModelModal}>
-              Cancel
-            </Button>
-            <Button onClick={closeModelModal} disabled={!variantId}>
-              Confirm
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
 
       {/* ── Hyperparameters Modal ── */}
-      <Modal opened={hyperModalOpened} onClose={closeHyperModal} title="Hyperparameters" centered>
+      <Modal
+        opened={hyperModalOpened}
+        onClose={closeHyperModal}
+        title="Hyperparameters"
+        size={advancedMode ? 'lg' : 'md'}
+        centered
+      >
         <Stack gap="md">
-          <NumberInput label="Epochs" value={epochs} onChange={(v) => setEpochs(Number(v) || 50)} min={1} max={1000} />
-          <NumberInput
-            label="Batch Size"
-            value={batchSize}
-            onChange={(v) => setBatchSize(Number(v) || 16)}
-            min={1}
-            max={256}
-          />
-          <NumberInput
-            label="Learning Rate"
-            value={learningRate}
-            onChange={(v) => setLearningRate(Number(v) || 0.001)}
-            min={0.00001}
-            max={1}
-            step={0.0001}
-            decimalScale={5}
-          />
-          <NumberInput
-            label="Image Size"
-            value={imageSize}
-            onChange={(v) => setImageSize(Number(v) || 224)}
-            min={32}
-            max={1024}
-            step={32}
-            suffix="px"
-          />
+          {/* ── Advanced toggle ── */}
+          <Group justify="flex-end">
+            <Switch
+              label="Advanced"
+              size="sm"
+              checked={advancedMode}
+              onChange={(e) => setAdvancedMode(e.currentTarget.checked)}
+            />
+          </Group>
+
+          {/* ── Basic fields (always visible) ── */}
+          <SimpleGrid cols={advancedMode ? 2 : 1} spacing="md">
+            <NumberInput label={<LabelWithTooltip label="Epochs" tooltip="Number of complete passes through the entire training dataset. More epochs can improve accuracy but may overfit." />} value={epochs} onChange={(v) => setEpochs(Number(v) || 50)} min={1} max={1000} />
+            <NumberInput
+              label={<LabelWithTooltip label="Batch Size" tooltip="Number of samples processed before updating model weights. Larger batches train faster but use more GPU memory." />}
+              value={batchSize}
+              onChange={(v) => setBatchSize(Number(v) || 16)}
+              min={1}
+              max={256}
+            />
+            <NumberInput
+              label={<LabelWithTooltip label="Learning Rate" tooltip="Controls how much to adjust model weights each step. Too high causes instability, too low causes slow convergence." />}
+              value={learningRate}
+              onChange={(v) => setLearningRate(Number(v) || 0.001)}
+              min={0.00001}
+              max={1}
+              step={0.0001}
+              decimalScale={5}
+            />
+          </SimpleGrid>
+
+          {/* ── Advanced fields ── */}
+          {advancedMode && (
+            <>
+              <Divider label="Optimization" labelPosition="center" />
+              <SimpleGrid cols={2} spacing="md">
+                <Select
+                  label={<LabelWithTooltip label="Optimizer" tooltip="Algorithm used to update model weights. AdamW is recommended for most cases, SGD may generalize better." />}
+                  data={[
+                    { value: 'adamw', label: 'AdamW' },
+                    { value: 'adam', label: 'Adam' },
+                    { value: 'sgd', label: 'SGD' },
+                  ]}
+                  value={optimizer}
+                  onChange={(v) => setOptimizer((v as typeof optimizer) ?? 'adamw')}
+                />
+                <NumberInput
+                  label={<LabelWithTooltip label="Weight Decay" tooltip="L2 regularization penalty. Helps prevent overfitting by penalizing large weights. Typical values: 0.01–0.1." />}
+                  value={weightDecay}
+                  onChange={(v) => setWeightDecay(Number(v) || 0.05)}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  decimalScale={4}
+                />
+              </SimpleGrid>
+
+              <Divider label="Schedule" labelPosition="center" />
+              <SimpleGrid cols={2} spacing="md">
+                <Select
+                  label={<LabelWithTooltip label="Scheduler" tooltip="Strategy for adjusting the learning rate during training. Cosine annealing is a popular choice for smooth decay." />}
+                  data={[
+                    { value: 'cosine', label: 'Cosine Annealing' },
+                    { value: 'step', label: 'Step Decay' },
+                    { value: 'linear', label: 'Linear Decay' },
+                  ]}
+                  value={scheduler}
+                  onChange={(v) => setScheduler((v as typeof scheduler) ?? 'cosine')}
+                />
+                <NumberInput
+                  label={<LabelWithTooltip label="Warmup Epochs" tooltip="Number of initial epochs where the learning rate gradually increases from zero. Stabilizes early training." />}
+                  value={warmupEpochs}
+                  onChange={(v) => setWarmupEpochs(Number(v) || 5)}
+                  min={0}
+                  max={100}
+                />
+              </SimpleGrid>
+
+              <Divider label="Model" labelPosition="center" />
+              <SimpleGrid cols={2} spacing="md">
+                <Switch
+                  label={<LabelWithTooltip label="Pretrained Weights" tooltip="Start from weights pre-trained on ImageNet. Dramatically improves accuracy and convergence speed for most tasks." />}
+                  checked={pretrained}
+                  onChange={(e) => setPretrained(e.currentTarget.checked)}
+                  mt="xs"
+                />
+                <NumberInput
+                  label={<LabelWithTooltip label="Dropout Rate" tooltip="Fraction of neurons randomly disabled during training. Helps prevent overfitting. 0 = no dropout." />}
+                  value={dropRate}
+                  onChange={(v) => setDropRate(Number(v) || 0)}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  decimalScale={2}
+                />
+              </SimpleGrid>
+
+              <Divider label="Dataset" labelPosition="center" />
+              <NumberInput
+                label={<LabelWithTooltip label="Data Loader Workers" tooltip="Number of CPU threads used to load and preprocess data in parallel. More workers = faster data pipeline." />}
+                value={numWorkers}
+                onChange={(v) => setNumWorkers(Number(v) || 4)}
+                min={0}
+                max={32}
+              />
+
+              <Divider label="Advanced Features" labelPosition="center" />
+              <SimpleGrid cols={3} spacing="md">
+                <Switch
+                  label={<LabelWithTooltip label="EMA" tooltip="Exponential Moving Average of model weights. Maintains a smoothed copy of the model that often performs better at inference." />}
+                  checked={useEma}
+                  onChange={(e) => setUseEma(e.currentTarget.checked)}
+                  mt="xs"
+                />
+                <NumberInput
+                  label={<LabelWithTooltip label="Mixup α" tooltip="Controls the strength of Mixup augmentation, which blends pairs of training images. Higher α = more mixing. 0 = disabled." />}
+                  value={mixupAlpha}
+                  onChange={(v) => setMixupAlpha(Number(v) || 0)}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  decimalScale={2}
+                />
+                <NumberInput
+                  label={<LabelWithTooltip label="CutMix α" tooltip="Controls the strength of CutMix augmentation, which pastes patches between training images. Higher α = larger patches. 0 = disabled." />}
+                  value={cutmixAlpha}
+                  onChange={(v) => setCutmixAlpha(Number(v) || 0)}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  decimalScale={2}
+                />
+              </SimpleGrid>
+            </>
+          )}
+
           <Group justify="flex-end">
             <Button variant="subtle" onClick={closeHyperModal}>
               Cancel
