@@ -1,7 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
   boolean,
-  check,
   index,
   integer,
   pgEnum,
@@ -146,8 +145,7 @@ export const datasetImages = pgTable(
     projectId: uuid('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
-    classId: uuid('class_id')
-      .references(() => datasetClasses.id, { onDelete: 'set null' }),
+    classId: uuid('class_id').references(() => datasetClasses.id, { onDelete: 'set null' }),
     filename: text('filename').notNull(),
     path: text('path').notNull(),
     width: integer('width').notNull(),
@@ -183,7 +181,12 @@ export const datasetImages = pgTable(
 //   (table) => [index('labels_imageId_idx').on(table.imageId), index('labels_classId_idx').on(table.classId)],
 // )
 
-export const trainingStatusEnum = pgEnum('training_status', ['queued', 'training', 'completed', 'failed'])
+// Status explained:
+// preparing: preparing dataset (splitting dataset into train, validation, test and copy them to AI microservice)
+// queued: queued for training, waiting for free GPU
+// training: training
+// completed: training completed (stopped = completed + completedAt is null, failed = completed + failedMessage is not null)
+export const trainingStatusEnum = pgEnum('training_status', ['preparing', 'queued', 'training', 'completed'])
 
 /* ------------------------------------------------------------------ */
 /*  Training Runs                                                     */
@@ -197,26 +200,19 @@ export const trainingRuns = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     taskId: text('task_id'),
     modelId: text('model_id').notNull(),
-    variantId: text('variant_id').notNull(),
-    train: integer('train').notNull().default(70),
-    validate: integer('validate').notNull().default(20),
-    test: integer('test').notNull().default(10),
     epochs: integer('epochs').notNull().default(50),
     batchSize: integer('batch_size').notNull().default(16),
     learningRate: real('learning_rate').notNull().default(0.001),
-    imageSize: integer('image_size').notNull().default(224),
-    status: trainingStatusEnum().default('queued').notNull(),
+    status: trainingStatusEnum().default('preparing').notNull(),
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    failedMessage: text('failed_message'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [
-    index('trainingRuns_projectId_idx').on(table.projectId),
-    check('split_config_check', sql`${table.train} + ${table.validate} + ${table.test} = 100`),
-  ],
+  (table) => [index('trainingRuns_projectId_idx').on(table.projectId)],
 )
 
 /* ------------------------------------------------------------------ */
