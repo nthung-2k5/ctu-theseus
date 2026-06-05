@@ -1,5 +1,5 @@
 # ── ElysiaJS Gateway Dockerfile ──
-FROM oven/bun:1 AS base
+FROM oven/bun:1-alpine AS base
 WORKDIR /app
 
 # Install dependencies
@@ -11,10 +11,6 @@ COPY src/ ./src/
 COPY public/ ./public/
 COPY tsconfig.json ./
 COPY drizzle.config.ts ./
-COPY start.sh ./
-
-# Make start.sh executable
-RUN chmod +x ./start.sh
 
 EXPOSE 3000
-CMD ["sh", "-c", "./start.sh"]
+CMD ["bun", "run", "dev"]

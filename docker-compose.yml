@@ -45,24 +45,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── ElysiaJS Gateway ──────────────────────────────────────────── (temporarily disabled)
-  # gateway:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.gateway
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     DATABASE_URL: postgres://theseus:theseus@db:5432/theseus
-  #     JWT_SECRET: ${JWT_SECRET:-theseus-production-secret}
-  #     AI_SERVICE_URL: http://ai_api:8000
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-
   # ── FastAPI AI Service ──────────────────────────────────────────
   ai_api:
     build:
@@ -74,12 +56,16 @@ services:
       - "8000:8000"
     environment:
       REDIS_URL: redis://redis:6379
-      UPLOAD_DIR: /app/uploads
-      MODEL_DIR: /app/models
-      DATASET_DIR: /app/datasets
-      DATA_DIR: /app/data
+      UPLOAD_DIR: /app_data/uploads
+      MODEL_DIR: /app_data/models
+      DATASET_DIR: /app_data/datasets
+      DATA_DIR: /app_data/data
+      PYTHONUNBUFFERED: 1
+      GATEWAY_URL: http://gateway:3000
     volumes:
-      - ./ai_mount:/app
+      - ./ai_mount:/app_data
+      - ./ai_service:/app/ai_service
+    command: uvicorn ai_service.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 10s
@@ -93,19 +79,52 @@ services:
   ai_worker:
     restart: unless-stopped
     image: theseus-ai:latest
-    command: celery -A ai_service.worker worker --loglevel=info --concurrency=1
+    command: celery -A ai_service.worker worker --loglevel=info -P threads --concurrency=1
     environment:
       REDIS_URL: redis://redis:6379
-      UPLOAD_DIR: /app/uploads
-      MODEL_DIR: /app/models
-      DATASET_DIR: /app/datasets
-      DATA_DIR: /app/data
+      UPLOAD_DIR: /app_data/uploads
+      MODEL_DIR: /app_data/models
+      DATASET_DIR: /app_data/datasets
+      DATA_DIR: /app_data/data
+      PYTHONUNBUFFERED: 1
+      GATEWAY_URL: http://gateway:3000
     volumes:
-      - ./ai_mount:/app
+      - ./ai_mount:/app_data
+      - ./ai_service:/app/ai_service
     depends_on:
       redis:
         condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
+  # ── ElysiaJS Gateway ────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://theseus:theseus@db:5432/theseus
+      JWT_SECRET: ${JWT_SECRET:-theseus-production-secret}
+      AI_SERVICE_URL: http://ai_api:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai_api:
+        condition: service_healthy
 volumes:
   pgdata:
   redisdata:
