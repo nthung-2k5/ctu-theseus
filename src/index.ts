@@ -5,6 +5,9 @@ import { projectRoutes } from '@server/routes/projects'
 import { trainingRoutes } from '@server/routes/training'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
+import { failAllTrainingTasks } from './lib/microservice'
+
+await failAllTrainingTasks(false)
 
 const app = new Elysia()
   .onError(({ error }) => {
@@ -34,8 +37,8 @@ const app = new Elysia()
   /* ── SPA Fallback ── */
   // .get('/*', index)
   .listen({
-     port: 3000,
-     hostname: '0.0.0.0'
+    port: 3000,
+    hostname: '0.0.0.0',
   })
 
 console.log(`CTU Theseus server is running at http://${app.server?.hostname}:${app.server?.port}`)

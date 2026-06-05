@@ -184,10 +184,10 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
     with: {
       datasetClasses: {
         columns: {
-          name: true
-        }
-      }
-    }
+          name: true,
+        },
+      },
+    },
   })
 
   const versionDatasetDir = `./ai_mount/datasets/${payload.id}`
@@ -198,7 +198,14 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
   ])
 
   await Promise.all(
-    datasetImages.filter((datasetImage) => datasetImage.split === 'train' || datasetImage.split === 'validation').map((datasetImage) => Bun.write(`${versionDatasetDir}/${datasetImage.split}/${datasetImage.datasetClasses!.name}/${datasetImage.filename}`, Bun.file(datasetImage.path))),
+    datasetImages
+      .filter((datasetImage) => datasetImage.split === 'train' || datasetImage.split === 'validation')
+      .map((datasetImage) =>
+        Bun.write(
+          `${versionDatasetDir}/${datasetImage.split}/${datasetImage.datasetClasses!.name}/${datasetImage.filename}`,
+          Bun.file(datasetImage.path),
+        ),
+      ),
   )
 
   // Dispatch to the AI microservice
@@ -219,4 +226,15 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
       console.error(`Training dispatch failed: ${e}`)
     }
   }
+}
+
+// If either the microservice or backend goes down, we need to update training tasks that are in progress to failed
+export const failAllTrainingTasks = async (microserviceSide: boolean) => {
+  await db
+    .update(trainingRuns)
+    .set({
+      status: 'completed',
+      failedMessage: microserviceSide ? 'AI Service was offline.' : 'Backend was offline.',
+    })
+    .where(eq(trainingRuns.status, 'training'))
 }
