@@ -43,7 +43,7 @@ export const relations = defineRelations(schema, (r) => ({
       from: r.datasetImages.projectId,
       to: r.projects.id,
     }),
-    datasetClasses: r.many.datasetClasses(),
+    datasetClasses: r.one.datasetClasses(),
   },
   trainingMetrics: {
     trainingRuns: r.one.trainingRuns({
