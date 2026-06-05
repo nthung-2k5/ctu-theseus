@@ -11,6 +11,7 @@ Endpoints:
   POST /api/v1/jobs/export           - Export trained weights
 """
 
+from celery.contrib.abortable import AbortableAsyncResult
 import os
 import shutil
 import uuid
@@ -79,11 +80,8 @@ def start_training_job(req: TrainRequest):
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Generate a unique ID for this specific trained model instance
-    model_id = f"{req.project_name}_{uuid.uuid7().hex[:8]}"
-
     # Send to Celery worker queue
-    task = train_model_task.delay(model_id, req.model_dump())
+    task = train_model_task.delay(req.id, req.model_dump())
 
     return JobResponse(job_id=task.id, status="queued")
 
@@ -91,7 +89,7 @@ def start_training_job(req: TrainRequest):
 @app.delete("/api/v1/jobs/{task_id}")
 def stop_training(task_id: str):
     """Terminate a running training task."""
-    celery_app.control.revoke(task_id, terminate=True)
+    AbortableAsyncResult(task_id).abort()
     return {"job_id": task_id, "status": "stopped"}
 
 

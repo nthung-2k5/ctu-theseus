@@ -14,6 +14,7 @@ import os
 
 import requests
 from celery import Celery
+from celery.contrib.abortable import AbortableTask
 from timm.data import create_dataset, create_loader
 
 from ai_service.dirs import DATASET_DIR, MODEL_DIR
@@ -23,6 +24,7 @@ from ai_service.models import get_model
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379")
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:3000")
 
 celery_app = Celery("theseus_ai", broker=f"{REDIS_URL}/0", backend=f"{REDIS_URL}/1")
 celery_app.conf.update(
@@ -37,12 +39,12 @@ celery_app.conf.update(
 def _send_webhook(webhook_url: str, payload: dict):
     """Send a webhook notification, logging but swallowing any errors."""
     try:
-        requests.post(webhook_url, json=payload, timeout=5)
+        requests.post(f"{GATEWAY_URL}{webhook_url}", json=payload, timeout=5)
     except requests.exceptions.RequestException as e:
         logger.warning(f"Webhook delivery failed: {e}")
 
 
-@celery_app.task(bind=True)
+@celery_app.task(bind=True, base=AbortableTask)
 def train_model_task(self, model_id: str, payload: dict):
     """Celery Task to execute the full training loop."""
 
@@ -56,11 +58,26 @@ def train_model_task(self, model_id: str, payload: dict):
     webhook_url = req.webhook_url
     task_id = self.request.id
 
+    # 0. Sending start notification
+    if webhook_url:
+        _send_webhook(webhook_url, { "task_id": task_id, "status": "training" })
+
     try:
         # 1. Setup Datasets & Loaders
         dataset_name = ds_config.source_uri.strip('/').split('/')[-1]
-        dataset_train = create_dataset(root=os.path.join(DATASET_DIR, dataset_name, 'train'), name='')
-        dataset_val = create_dataset(root=os.path.join(DATASET_DIR, dataset_name, 'val'), name='')
+        base_dataset_dir = os.path.join(DATASET_DIR, dataset_name)
+        dataset_train = create_dataset(
+            name='',
+            root=base_dataset_dir,
+            split='train',
+            is_training=True
+        )
+        dataset_val = create_dataset(
+            name='',
+            root=base_dataset_dir,
+            split='validation',
+            is_training=False
+        )
 
         class_mapping = dataset_train.reader.class_to_idx
         num_classes = len(class_mapping)
@@ -97,11 +114,21 @@ def train_model_task(self, model_id: str, payload: dict):
 
         # 4. Training Loop
         for epoch in range(sched_config.epochs):
+            if self.is_aborted():
+                return
+
             train_loss = worker.train_one_epoch(train_loader, epoch)
+
+            if self.is_aborted():
+                return
+
             metrics = worker.validate(val_loader)
 
+            if self.is_aborted():
+                return
+
             state_meta = {
-                'epoch': epoch,
+                'epoch': epoch + 1,
                 'train_loss': train_loss,
                 'val_loss': metrics['val_loss'],
                 'accuracy': metrics['accuracy'],
@@ -111,15 +138,22 @@ def train_model_task(self, model_id: str, payload: dict):
             # Update Celery state so the API can poll the status
             self.update_state(state='TRAINING', meta=state_meta)
 
+            if self.is_aborted():
+                return
+
             if webhook_url:
                 _send_webhook(webhook_url, {
                     "task_id": task_id, "status": "training", "metrics": state_meta
                 })
 
+            if self.is_aborted():
+                return
+
         # 5. Save to Disk
         weight_path, map_path = worker.save_model(model_id, class_mapping)
-        final_result = {"status": "success", "weights": weight_path, "mapping": map_path}
+        final_result = {"weights": weight_path, "mapping": map_path}
 
+        # 6. Sending completed notification
         if webhook_url:
             _send_webhook(webhook_url, {
                 "task_id": task_id, "status": "completed", "result": final_result
@@ -130,6 +164,7 @@ def train_model_task(self, model_id: str, payload: dict):
     except Exception as e:
         logger.exception(f"Training failed for model {model_id}")
         if webhook_url:
+            # 6.1. Sending failed notification
             _send_webhook(webhook_url, {
                 "task_id": task_id, "status": "failed", "error": str(e)
             })
