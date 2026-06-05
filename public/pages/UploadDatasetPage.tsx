@@ -98,8 +98,8 @@ export const UploadDatasetPage = () => {
       prev.map((f) => (f.status === 'error' ? { ...f, status: 'pending' as const, progress: 0, error: undefined } : f)),
     )
 
-    // Upload concurrently (max 3 at a time)
-    const concurrency = 3
+    // Upload concurrently (max 10 at a time)
+    const concurrency = 10
     let idx = 0
 
     const uploadOne = async (item: QueuedFile) => {
@@ -286,11 +286,6 @@ export const UploadDatasetPage = () => {
               {pendingCount > 0 && (
                 <Badge variant="light" color="blue" size="sm">
                   {pendingCount} pending
-                </Badge>
-              )}
-              {uploadingCount > 0 && (
-                <Badge variant="light" color="primary" size="sm">
-                  {uploadingCount} uploading
                 </Badge>
               )}
               {doneCount > 0 && (
