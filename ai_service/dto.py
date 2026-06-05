@@ -31,12 +31,12 @@ class AdvancedFeaturesConfig(BaseModel):
 
 class TrainRequest(BaseModel):
     """Comprehensive payload for submitting a new training job."""
-    project_name: str = Field(..., description="Name of the training project")
+    id: str = Field(..., description="ID of the training run")
     dataset: DatasetConfig
     model: ModelConfig
-    optimization: OptimizationConfig
-    schedule: ScheduleConfig
-    advanced_features: AdvancedFeaturesConfig
+    optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
+    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
+    advanced_features: AdvancedFeaturesConfig = Field(default_factory=AdvancedFeaturesConfig)
     webhook_url: Optional[str] = Field(None, description="Optional webhook URL to receive progress and completion events")
 
 class JobResponse(BaseModel):
