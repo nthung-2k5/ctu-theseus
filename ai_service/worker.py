@@ -194,14 +194,13 @@ def inference_task(self, model_id: str, model_name: str, image_path: str, thresh
 
         # Run inference with threshold
         results = worker.inference(image_path, class_mapping, threshold)
-        final_result = {"status": "success", "predictions": results}
 
         if webhook_url:
             _send_webhook(webhook_url, {
-                "task_id": self.request.id, "status": "success", "result": final_result
+                "task_id": self.request.id, "status": "success", "result": results
             })
 
-        return final_result
+        return results
 
     except Exception as e:
         logger.exception(f"Inference failed for model {model_id}")
