@@ -78,15 +78,6 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
   const [optimizer, setOptimizer] = useState<'adamw' | 'adam' | 'sgd'>('adamw')
   const [weightDecay, setWeightDecay] = useState(0.05)
 
-  // Schedule
-  const [scheduler, setScheduler] = useState<'cosine' | 'step' | 'linear'>('cosine')
-  const [warmupEpochs, setWarmupEpochs] = useState(5)
-
-  // Advanced features
-  const [useEma, setUseEma] = useState(true)
-  const [mixupAlpha, setMixupAlpha] = useState(0.8)
-  const [cutmixAlpha, setCutmixAlpha] = useState(1.0)
-
   /* ── Modals ── */
   const [hyperModalOpened, { open: openHyperModal, close: closeHyperModal }] = useDisclosure()
 
@@ -130,14 +121,7 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
               weight_decay: weightDecay,
             },
             schedule: {
-              scheduler,
               epochs,
-              warmup_epochs: warmupEpochs,
-            },
-            advanced_features: {
-              use_ema: useEma,
-              mixup_alpha: mixupAlpha,
-              cutmix_alpha: cutmixAlpha,
             },
           }
         : {
@@ -410,27 +394,6 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
                 />
               </SimpleGrid>
 
-              <Divider label="Schedule" labelPosition="center" />
-              <SimpleGrid cols={2} spacing="md">
-                <Select
-                  label={<LabelWithTooltip label="Scheduler" tooltip="Strategy for adjusting the learning rate during training. Cosine annealing is a popular choice for smooth decay." />}
-                  data={[
-                    { value: 'cosine', label: 'Cosine Annealing' },
-                    { value: 'step', label: 'Step Decay' },
-                    { value: 'linear', label: 'Linear Decay' },
-                  ]}
-                  value={scheduler}
-                  onChange={(v) => setScheduler((v as typeof scheduler) ?? 'cosine')}
-                />
-                <NumberInput
-                  label={<LabelWithTooltip label="Warmup Epochs" tooltip="Number of initial epochs where the learning rate gradually increases from zero. Stabilizes early training." />}
-                  value={warmupEpochs}
-                  onChange={(v) => setWarmupEpochs(Number(v) || 5)}
-                  min={0}
-                  max={100}
-                />
-              </SimpleGrid>
-
               <Divider label="Model" labelPosition="center" />
               <SimpleGrid cols={2} spacing="md">
                 <Switch
@@ -458,34 +421,6 @@ export function CreateVersionPanel({ projectId, onStartTraining }: CreateVersion
                 min={0}
                 max={32}
               />
-
-              <Divider label="Advanced Features" labelPosition="center" />
-              <SimpleGrid cols={3} spacing="md">
-                <Switch
-                  label={<LabelWithTooltip label="EMA" tooltip="Exponential Moving Average of model weights. Maintains a smoothed copy of the model that often performs better at inference." />}
-                  checked={useEma}
-                  onChange={(e) => setUseEma(e.currentTarget.checked)}
-                  mt="xs"
-                />
-                <NumberInput
-                  label={<LabelWithTooltip label="Mixup α" tooltip="Controls the strength of Mixup augmentation, which blends pairs of training images. Higher α = more mixing. 0 = disabled." />}
-                  value={mixupAlpha}
-                  onChange={(v) => setMixupAlpha(Number(v) || 0)}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  decimalScale={2}
-                />
-                <NumberInput
-                  label={<LabelWithTooltip label="CutMix α" tooltip="Controls the strength of CutMix augmentation, which pastes patches between training images. Higher α = larger patches. 0 = disabled." />}
-                  value={cutmixAlpha}
-                  onChange={(v) => setCutmixAlpha(Number(v) || 0)}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  decimalScale={2}
-                />
-              </SimpleGrid>
             </>
           )}
 

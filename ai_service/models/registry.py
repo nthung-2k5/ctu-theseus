@@ -1,24 +1,24 @@
 """
-Model Registry -- a central factory for dynamically registering and
-retrieving model implementations.
+Model Registry -- a configuration-based registry for Ludwig model variants.
+
+Each variant maps to a Ludwig encoder configuration (using timm models).
+No model classes are needed; Ludwig handles all model creation and training.
 
 Usage:
-    from ai_service.models.registry import register_model, get_model, list_models
+    from ai_service.models.registry import get_model_config, list_models
 
-    @register_model("resnet18", family="resnet", display_name="ResNet-18")
-    class ResNet18Model(BaseModel):
-        ...
-
-    # Retrieve by variant id
-    ModelClass = get_model("resnet18")
-    instance = ModelClass(num_classes=10)
+    config = get_model_config("resnet18")
+    # Returns: {"type": "timm", "model_name": "resnet18", "pretrained": True}
 """
 
-from typing import Any, Type
+from typing import Any
 
-from ai_service.models.base import TrainableModel
+# ──────────────────────────────────────────────────────────────────
+# Registry data structure
+# ──────────────────────────────────────────────────────────────────
 
 _MODEL_REGISTRY: dict[str, dict[str, Any]] = {}
+
 
 def register_model(
     variant_id: str,
@@ -26,39 +26,55 @@ def register_model(
     family: str,
     display_name: str,
     description: str = "",
+    timm_name: str,
 ):
     """
-    Decorator to register a model class in the global registry.
+    Register a model variant in the global registry.
 
     Args:
         variant_id: Unique identifier for the variant (e.g., "resnet50").
         family: The model family name (e.g., "resnet").
         display_name: Human-readable name (e.g., "ResNet-50").
         description: Optional description of the variant.
+        timm_name: The timm model name used by Ludwig's timm encoder.
     """
-
-    def decorator(cls: Type[TrainableModel]) -> Type[TrainableModel]:
-        if variant_id in _MODEL_REGISTRY:
-            raise ValueError(f"Model variant '{variant_id}' is already registered.")
-        _MODEL_REGISTRY[variant_id] = {
-            "class": cls,
-            "family": family,
-            "display_name": display_name,
-            "description": description,
-        }
-        return cls
-
-    return decorator
+    if variant_id in _MODEL_REGISTRY:
+        raise ValueError(f"Model variant '{variant_id}' is already registered.")
+    _MODEL_REGISTRY[variant_id] = {
+        "family": family,
+        "display_name": display_name,
+        "description": description,
+        "timm_name": timm_name,
+    }
 
 
-def get_model(variant_id: str) -> Type[TrainableModel]:
-    """Retrieve a model class by its variant id."""
+def get_model_config(variant_id: str) -> dict[str, Any]:
+    """Retrieve the Ludwig encoder config for a model variant."""
     if variant_id not in _MODEL_REGISTRY:
         raise KeyError(
             f"Model variant '{variant_id}' not found. "
             f"Available: {list(_MODEL_REGISTRY.keys())}"
         )
-    return _MODEL_REGISTRY[variant_id]["class"]
+    meta = _MODEL_REGISTRY[variant_id]
+    return {
+        "type": "timm",
+        "model_name": meta["timm_name"],
+    }
+
+
+def get_model_meta(variant_id: str) -> dict[str, Any]:
+    """Retrieve the full metadata for a model variant."""
+    if variant_id not in _MODEL_REGISTRY:
+        raise KeyError(
+            f"Model variant '{variant_id}' not found. "
+            f"Available: {list(_MODEL_REGISTRY.keys())}"
+        )
+    return _MODEL_REGISTRY[variant_id]
+
+
+def has_model(variant_id: str) -> bool:
+    """Check if a model variant is registered."""
+    return variant_id in _MODEL_REGISTRY
 
 
 def list_models() -> list[dict[str, Any]]:

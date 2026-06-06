@@ -100,14 +100,7 @@ export interface TrainPayload {
     weight_decay?: number
   }
   schedule?: {
-    scheduler?: 'cosine' | 'step' | 'linear'
     epochs?: number
-    warmup_epochs?: number
-  }
-  advanced_features?: {
-    use_ema?: boolean
-    mixup_alpha?: number
-    cutmix_alpha?: number
   }
   webhook_url?: string
 }
@@ -157,15 +150,7 @@ export const OptimizationConfigSchema = t.Object({
 })
 
 export const ScheduleConfigSchema = t.Object({
-  scheduler: t.Optional(t.Union([t.Literal('cosine'), t.Literal('step'), t.Literal('linear')], { default: 'cosine' })),
   epochs: t.Optional(t.Integer({ minimum: 1, default: 50 })),
-  warmup_epochs: t.Optional(t.Integer({ minimum: 0, default: 5 })),
-})
-
-export const AdvancedFeaturesConfigSchema = t.Object({
-  use_ema: t.Optional(t.Boolean({ default: true })),
-  mixup_alpha: t.Optional(t.Number({ minimum: 0.0, default: 0.8 })),
-  cutmix_alpha: t.Optional(t.Number({ minimum: 0.0, default: 1.0 })),
 })
 
 export const TrainRequestSchema = t.Object({
@@ -173,7 +158,6 @@ export const TrainRequestSchema = t.Object({
   model: ModelConfigSchema,
   optimization: t.Optional(OptimizationConfigSchema),
   schedule: t.Optional(ScheduleConfigSchema),
-  advanced_features: t.Optional(AdvancedFeaturesConfigSchema),
 })
 
 export async function queueTraining(projectId: string, payload: TrainPayload) {

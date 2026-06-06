@@ -10,24 +10,17 @@ class DatasetConfig(BaseModel):
     num_workers: PositiveInt = Field(4, ge=0, description="Number of DataLoader workers")
 
 class ModelConfig(BaseModel):
-    architecture: str = Field(..., description="Timm model architecture name")
+    architecture: str = Field(..., description="Model variant ID from the registry (e.g., resnet50)")
     pretrained: bool = Field(True, description="Whether to start with pre-trained weights")
     drop_rate: NonNegativeFloat = Field(0.0, ge=0.0, le=1.0, description="Dropout rate")
 
 class OptimizationConfig(BaseModel):
-    optimizer: Literal["adamw", "adam", "sgd"] = Field("adamw", description="Optimizer name supported by timm (e.g., adamw, sgd)")
+    optimizer: Literal["adamw", "adam", "sgd"] = Field("adamw", description="Optimizer type")
     learning_rate: NonNegativeFloat = Field(0.001, gt=0.0, description="Initial learning rate")
     weight_decay: NonNegativeFloat = Field(0.05, ge=0.0, description="Weight decay for regularization")
 
 class ScheduleConfig(BaseModel):
-    scheduler: Literal["cosine", "step", "linear"] = Field("cosine", description="Learning rate scheduler (e.g., cosine, step)")
     epochs: PositiveInt = Field(50, ge=1, description="Total number of training epochs")
-    warmup_epochs: int = Field(5, ge=0, description="Number of warmup epochs")
-
-class AdvancedFeaturesConfig(BaseModel):
-    use_ema: bool = Field(True, description="Use Exponential Moving Average for model weights")
-    mixup_alpha: NonNegativeFloat = Field(0.8, ge=0.0, description="Alpha for Mixup augmentation. 0.0 disables it.")
-    cutmix_alpha: NonNegativeFloat = Field(1.0, ge=0.0, description="Alpha for Cutmix augmentation. 0.0 disables it.")
 
 class TrainRequest(BaseModel):
     """Comprehensive payload for submitting a new training job."""
@@ -36,7 +29,6 @@ class TrainRequest(BaseModel):
     model: ModelConfig
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
-    advanced_features: AdvancedFeaturesConfig = Field(default_factory=AdvancedFeaturesConfig)
     webhook_url: Optional[str] = Field(None, description="Optional webhook URL to receive progress and completion events")
 
 class JobResponse(BaseModel):

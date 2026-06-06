@@ -22,13 +22,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ai_service.dirs import DATA_DIR, MODEL_DIR, UPLOAD_DIR
 from ai_service.dto import ExportRequest, JobResponse, TrainRequest
-from ai_service.models import get_model, list_models
+from ai_service.models import get_model_config, has_model, list_models
 from ai_service.worker import celery_app, export_model_task, inference_task, train_model_task
 
 app = FastAPI(
     title="CTU Theseus AI Service",
-    description="API gateway for asynchronous PyTorch model training, inference, and exporting.",
-    version="1.0.0",
+    description="API gateway for asynchronous Ludwig model training, inference, and exporting.",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -75,10 +75,8 @@ def start_training_job(req: TrainRequest):
     """Validates the configuration against the model registry and queues a training job."""
 
     # Validate against the model registry
-    try:
-        get_model(req.model.architecture)
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if not has_model(req.model.architecture):
+        raise HTTPException(status_code=400, detail=f"Unknown model architecture '{req.model.architecture}'")
 
     # Send to Celery worker queue
     task = train_model_task.delay(req.id, req.model_dump())
@@ -117,16 +115,14 @@ def inference(
 ):
     """Accepts an image upload, saves it to disk, and queues an inference job."""
 
-    # Validate model weights exist on disk
-    weight_path = os.path.join(MODEL_DIR, f"{model_id}.pt")
-    if not os.path.exists(weight_path):
+    # Validate model weights exist on disk (Ludwig saves to a directory)
+    model_dir = os.path.join(MODEL_DIR, model_id)
+    if not os.path.exists(model_dir):
         raise HTTPException(status_code=404, detail=f"Model weights for '{model_id}' not found.")
 
     # Validate model_name is in the registry
-    try:
-        get_model(model_name)
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if not has_model(model_name):
+        raise HTTPException(status_code=400, detail=f"Unknown model architecture '{model_name}'")
 
     # Validate filename is present
     if not image.filename:
@@ -155,17 +151,15 @@ def inference(
 
 @app.post("/api/v1/jobs/export", response_model=JobResponse)
 def start_export_job(request: ExportRequest):
-    """Queues a job to export pure PyTorch weights into ONNX/TorchScript."""
+    """Queues a job to export Ludwig model to ONNX/TorchScript."""
 
-    weight_path = os.path.join(MODEL_DIR, f"{request.model_id}.pt")
-    if not os.path.exists(weight_path):
+    model_dir = os.path.join(MODEL_DIR, request.model_id)
+    if not os.path.exists(model_dir):
         raise HTTPException(status_code=404, detail=f"Model weights for '{request.model_id}' not found.")
 
     # Validate model_name is in the registry
-    try:
-        get_model(request.model_name)
-    except KeyError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if not has_model(request.model_name):
+        raise HTTPException(status_code=400, detail=f"Unknown model architecture '{request.model_name}'")
 
     task = export_model_task.delay(
         request.model_id,
