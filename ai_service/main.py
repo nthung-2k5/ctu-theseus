@@ -143,7 +143,7 @@ def inference(
         )
 
     file_ext = image.filename.rsplit(".", 1)[-1]
-    image_path = UPLOAD_DIR / f"{uuid.uuid7().hex}.{file_ext}"
+    image_path = UPLOAD_DIR / f"{uuid.uuid4().hex}.{file_ext}"
 
     with open(image_path, "wb") as buffer:
         shutil.copyfileobj(image.file, buffer)
