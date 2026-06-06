@@ -1,6 +1,7 @@
 import { staticPlugin } from '@elysia/static'
 import { classesRoutes } from '@server/routes/classes'
 import { datasetRoutes } from '@server/routes/datasets'
+import { inferenceRoutes } from '@server/routes/inference'
 import { projectRoutes } from '@server/routes/projects'
 import { trainingRoutes } from '@server/routes/training'
 import { Elysia } from 'elysia'
@@ -34,6 +35,7 @@ const app = new Elysia()
   .use(classesRoutes)
   .use(datasetRoutes)
   .use(trainingRoutes)
+  .use(inferenceRoutes)
   /* ── SPA Fallback ── */
   // .get('/*', index)
   .listen({

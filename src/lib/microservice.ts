@@ -228,6 +228,63 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Inference                                                          */
+/* ------------------------------------------------------------------ */
+
+export interface InferencePayload {
+  model_id: string
+  model_name: string
+  threshold: number
+  webhook_url?: string
+  image: File
+}
+
+/** Submit an inference job to the AI microservice. Returns a job response immediately. */
+export async function dispatchInference(payload: InferencePayload): Promise<JobResponse> {
+  const formData = new FormData()
+  formData.append('model_id', payload.model_id)
+  formData.append('model_name', payload.model_name)
+  formData.append('threshold', payload.threshold.toString())
+  if (payload.webhook_url) {
+    formData.append('webhook_url', payload.webhook_url)
+  }
+  formData.append('image', payload.image)
+
+  const res = await axios.post<JobResponse>(`${AI_SERVICE_URL}/api/v1/jobs/inference`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  if (res.status !== 200) {
+    throw new Error(`Inference dispatch failed (${res.status}): ${JSON.stringify(res.data)}`)
+  }
+  return res.data
+}
+
+/* ------------------------------------------------------------------ */
+/*  Export                                                             */
+/* ------------------------------------------------------------------ */
+
+export interface ExportPayload {
+  model_id: string
+  model_name: string
+  num_classes: number
+  export_format: 'onnx' | 'torchscript'
+  webhook_url?: string
+}
+
+/** Submit an export job to the AI microservice. */
+export async function dispatchExport(payload: ExportPayload): Promise<JobResponse> {
+  const res = await axios.post<JobResponse>(`${AI_SERVICE_URL}/api/v1/jobs/export`, payload)
+  if (res.status !== 200) {
+    throw new Error(`Export dispatch failed (${res.status}): ${JSON.stringify(res.data)}`)
+  }
+  return res.data
+}
+
+/* ------------------------------------------------------------------ */
+/*  Failure Recovery                                                   */
+/* ------------------------------------------------------------------ */
+
 // If either the microservice or backend goes down, we need to update training tasks that are in progress to failed
 export const failAllTrainingTasks = async (microserviceSide: boolean) => {
   await db

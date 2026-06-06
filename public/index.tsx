@@ -13,6 +13,7 @@ import { AppShell } from '@public/layouts/AppShell'
 import { ClassPage } from '@public/pages/ClassPage'
 import { DashboardPage } from '@public/pages/DashboardPage'
 import { DatasetPage } from '@public/pages/DatasetPage'
+import { InferencePage } from '@public/pages/InferencePage'
 import { LoginPage } from '@public/pages/LoginPage'
 import { ProjectPage } from '@public/pages/ProjectPage'
 import { RegisterPage } from '@public/pages/RegisterPage'
@@ -55,7 +56,8 @@ function App() {
                           <Route path="/classes" component={ClassPage} />
                           <Route path="/upload" component={UploadDatasetPage} />
                           <Route path="/dataset" component={DatasetPage} />
-                          <Route path="/training" component={TrainingPage} />
+                          <Route path="/training" component={TrainingPage} /> */}
+                          <Route path="/inference" component={InferencePage} />
                         </ProjectProvider>
                       </Route>
                     </Switch>
