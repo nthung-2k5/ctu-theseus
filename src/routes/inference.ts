@@ -1,23 +1,20 @@
 /**
  * Inference & Export routes
  *
- * - POST /api/inference/:projectId/infer    → dispatches an inference job via the AI service
- * - POST /api/inference/:projectId/export   → dispatches an export job via the AI service
- * - POST /api/webhooks/inference            → webhook receiver for inference results
- * - POST /api/webhooks/export               → webhook receiver for export results
- * - WS   /api/inference/:projectId/ws       → WebSocket: client sends inference requests, receives results in real-time
+ * - WS   /api/inference/:projectId/ws       → WebSocket: client sends inference/export requests, receives results in real-time
+ * - GET  /api/inference/:projectId/download/:format → Download exported model file
  */
 
+import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { db } from '@server/db'
-import { datasetClasses, trainingRuns } from '@server/db/schema'
+import { trainingRuns } from '@server/db/schema'
 import {
-  AI_SERVICE_URL,
   dispatchExport,
   dispatchInference,
-  modelRegistry,
-  type ExportPayload,
 } from '@server/lib/microservice'
-import { count, eq } from 'drizzle-orm'
+import { subscribe } from '@server/lib/nats'
+import { eq } from 'drizzle-orm'
 import { Elysia, t } from 'elysia'
 import { betterAuth } from './auth'
 
@@ -42,6 +39,83 @@ const pendingExportJobs = new Map<string, PendingJob>()
 const activeWebSockets = new Map<string, { send: (data: string) => void; projectId: string }>()
 
 let wsIdCounter = 0
+
+/* ------------------------------------------------------------------ */
+/*  NATS consumers for inference/export results                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Start NATS consumers for inference and export results.
+ * Called once at gateway startup after initNats().
+ */
+export async function startInferenceNatsConsumers(): Promise<void> {
+  // ── Inference results ──
+  await subscribe('RESULTS', 'theseus.results.inference.>', 'gateway-inference-results', async (data) => {
+    const jobId = data.id as string
+    const status = data.status as string
+
+    const job = pendingInferenceJobs.get(jobId)
+    if (!job) return
+
+    job.status = status === 'success' ? 'success' : 'failed'
+    job.result = data.result
+    job.error = data.error as string | undefined
+
+    // Push result to all subscribed WebSockets
+    for (const wsId of job.subscribers) {
+      const ws = activeWebSockets.get(wsId)
+      if (ws) {
+        ws.send(
+          JSON.stringify({
+            type: 'inference_result',
+            jobId,
+            status: job.status,
+            result: job.result,
+            error: job.error,
+          }),
+        )
+      }
+    }
+
+    // Clean up after delivery
+    pendingInferenceJobs.delete(jobId)
+    console.log(`[nats] Inference result delivered: job=${jobId}, status=${status}`)
+  })
+
+  // ── Export results ──
+  await subscribe('RESULTS', 'theseus.results.export.>', 'gateway-export-results', async (data) => {
+    const jobId = data.id as string
+    const status = data.status as string
+
+    const job = pendingExportJobs.get(jobId)
+    if (!job) return
+
+    job.status = status === 'success' ? 'success' : 'failed'
+    job.result = data.result
+    job.error = data.error as string | undefined
+
+    // Push result to all subscribed WebSockets
+    for (const wsId of job.subscribers) {
+      const ws = activeWebSockets.get(wsId)
+      if (ws) {
+        ws.send(
+          JSON.stringify({
+            type: 'export_result',
+            jobId,
+            status: job.status,
+            result: job.result,
+            error: job.error,
+          }),
+        )
+      }
+    }
+
+    pendingExportJobs.delete(jobId)
+    console.log(`[nats] Export result delivered: job=${jobId}, status=${status}`)
+  })
+
+  console.log('[inference] NATS consumers started for inference and export results.')
+}
 
 /* ------------------------------------------------------------------ */
 /*  Routes                                                             */
@@ -69,7 +143,6 @@ export const inferenceRoutes = new Elysia({ prefix: '/api' })
 
         if (msg.type === 'inference') {
           // Client wants to run inference
-          // We need the training run to know model_id and model_name
           const run = await db.query.trainingRuns.findFirst({
             where: { projectId, status: 'completed' },
             columns: { id: true, modelId: true, failedMessage: true, completedAt: true },
@@ -81,32 +154,25 @@ export const inferenceRoutes = new Elysia({ prefix: '/api' })
             return
           }
 
-          // Fetch the image from the provided base64 data
-          const imageData = msg.image as string // base64-encoded image
+          // Decode base64 image and save to disk for the AI worker
+          const imageData = msg.image as string
           const imageName = (msg.imageName as string) || 'image.jpg'
           const threshold = (msg.threshold as number) ?? 0.5
 
-          // Convert base64 to File
           const byteString = atob(imageData.split(',')[1] || imageData)
-          const mimeMatch = imageData.match(/data:([^;]+);/)
-          const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg'
           const ab = new ArrayBuffer(byteString.length)
           const ia = new Uint8Array(ab)
           for (let i = 0; i < byteString.length; i++) {
             ia[i] = byteString.charCodeAt(i)
           }
-          const imageFile = new File([ab], imageName, { type: mimeType })
 
-          const modelName = run.modelId
-          const modelId = run.id
+          // Save to ai_mount/uploads for the worker to read
+          const fileExt = path.extname(imageName) || '.jpg'
+          const uploadFilename = `${randomUUID()}${fileExt}`
+          const uploadPath = `./ai_mount/uploads/${uploadFilename}`
+          await Bun.write(uploadPath, new Uint8Array(ab))
 
-          const result = await dispatchInference({
-            model_id: modelId,
-            model_name: modelName,
-            threshold,
-            webhook_url: '/api/webhooks/inference',
-            image: imageFile,
-          })
+          const jobId = randomUUID()
 
           // Track the pending job
           const jobEntry: PendingJob = {
@@ -114,9 +180,17 @@ export const inferenceRoutes = new Elysia({ prefix: '/api' })
             subscribers: new Set([wsId]),
             status: 'pending',
           }
-          pendingInferenceJobs.set(result.job_id, jobEntry)
+          pendingInferenceJobs.set(jobId, jobEntry)
 
-          ws.send(JSON.stringify({ type: 'inference_queued', jobId: result.job_id }))
+          // Dispatch via NATS
+          await dispatchInference(projectId, {
+            id: jobId,
+            model_id: run.id,
+            image_path: `/app_data/uploads/${uploadFilename}`,
+            threshold,
+          })
+
+          ws.send(JSON.stringify({ type: 'inference_queued', jobId }))
         } else if (msg.type === 'export') {
           // Client wants to export a model
           const run = await db.query.trainingRuns.findFirst({
@@ -136,30 +210,23 @@ export const inferenceRoutes = new Elysia({ prefix: '/api' })
             return
           }
 
-          // Get num_classes
-          const classCount = (
-            await db
-              .select({ count: count() })
-              .from(datasetClasses)
-              .where(eq(datasetClasses.projectId, projectId))
-          )[0].count
-
-          const result = await dispatchExport({
-            model_id: run.id,
-            model_name: run.modelId,
-            num_classes: classCount,
-            export_format: exportFormat,
-            webhook_url: '/api/webhooks/export',
-          })
+          const jobId = randomUUID()
 
           const jobEntry: PendingJob = {
             projectId,
             subscribers: new Set([wsId]),
             status: 'pending',
           }
-          pendingExportJobs.set(result.job_id, jobEntry)
+          pendingExportJobs.set(jobId, jobEntry)
 
-          ws.send(JSON.stringify({ type: 'export_queued', jobId: result.job_id, format: exportFormat }))
+          // Dispatch via NATS
+          await dispatchExport(projectId, {
+            id: jobId,
+            model_id: run.id,
+            export_format: exportFormat,
+          })
+
+          ws.send(JSON.stringify({ type: 'export_queued', jobId, format: exportFormat }))
         }
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err)
@@ -177,91 +244,6 @@ export const inferenceRoutes = new Elysia({ prefix: '/api' })
     }),
     body: t.Any(),
   })
-
-  /* ── Webhook: inference result from AI service ──────────────── */
-  .post(
-    '/webhooks/inference',
-    ({ body }) => {
-      const { task_id, status, result, error } = body
-
-      const job = pendingInferenceJobs.get(task_id)
-      if (!job) return { received: true }
-
-      job.status = status === 'success' ? 'success' : 'failed'
-      job.result = result
-      job.error = error
-
-      // Push result to all subscribed WebSockets
-      for (const wsId of job.subscribers) {
-        const ws = activeWebSockets.get(wsId)
-        if (ws) {
-          ws.send(
-            JSON.stringify({
-              type: 'inference_result',
-              jobId: task_id,
-              status: job.status,
-              result: job.result,
-              error: job.error,
-            }),
-          )
-        }
-      }
-
-      // Clean up after delivery
-      pendingInferenceJobs.delete(task_id)
-      return { received: true }
-    },
-    {
-      body: t.Object({
-        task_id: t.String(),
-        status: t.String(),
-        result: t.Optional(t.Any()),
-        error: t.Optional(t.String()),
-      }),
-    },
-  )
-
-  /* ── Webhook: export result from AI service ─────────────────── */
-  .post(
-    '/webhooks/export',
-    ({ body }) => {
-      const { task_id, status, result, error } = body
-
-      const job = pendingExportJobs.get(task_id)
-      if (!job) return { received: true }
-
-      job.status = status === 'success' ? 'success' : 'failed'
-      job.result = result
-      job.error = error
-
-      // Push result to all subscribed WebSockets
-      for (const wsId of job.subscribers) {
-        const ws = activeWebSockets.get(wsId)
-        if (ws) {
-          ws.send(
-            JSON.stringify({
-              type: 'export_result',
-              jobId: task_id,
-              status: job.status,
-              result: job.result,
-              error: job.error,
-            }),
-          )
-        }
-      }
-
-      pendingExportJobs.delete(task_id)
-      return { received: true }
-    },
-    {
-      body: t.Object({
-        task_id: t.String(),
-        status: t.String(),
-        result: t.Optional(t.Any()),
-        error: t.Optional(t.String()),
-      }),
-    },
-  )
 
   /* ── REST: download exported model file ─────────────────────── */
   .get(

@@ -1,14 +1,18 @@
 import { staticPlugin } from '@elysia/static'
 import { classesRoutes } from '@server/routes/classes'
 import { datasetRoutes } from '@server/routes/datasets'
-import { inferenceRoutes } from '@server/routes/inference'
+import { inferenceRoutes, startInferenceNatsConsumers } from '@server/routes/inference'
 import { projectRoutes } from '@server/routes/projects'
 import { trainingRoutes } from '@server/routes/training'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
-import { failAllTrainingTasks } from './lib/microservice'
+import { startNatsConsumers } from './lib/microservice'
+import { initNats } from './lib/nats'
 
-await failAllTrainingTasks(false)
+// Initialize NATS connection and start result/progress consumers
+await initNats()
+await startNatsConsumers()
+await startInferenceNatsConsumers()
 
 const app = new Elysia()
   .onError(({ error }) => {

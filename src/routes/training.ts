@@ -1,8 +1,7 @@
 /**
- * Training routes – connects the ElysiaJS gateway to the FastAPI AI microservice.
+ * Training routes – connects the ElysiaJS gateway to the AI worker via NATS.
  */
 
-import assert from 'node:assert'
 import { db } from '@server/db'
 import { datasetClasses, trainingMetrics, trainingRuns } from '@server/db/schema'
 import {
@@ -155,7 +154,6 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
               .where(eq(datasetClasses.projectId, params.projectId))
           )[0].count,
         },
-        webhook_url: '/api/webhooks/training',
       }
 
       queueTraining(project.id, payload)
@@ -169,11 +167,12 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
   .post('/runs/:runId/stop', async ({ params }) => {
     const run = await db.query.trainingRuns.findFirst({
       where: { id: params.runId },
-      columns: { taskId: true },
+      columns: { id: true, status: true },
     })
-    if (!run?.taskId) throw new Error('Training run not found or has no task ID')
+    if (!run) throw new Error('Training run not found')
 
-    const result = await stopTraining(run.taskId)
+    // Publish abort command via NATS
+    const result = await stopTraining(run.id)
 
     await db
       .update(trainingRuns)
@@ -184,7 +183,7 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
 
     return result
   })
-  /* ── Get training status from AI service ───────────────────── */
+  /* ── Get training status ───────────────────────────────────── */
   .get('/runs/:runId/status', async ({ params }) => {
     const run = await db.query.trainingRuns.findFirst({
       where: { id: params.runId },
@@ -208,100 +207,3 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
 
     return runStatus
   })
-  /* ── Webhook receiver (called by the AI microservice) ──────── */
-  .post(
-    '/webhooks/training',
-    async ({ body }) => {
-      const { task_id, status } = body
-
-      // Look up the training run by its Celery task ID
-      const run = await db.query.trainingRuns.findFirst({
-        where: { taskId: task_id },
-        columns: { id: true, status: true },
-      })
-
-      if (!run) return
-
-      const runId = run.id
-
-      assert(run.status === 'queued' || run.status === 'training')
-
-      if (status === 'training') {
-        const metrics = body.metrics
-        if (!metrics) {
-          // The task has just started
-          await db
-            .update(trainingRuns)
-            .set({ status: 'training', startedAt: new Date() })
-            .where(eq(trainingRuns.id, runId))
-        } else {
-          // Persist the epoch metrics
-          await db
-            .insert(trainingMetrics)
-            .values({
-              trainingRunId: runId,
-              epoch: metrics.epoch,
-              trainingLoss: metrics.train_loss,
-              validationLoss: metrics.val_loss,
-              accuracy: metrics.accuracy,
-              mAP: metrics.mAP,
-            })
-            .onConflictDoUpdate({
-              target: [trainingMetrics.trainingRunId, trainingMetrics.epoch],
-              set: {
-                trainingLoss: metrics.train_loss,
-                validationLoss: metrics.val_loss,
-                accuracy: metrics.accuracy,
-                mAP: metrics.mAP,
-              },
-            })
-
-          // Update training run status (just in case)
-          await db.update(trainingRuns).set({ status: 'training' }).where(eq(trainingRuns.id, runId))
-        }
-      } else if (status === 'completed') {
-        await db
-          .update(trainingRuns)
-          .set({
-            status: 'completed',
-            completedAt: new Date(),
-          })
-          .where(eq(trainingRuns.id, runId))
-      } else if (status === 'failed') {
-        await db
-          .update(trainingRuns)
-          .set({ failedMessage: body.error, completedAt: new Date() })
-          .where(eq(trainingRuns.id, runId))
-      }
-    },
-    {
-      body: t.Union([
-        t.Object({
-          task_id: t.String(),
-          status: t.Literal('training'),
-          metrics: t.Optional(
-            t.Object({
-              epoch: t.Number(),
-              train_loss: t.Number(),
-              val_loss: t.Number(),
-              accuracy: t.Number(),
-              mAP: t.Number(),
-            }),
-          ),
-        }),
-        t.Object({
-          task_id: t.String(),
-          status: t.Literal('completed'),
-          result: t.Object({
-            weights: t.String(),
-            mapping: t.String(),
-          }),
-        }),
-        t.Object({
-          task_id: t.String(),
-          status: t.Literal('failed'),
-          error: t.String(),
-        }),
-      ]),
-    },
-  )
