@@ -3,7 +3,7 @@
 #
 # Usage:
 #   Infrastructure only (for local dev):
-#     docker compose up db redis -d
+#     docker compose up db nats -d
 #
 #   Full stack:
 #     docker compose up -d
@@ -31,68 +31,41 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Redis ───────────────────────────────────────────────────────
-  redis:
-    image: redis:7.4-alpine
+  # ── NATS (replaces Redis) ──────────────────────────────────────
+  nats:
+    image: nats:2.11-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "4222:4222"       # Client connections
+      - "8222:8222"       # HTTP monitoring
+    command: ["--jetstream", "--store_dir", "/data"]
     volumes:
-      - redisdata:/data
+      - natsdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # ── FastAPI AI Service ──────────────────────────────────────────
-  ai_api:
+  # ── AI Worker (NATS consumer, single GPU) ──────────────────────
+  ai_worker:
     build:
       context: .
       dockerfile: Dockerfile.ai
     restart: unless-stopped
-    image: theseus-ai:latest
-    ports:
-      - "8000:8000"
     environment:
-      REDIS_URL: redis://redis:6379
+      NATS_URL: nats://nats:4222
       UPLOAD_DIR: /app_data/uploads
       MODEL_DIR: /app_data/models
       DATASET_DIR: /app_data/datasets
       DATA_DIR: /app_data/data
       PYTHONUNBUFFERED: 1
-      GATEWAY_URL: http://gateway:3000
     volumes:
       - ./ai_mount:/app_data
       - ./ai_service:/app/ai_service
-    command: uvicorn ai_service.main:app --host 0.0.0.0 --port 8000 --reload
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    command: python -m ai_service.worker
     depends_on:
-      redis:
-        condition: service_healthy
-
-  # ── Celery Worker ───────────────────────────────────────────────
-  ai_worker:
-    restart: unless-stopped
-    image: theseus-ai:latest
-    command: celery -A ai_service.worker worker --loglevel=info -P threads --concurrency=1
-    environment:
-      REDIS_URL: redis://redis:6379
-      UPLOAD_DIR: /app_data/uploads
-      MODEL_DIR: /app_data/models
-      DATASET_DIR: /app_data/datasets
-      DATA_DIR: /app_data/data
-      PYTHONUNBUFFERED: 1
-      GATEWAY_URL: http://gateway:3000
-    volumes:
-      - ./ai_mount:/app_data
-      - ./ai_service:/app/ai_service
-    depends_on:
-      redis:
+      nats:
         condition: service_healthy
     deploy:
       resources:
@@ -113,18 +86,18 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - ./ai_mount:/app/ai_mount
     environment:
       NODE_ENV: development
       DATABASE_URL: postgres://theseus:theseus@db:5432/theseus
       JWT_SECRET: ${JWT_SECRET:-theseus-production-secret}
-      AI_SERVICE_URL: http://ai_api:8000
+      NATS_URL: nats://nats:4222
     depends_on:
       db:
         condition: service_healthy
-      redis:
+      nats:
         condition: service_healthy
-      ai_api:
-        condition: service_healthy
+
 volumes:
   pgdata:
-  redisdata:
+  natsdata:
