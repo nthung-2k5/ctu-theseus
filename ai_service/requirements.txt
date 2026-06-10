@@ -1,14 +1,11 @@
 # Theseus AI Service - Python Dependencies
 
-# Web framework
+# Health endpoint (optional, can be removed if not needed)
 fastapi>=0.136.3
 uvicorn[standard]>=0.48.0
-python-multipart>=0.0.30
-requests>=2.34.2
 
-# Task queue (distributed training)
-celery>=5.6.3
-redis>=7.4.0
+# NATS messaging (replaces Celery + Redis + requests/webhooks)
+nats-py>=2.10.0
 
 # Deep learning (Ludwig handles torch, torchvision, timm internally)
 ludwig>=0.17.5
