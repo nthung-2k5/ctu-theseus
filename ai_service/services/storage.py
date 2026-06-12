@@ -62,7 +62,7 @@ def download_prefix(bucket: str, prefix: str, local_dir: str) -> int:
         for obj in page.get("Contents", []):
             key = obj["Key"]
             # Compute relative path from prefix
-            rel_path = key[len(prefix):].lstrip("/")
+            rel_path = key[len(prefix) :].lstrip("/")
             if not rel_path:
                 continue
 
@@ -134,6 +134,7 @@ def file_exists(bucket: str, key: str) -> bool:
 # High-level helpers for common operations
 # ──────────────────────────────────────────────────────────────────
 
+
 def download_dataset(project_id: str, run_id: str) -> str:
     """
     Download a training dataset from S3 to a local temp directory.
@@ -169,12 +170,14 @@ def download_model(run_id: str) -> str:
     prefix = f"{run_id}/"
     count = download_prefix(BUCKET_MODELS, prefix, local_dir)
     if count == 0:
-        raise FileNotFoundError(f"No model artifacts found in s3://{BUCKET_MODELS}/{prefix}")
+        raise FileNotFoundError(
+            f"No model artifacts found in s3://{BUCKET_MODELS}/{prefix}"
+        )
     return local_dir
 
 
 def cleanup_temp(subdir: str, item_id: str):
     """Remove a temp directory for a specific item."""
-    target = str(TEMP_DIR / subdir / item_id)
-    if os.path.exists(target):
-        shutil.rmtree(target)
+    target = Path(TEMP_DIR / subdir / item_id)
+    if target.exists():
+        target.rmdir()

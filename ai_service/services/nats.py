@@ -1,22 +1,22 @@
 """
-NATS JetStream client for the AI worker service.
+NATS + JetStream client for the AI worker service.
 
 Provides connection management, stream provisioning, and publish/subscribe helpers.
 """
 
-from typing import Awaitable
-from nats.aio.msg import Msg
 import asyncio
 import json
 import logging
 import os
-from typing import Any, Callable, Coroutine
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Coroutine
 
 import nats
-from nats.aio.client import Client as NatsClient
-from nats.js import JetStreamContext
-import nats.js.errors
 import nats.errors
+import nats.js.errors
+from nats.aio.client import Client as NatsClient
+from nats.aio.msg import Msg
+from nats.js import JetStreamContext
 from nats.js.api import (
     ConsumerConfig,
     DeliverPolicy,
@@ -58,6 +58,7 @@ STREAMS: list[StreamConfig] = [
         max_age=3600 * 1_000_000_000,  # 1 hour
     ),
 ]
+
 
 class NatsService:
     """Manages the NATS connection and JetStream context for the AI worker."""
@@ -104,7 +105,9 @@ class NatsService:
             await self._js.object_store("theseus-inferences")
             logger.info("Object Store 'theseus-inferences' exists.")
         except nats.js.errors.NotFoundError:
-            await self._js.create_object_store("theseus-inferences", description="Uploads for inference tasks")
+            await self._js.create_object_store(
+                "theseus-inferences", description="Uploads for inference tasks"
+            )
             logger.info("Object Store 'theseus-inferences' created.")
 
         logger.info("NATS JetStream connected and streams provisioned.")
@@ -119,11 +122,22 @@ class NatsService:
     # Object Store
     # ──────────────────────────────────────────────────────────────
 
-    async def get_upload(self, key: str) -> bytes | None:
+    async def get_upload(self, bucket: str, key: str) -> bytes | None:
         """Download an uploaded image from NATS Object Store."""
-        os = await self.js.object_store("theseus-inferences")
+        os = await self.js.object_store(bucket)
         obj = await os.get(key)
         return obj.data
+
+    async def download(self, bucket: str, key: str, downloadTo: Path) -> bool:
+        """Download an uploaded image from NATS Object Store to a specific path."""
+        os = await self.js.object_store(bucket)
+        try:
+            with open(downloadTo, "wb") as f:
+                await os.get(key, writeinto=f)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download {key} from NATS Object Store: {e}")
+            return False
 
     # ──────────────────────────────────────────────────────────────
     # Publishing
@@ -135,7 +149,9 @@ class NatsService:
         ack = await self.js.publish(subject, payload)
         logger.debug(f"Published to {subject} (stream={ack.stream}, seq={ack.seq})")
 
-    async def publish_result(self, task_type: str, task_id: str, data: dict[str, Any]) -> None:
+    async def publish_result(
+        self, task_type: str, task_id: str, data: dict[str, Any]
+    ) -> None:
         """Publish a result message."""
         await self.publish(f"theseus.results.{task_type}.{task_id}", data)
 
@@ -236,6 +252,7 @@ class NatsService:
                 if not self._nc or not self._nc.is_connected:
                     break
                 await asyncio.sleep(1)
+
 
 # Module-level singleton
 nats_service = NatsService()
