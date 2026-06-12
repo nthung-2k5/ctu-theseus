@@ -1,7 +1,7 @@
 import { staticPlugin } from '@elysia/static'
 import { classesRoutes } from '@server/routes/classes'
 import { datasetRoutes } from '@server/routes/datasets'
-import { inferenceRoutes, startInferenceNatsConsumers } from '@server/routes/inference'
+import { inferenceRoutes } from '@server/routes/inference'
 import { projectRoutes } from '@server/routes/projects'
 import { trainingRoutes } from '@server/routes/training'
 import { Elysia } from 'elysia'
@@ -14,7 +14,6 @@ import { ensureBuckets } from './lib/storage'
 await initNats()
 await ensureBuckets()
 await startNatsConsumers()
-await startInferenceNatsConsumers()
 
 const app = new Elysia()
   .onError(({ error }) => {
