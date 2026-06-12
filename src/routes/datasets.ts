@@ -1,6 +1,6 @@
 import { db } from '@server/db'
 import { datasetImages } from '@server/db/schema'
-import { BUCKET_DATASETS, deleteFile, downloadFile, fileExists, getDownloadUrl, uploadFile } from '@server/lib/storage'
+import { BUCKET_DATASETS, deleteFile, fileExists, getDownloadUrl, uploadFile } from '@server/lib/storage'
 import { and, asc, desc, eq, ilike, inArray } from 'drizzle-orm'
 import { Elysia, status, t } from 'elysia'
 import { betterAuth } from './auth'
@@ -112,38 +112,33 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
 
       const result = await Promise.allSettled(
         images.map(async ([img, classId]) => {
-          const originalName = img.name
-          let finalName = originalName
-
           // Check for existing file with the same name in S3
-          const s3Key = `images/${params.projectId}/${originalName}`
-          if (await fileExists(BUCKET_DATASETS, s3Key)) {
+          const s3Key = `images/${params.projectId}/${img.name}`
+          const existing = await fileExists(BUCKET_DATASETS, s3Key)
+          if (existing) {
             // Compare content via hash
-            const existingBytes = await downloadFile(BUCKET_DATASETS, s3Key)
-            const existingHash = new Bun.CryptoHasher('md5').update(existingBytes).digest('hex')
+            const existingHash = existing.ETag
             const newHash = new Bun.CryptoHasher('md5').update(await img.arrayBuffer()).digest('hex')
 
             if (existingHash === newHash) {
               // Identical content — find existing DB record and return it
               const existing = await db.query.datasetImages.findFirst({
-                where: { projectId: params.projectId, filename: originalName },
+                where: { projectId: params.projectId, filename: img.name },
               })
+
               if (existing) {
                 return existing
               }
+
               // If not exists then create a new record.
             } else {
-              // Different content — find a unique suffix
-              const suffix = Bun.randomUUIDv7()
-              finalName = `${originalName}_${suffix}`
+              return status(422, { error: 'File with same name but different content already exists' })
             }
+          } else {
+            // Upload to S3
+            const buffer = new Uint8Array(await img.arrayBuffer())
+            await uploadFile(BUCKET_DATASETS, s3Key, buffer, img.type)
           }
-
-          const targetKey = `images/${params.projectId}/${finalName}`
-
-          // Upload to S3
-          const buffer = new Uint8Array(await img.arrayBuffer())
-          await uploadFile(BUCKET_DATASETS, targetKey, buffer, img.type)
 
           // Read image dimensions
           const imgObj = img.image()
@@ -155,9 +150,9 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
             .insert(datasetImages)
             .values({
               projectId: params.projectId,
-              filename: finalName,
-              classId: classId || null,
-              path: targetKey,
+              filename: img.name,
+              classId,
+              path: s3Key,
               width,
               height,
             })
@@ -175,11 +170,11 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
       projectBelongToUser: true,
       body: t.Union([
         t.Object({
-          image: t.File({ type: 'image/*', maxSize: '5m' }),
+          image: t.File({ type: 'image/*', maxSize: '15m' }),
           classId: t.Nullable(t.String()),
         }),
         t.Object({
-          images: t.Array(t.Tuple([t.File({ type: 'image/*', maxSize: '5m' }), t.Nullable(t.String())])),
+          images: t.Array(t.Tuple([t.File({ type: 'image/*', maxSize: '15m' }), t.Nullable(t.String())])),
         }),
       ]),
     },

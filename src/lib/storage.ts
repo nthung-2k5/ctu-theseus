@@ -12,6 +12,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  type HeadObjectCommandOutput,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -109,6 +110,7 @@ export async function uploadFile(
       Bucket: bucket,
       Key: key,
       Body: body,
+
       ...(contentType && { ContentType: contentType }),
     }),
   )
@@ -138,12 +140,12 @@ export async function downloadFile(bucket: string, key: string): Promise<Uint8Ar
 /**
  * Check if a file exists in S3.
  */
-export async function fileExists(bucket: string, key: string): Promise<boolean> {
+export async function fileExists(bucket: string, key: string): Promise<HeadObjectCommandOutput | null> {
   try {
-    await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
-    return true
+    const response = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+    return response
   } catch {
-    return false
+    return null
   }
 }
 
@@ -211,11 +213,7 @@ export async function uploadDatasetImage(
 /**
  * Generate a presigned download URL for a model export.
  */
-export async function getExportDownloadUrl(
-  runId: string,
-  format: string,
-  expiresIn = 3600,
-): Promise<string> {
+export async function getExportDownloadUrl(runId: string, format: string, expiresIn = 3600): Promise<string> {
   const key = `${runId}/model.${format}`
   return getDownloadUrl(BUCKET_MODELS, key, expiresIn)
 }
