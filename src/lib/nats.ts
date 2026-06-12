@@ -7,20 +7,21 @@
 
 import {
   AckPolicy,
-  connect,
   DeliverPolicy,
   type JetStreamClient,
   type JetStreamManager,
-  type NatsConnection,
+  jetstream,
+  jetstreamManager,
   RetentionPolicy,
-  StringCodec,
-} from 'nats'
-
-const sc = StringCodec()
+} from '@nats-io/jetstream'
+import type { NatsConnection } from '@nats-io/nats-core'
+import { Objm } from '@nats-io/obj'
+import { connect } from '@nats-io/transport-node'
 
 let nc: NatsConnection
 let js: JetStreamClient
 let jsm: JetStreamManager
+let objm: Objm
 
 const NATS_URL = process.env.NATS_URL ?? 'nats://localhost:4222'
 
@@ -36,8 +37,9 @@ export async function initNats(): Promise<void> {
   console.log(`[nats] Connecting to ${NATS_URL}...`)
 
   nc = await connect({ servers: NATS_URL })
-  js = nc.jetstream()
-  jsm = await nc.jetstreamManager()
+  js = jetstream(nc)
+  jsm = await jetstreamManager(nc)
+  objm = new Objm(js)
 
   // Provision streams (idempotent — creates if missing, updates if exists)
   const streams = [
@@ -78,6 +80,14 @@ export async function initNats(): Promise<void> {
     }
   }
 
+  // Provision Object Store for inference uploads
+  try {
+    await objm.create('theseus-inferences', { description: 'Uploads for inference tasks' })
+    console.log(`[nats] Object Store 'theseus-inferences' created/verified.`)
+  } catch (err) {
+    console.error(`[nats] Failed to create Object Store:`, err)
+  }
+
   console.log('[nats] Connected and streams provisioned.')
 }
 
@@ -98,31 +108,46 @@ export async function closeNats(): Promise<void> {
 /**
  * Publish a JSON message to a JetStream subject.
  */
-export async function publish(subject: string, data: unknown): Promise<void> {
-  const payload = sc.encode(JSON.stringify(data))
-  const ack = await js.publish(subject, payload)
+async function publish(subject: string, data: unknown): Promise<void> {
+  const ack = await js.publish(subject, JSON.stringify(data))
   console.log(`[nats] Published to ${subject} (stream=${ack.stream}, seq=${ack.seq})`)
 }
 
 /**
  * Publish a training task.
  */
-export async function publishTrainTask(projectId: string, data: unknown): Promise<void> {
-  await publish(`theseus.tasks.train.${projectId}`, data)
+export async function publishTrainTask(data: unknown): Promise<void> {
+  await publish(`theseus.tasks.train`, data)
 }
 
 /**
  * Publish an inference task.
  */
-export async function publishInferenceTask(projectId: string, data: unknown): Promise<void> {
-  await publish(`theseus.tasks.inference.${projectId}`, data)
+export interface InferencePayload {
+  uploadKey: string
+  threshold: number
+}
+
+export type InferenceResponse =
+  | {
+      status: 'success'
+      results: Record<string, number>
+    }
+  | {
+      status: 'failed'
+      error: string
+    }
+
+export async function requestInferenceTask(modelId: string, data: InferencePayload): Promise<InferenceResponse> {
+  const msg = await nc.request(`theseus.inference.${modelId}`, JSON.stringify(data))
+  return await msg.json()
 }
 
 /**
  * Publish an export task.
  */
-export async function publishExportTask(projectId: string, data: unknown): Promise<void> {
-  await publish(`theseus.tasks.export.${projectId}`, data)
+export async function publishExportTask(data: unknown): Promise<void> {
+  await publish(`theseus.tasks.export`, data)
 }
 
 /**
@@ -133,6 +158,19 @@ export async function publishAbortCommand(runId: string): Promise<void> {
     command: 'abort',
     run_id: runId,
   })
+}
+
+/* ------------------------------------------------------------------ */
+/*  Object Store                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Upload an image to NATS Object Store for inference.
+ */
+export async function uploadInferenceImage(filename: string, data: Uint8Array): Promise<string> {
+  const store = await objm.open('theseus-inferences')
+  const info = await store.putBlob({ name: filename }, data)
+  return info.name
 }
 
 /* ------------------------------------------------------------------ */
@@ -149,11 +187,11 @@ export interface NatsMessage {
  * The handler is called for each message. Messages are auto-acked after
  * successful handler execution.
  */
-export async function subscribe(
+export async function subscribe<T>(
   stream: string,
   subject: string,
   durableName: string,
-  handler: (data: Record<string, unknown>, subject: string) => Promise<void>,
+  handler: (data: T, subject: string) => Promise<void>,
 ): Promise<void> {
   // Ensure consumer exists
   try {
@@ -177,7 +215,7 @@ export async function subscribe(
         const messages = await consumer.fetch({ max_messages: 1, expires: 5_000 })
         for await (const msg of messages) {
           try {
-            const data = JSON.parse(sc.decode(msg.data)) as Record<string, unknown>
+            const data = msg.json<T>()
             await handler(data, msg.subject)
             msg.ack()
           } catch (err) {
