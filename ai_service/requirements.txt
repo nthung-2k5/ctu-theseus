@@ -7,6 +7,9 @@ uvicorn[standard]>=0.48.0
 # NATS messaging (replaces Celery + Redis + requests/webhooks)
 nats-py>=2.10.0
 
+# S3-compatible storage (RustFS)
+boto3>=1.39.0
+
 # Deep learning (Ludwig handles torch, torchvision, timm internally)
 ludwig>=0.17.5
 pandas>=2.3.0

@@ -8,9 +8,11 @@ import { Elysia } from 'elysia'
 import { auth } from './auth'
 import { startNatsConsumers } from './lib/microservice'
 import { initNats } from './lib/nats'
+import { ensureBuckets } from './lib/storage'
 
-// Initialize NATS connection and start result/progress consumers
+// Initialize NATS connection and S3 buckets
 await initNats()
+await ensureBuckets()
 await startNatsConsumers()
 await startInferenceNatsConsumers()
 
@@ -24,12 +26,6 @@ const app = new Elysia()
       prefix: '/',
       bunFullstack: true,
       alwaysStatic: true,
-    }),
-  )
-  .use(
-    await staticPlugin({
-      prefix: '/data',
-      assets: 'data',
     }),
   )
   /* ── Authentication ── */

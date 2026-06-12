@@ -3,7 +3,7 @@
 #
 # Usage:
 #   Infrastructure only (for local dev):
-#     docker compose up db nats -d
+#     docker compose up db nats rustfs -d
 #
 #   Full stack:
 #     docker compose up -d
@@ -31,7 +31,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── NATS (replaces Redis) ──────────────────────────────────────
+  # ── NATS ───────────────────────────────────────────────────────
   nats:
     image: nats:2.11-alpine
     restart: unless-stopped
@@ -47,6 +47,25 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── RustFS (S3-compatible object storage) ──────────────────────
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000"       # S3 API
+      - "9001:9001"       # Web console
+    environment:
+      RUSTFS_ROOT_USER: theseus
+      RUSTFS_ROOT_PASSWORD: theseus-secret
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      - rustfsdata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # ── AI Worker (NATS consumer, single GPU) ──────────────────────
   ai_worker:
     build:
@@ -55,17 +74,17 @@ services:
     restart: unless-stopped
     environment:
       NATS_URL: nats://nats:4222
-      UPLOAD_DIR: /app_data/uploads
-      MODEL_DIR: /app_data/models
-      DATASET_DIR: /app_data/datasets
-      DATA_DIR: /app_data/data
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY: theseus
+      S3_SECRET_KEY: theseus-secret
       PYTHONUNBUFFERED: 1
     volumes:
-      - ./ai_mount:/app_data
       - ./ai_service:/app/ai_service
     command: python -m ai_service.worker
     depends_on:
       nats:
+        condition: service_healthy
+      rustfs:
         condition: service_healthy
     deploy:
       resources:
@@ -86,18 +105,23 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-      - ./ai_mount:/app/ai_mount
     environment:
       NODE_ENV: development
       DATABASE_URL: postgres://theseus:theseus@db:5432/theseus
       JWT_SECRET: ${JWT_SECRET:-theseus-production-secret}
       NATS_URL: nats://nats:4222
+      S3_ENDPOINT: http://rustfs:9000
+      S3_ACCESS_KEY: theseus
+      S3_SECRET_KEY: theseus-secret
     depends_on:
       db:
         condition: service_healthy
       nats:
         condition: service_healthy
+      rustfs:
+        condition: service_healthy
 
 volumes:
   pgdata:
   natsdata:
+  rustfsdata:
