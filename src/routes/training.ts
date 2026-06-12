@@ -3,7 +3,7 @@
  */
 
 import { db } from '@server/db'
-import { datasetClasses, trainingMetrics, trainingRuns } from '@server/db/schema'
+import { datasetClasses, trainingRuns } from '@server/db/schema'
 import {
   modelRegistry,
   queueTraining,
@@ -12,7 +12,7 @@ import {
   TrainRequestSchema,
 } from '@server/lib/microservice'
 import { count, eq } from 'drizzle-orm'
-import { Elysia, status, t } from 'elysia'
+import { Elysia, status } from 'elysia'
 import { betterAuth } from './auth'
 
 /* ------------------------------------------------------------------ */
@@ -146,7 +146,6 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
         id: run.id,
         dataset: {
           ...body.dataset,
-          source_uri: `/app_data/datasets/${run.id}`,
           num_classes: (
             await db
               .select({ count: count() })
