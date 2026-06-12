@@ -16,11 +16,15 @@
   },
   "python.pyrefly.typeCheckingMode": "strict",
   "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
     "diffEditor.ignoreTrimWhitespace": false,
     "editor.defaultColorDecorators": "never",
     "gitlens.codeLens.symbolScopes": ["!Module"],
     "editor.tabSize": 4,
-    "editor.indentSize": 4
+    "editor.indentSize": 4,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports.ruff": "always"
+    }
   },
   "[typescript]": {
     "editor.defaultFormatter": "biomejs.biome"
