@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Coroutine
+from typing import Any, Awaitable, Callable
 
 import nats
 import nats.errors
@@ -169,22 +169,69 @@ class NatsService:
         subject: str,
         handler: Callable[[Msg], Awaitable[None]],
     ) -> None:
+        """Basic Request-Reply subscription."""
         await self.nc.subscribe(subject, cb=handler)
-
         logger.info(f"Subscribed to '{subject}' with request-reply")
+
+    async def _consume_loop(
+        self,
+        consumer: JetStreamContext.PullSubscription,
+        subject: str,
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
+        retry_on_failure: bool = True,
+        nak_delay: int = 10,
+        fetch_timeout: int = 5,
+    ) -> None:
+        """
+        Generic pull consumer loop.
+        """
+        while True:
+            try:
+                messages = await consumer.fetch(batch=1, timeout=fetch_timeout)
+                for msg in messages:
+                    try:
+                        data = json.loads(msg.data.decode())
+                        await handler(data)
+                        await msg.ack()
+                    except json.JSONDecodeError as e:
+                        logger.error(
+                            f"Malformed JSON in {subject}: {e}. Dropping message."
+                        )
+                        await msg.ack()  # Prevent poison pill infinite retries
+                    except Exception as e:
+                        logger.exception(f"Handler failed for {subject}: {e}")
+                        if retry_on_failure:
+                            await msg.nak(delay=nak_delay)
+                        else:
+                            await msg.ack()
+
+            except nats.errors.TimeoutError:
+                # No messages available, continue polling
+                continue
+            except asyncio.CancelledError:
+                logger.info(
+                    f"Consumer loop for '{subject}' cancelled. Shutting down cleanly."
+                )
+                break
+            except Exception as e:
+                # Check for disconnects (ensure self.nc is the correct reference)
+                if getattr(self, "nc", None) is None or not self.nc.is_connected:
+                    logger.error("NATS disconnected, stopping consumer loop.")
+                    break
+                logger.exception(f"Consumer polling error on '{subject}': {e}")
+                await asyncio.sleep(1)
 
     async def subscribe_tasks(
         self,
         subject: str,
         durable_name: str,
-        handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]],
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
         """
         Subscribe to task messages using a pull-based consumer.
         The handler receives the parsed JSON payload and should process it.
         Messages are acked after successful processing; nak'd on failure.
         """
-        # Create or bind to a durable pull consumer
         consumer = await self.js.pull_subscribe(
             subject,
             durable=durable_name,
@@ -198,31 +245,19 @@ class NatsService:
 
         logger.info(f"Subscribed to '{subject}' as consumer '{durable_name}'")
 
-        while True:
-            try:
-                messages = await consumer.fetch(batch=1, timeout=5)
-                for msg in messages:
-                    try:
-                        data = json.loads(msg.data.decode())
-                        await handler(data)
-                        await msg.ack()
-                    except Exception as e:
-                        logger.exception(f"Task handler failed for {subject}: {e}")
-                        await msg.nak(delay=10)  # Retry after 10 seconds
-            except nats.errors.TimeoutError:
-                # No messages available, continue polling
-                continue
-            except Exception as e:
-                if not self._nc or not self._nc.is_connected:
-                    logger.error("NATS disconnected, stopping consumer loop.")
-                    break
-                logger.exception(f"Consumer error: {e}")
-                await asyncio.sleep(1)
+        # Delegate to the generic loop (retries enabled)
+        await self._consume_loop(
+            consumer=consumer,
+            subject=subject,
+            handler=handler,
+            retry_on_failure=True,
+            nak_delay=10,
+        )
 
     async def subscribe_commands(
         self,
         subject: str,
-        handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]],
+        handler: Callable[[dict[str, Any]], Awaitable[None]],
     ) -> None:
         """Subscribe to command messages (stop/abort)."""
         consumer = await self.js.pull_subscribe(
@@ -235,23 +270,16 @@ class NatsService:
             ),
         )
 
-        while True:
-            try:
-                messages = await consumer.fetch(batch=1, timeout=1)
-                for msg in messages:
-                    try:
-                        data = json.loads(msg.data.decode())
-                        await handler(data)
-                        await msg.ack()
-                    except Exception as e:
-                        logger.exception(f"Command handler failed: {e}")
-                        await msg.ack()  # Don't retry commands
-            except nats.errors.TimeoutError:
-                continue
-            except Exception:
-                if not self._nc or not self._nc.is_connected:
-                    break
-                await asyncio.sleep(1)
+        logger.info(f"Subscribed to '{subject}' for commands")
+
+        # Delegate to the generic loop (retries disabled for commands)
+        await self._consume_loop(
+            consumer=consumer,
+            subject=subject,
+            handler=handler,
+            retry_on_failure=False,
+            fetch_timeout=1,
+        )
 
 
 # Module-level singleton
