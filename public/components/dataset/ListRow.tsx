@@ -31,7 +31,7 @@ export function ListRow({ image, selected, onSelect, cls }: ListRowProps) {
       <Group gap="md" wrap="nowrap">
         {/* Thumbnail */}
         <Paper radius="xs" style={{ width: 80, height: 80, overflow: 'hidden', flexShrink: 0 }}>
-          <Image src={`/${image.path}`} alt={image.filename} fit="cover" w="100%" h="100%" />
+          <Image src={image.url} alt={image.filename} fit="cover" w="100%" h="100%" />
         </Paper>
 
         {/* Info */}

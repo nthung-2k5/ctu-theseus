@@ -38,7 +38,7 @@ export function GridCard({ image, selected, onSelect, cls }: GridCardProps) {
     >
       {/* Image area */}
       <Box pos="relative" style={{ aspectRatio: '4/3', overflow: 'hidden' }}>
-        <Image src={`/${image.path}`} alt={image.filename} fit="cover" w="100%" h="100%" display="block" />
+        <Image src={image.url} alt={image.filename} fit="cover" w="100%" h="100%" display="block" />
 
         {/* Hover darkening on the cell border, not the image */}
         {hovered && (

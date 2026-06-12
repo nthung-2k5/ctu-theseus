@@ -9,6 +9,9 @@ Start the worker:
     python -m ai_service.worker
 """
 
+from pydantic import ConfigDict, BaseModel
+from pydantic.alias_generators import to_camel
+from nats.aio.msg import Msg
 from ludwig.utils.types import DataFrame
 import asyncio
 import json
@@ -22,9 +25,19 @@ import pandas as pd
 from ludwig.api import LudwigModel
 from ludwig.callbacks import Callback
 
-from ai_service.dirs import DATASET_DIR, MODEL_DIR, UPLOAD_DIR
 from ai_service.models import get_model_config, get_model_meta, has_model
 from ai_service.nats_client import nats_service
+from ai_service.storage import (
+    BUCKET_EXPORTS,
+    BUCKET_MODELS,
+    cleanup_temp,
+    download_dataset,
+    download_model,
+    ensure_buckets,
+    upload_directory,
+    upload_file,
+    upload_model,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -244,15 +257,13 @@ async def handle_train(data: dict[str, Any]) -> None:
     })
 
     try:
-        # 1. Build dataset DataFrame
-        dataset_config = payload.get("dataset", {})
-        source_uri = dataset_config.get("source_uri", "")
-        dataset_name = source_uri.strip('/').split('/')[-1]
-        base_dataset_dir = os.path.join(DATASET_DIR, dataset_name)
-        dataset_df = _build_dataset_df(base_dataset_dir)
+        # 1. Download dataset from S3 to local temp dir
+        project_id = data.get("project_id", "")
+        local_dataset_dir = download_dataset(project_id, run_id)
+        dataset_df = _build_dataset_df(local_dataset_dir)
 
         if dataset_df.empty:
-            raise ValueError(f"No images found in dataset directory: {base_dataset_dir}")
+            raise ValueError(f"No images found in downloaded dataset for run {run_id}")
 
         # Extract class mapping from the dataset
         unique_classes = sorted(dataset_df['label'].unique().tolist())
@@ -270,8 +281,9 @@ async def handle_train(data: dict[str, Any]) -> None:
             callbacks=[progress_callback],
         )
 
-        # 4. Train the model (blocking — runs in the current thread)
-        model_save_dir = os.path.join(MODEL_DIR, run_id)
+        # 4. Train the model in a local temp dir
+        import tempfile
+        model_save_dir = os.path.join(tempfile.gettempdir(), "theseus", "training", run_id)
         os.makedirs(model_save_dir, exist_ok=True)
 
         # Run training in a thread to keep the event loop responsive
@@ -292,19 +304,25 @@ async def handle_train(data: dict[str, Any]) -> None:
         with open(map_path, 'w') as f:
             json.dump(class_mapping, f)
 
-        # 6. Publish completion result
+        # 6. Upload trained model to S3
+        upload_model(run_id, model_save_dir)
+
+        # 7. Publish completion result
         await nats_service.publish_result("train", run_id, {
             "id": run_id,
             "type": "train",
             "status": "completed",
             "result": {
-                "weights": output_directory,
-                "mapping": map_path,
+                "model_key": f"{run_id}/",
+                "mapping_key": f"{run_id}/class_mapping.json",
             },
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
 
         logger.info(f"Training completed for run {run_id}")
+
+        # 8. Clean up local temp files
+        cleanup_temp("datasets", run_id)
 
     except KeyboardInterrupt:
         logger.info(f"Training aborted for run {run_id}")
@@ -321,21 +339,26 @@ async def handle_train(data: dict[str, Any]) -> None:
         })
         raise  # Let NATS nak the message for retry
 
+class InferenceRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel)
 
-async def handle_inference(data: dict[str, Any]) -> None:
+    upload_key: str
+    upload_filename: str
+    threshold: float = 0.5
+
+
+async def handle_inference(msg: Msg) -> None:
     """Handle an inference task message."""
-    job_id = data["id"]
-    model_id = data["model_id"]
-    image_path = data["image_path"]
-    threshold = data.get("threshold", 0.5)
+    request = InferenceRequest.model_validate_json(msg.data.decode("utf-8"))
+    model_id = msg.subject.split(".")[-1]
 
-    logger.info(f"Starting inference job {job_id} for model {model_id}")
+    logger.info(f"Starting inference job for model {model_id}")
 
     try:
-        model_save_dir = os.path.join(MODEL_DIR, model_id)
+        # 1. Download model from S3 (cached locally)
+        model_save_dir = download_model(model_id)
         map_path = os.path.join(model_save_dir, "class_mapping.json")
 
-        # Load the class mapping JSON
         with open(map_path, 'r') as f:
             class_mapping = json.load(f)
 
@@ -349,10 +372,23 @@ async def handle_inference(data: dict[str, Any]) -> None:
         if ludwig_model_dir is None:
             ludwig_model_dir = model_save_dir
 
-        # Load and run inference in a thread
+        # 2. Download inference input image from NATS Object Store
+        upload_data = await nats_service.get_upload(request.upload_key)
+        if upload_data is None:
+            raise FileNotFoundError(f"Upload not found for key: {request.upload_key}")
+
+        import tempfile
+        local_image_dir = os.path.join(tempfile.gettempdir(), "theseus", "uploads", job_id)
+        os.makedirs(local_image_dir, exist_ok=True)
+        local_image_path = os.path.join(local_image_dir, request.upload_filename)
+
+        with open(local_image_path, "wb") as f:
+            f.write(upload_data)
+
+        # 3. Load and run inference in a thread
         def _run_inference():
             model = LudwigModel.load(ludwig_model_dir)
-            input_df = pd.DataFrame({'image_path': [image_path]})
+            input_df = pd.DataFrame({'image_path': [local_image_path]})
             predictions, _ = model.predict(dataset=input_df)
             return predictions
 
@@ -367,11 +403,11 @@ async def handle_inference(data: dict[str, Any]) -> None:
             if isinstance(probs, list):
                 idx_to_class = {v: k for k, v in class_mapping.items()}
                 for idx, prob in enumerate(probs):
-                    if prob >= threshold and idx in idx_to_class:
+                    if prob >= request.threshold and idx in idx_to_class:
                         results[idx_to_class[idx]] = round(float(prob), 4)
             elif isinstance(probs, dict):
                 for class_name, prob in probs.items():
-                    if prob >= threshold:
+                    if prob >= request.threshold:
                         results[class_name] = round(float(prob), 4)
 
         if not results and 'label_predictions' in predictions.columns:
@@ -382,30 +418,23 @@ async def handle_inference(data: dict[str, Any]) -> None:
         results = dict(sorted(results.items(), key=lambda item: item[1], reverse=True))
 
         # Publish result
-        await nats_service.publish_result("inference", job_id, {
-            "id": job_id,
-            "type": "inference",
+        await msg.respond(json.dumps({
             "status": "success",
-            "result": results,
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-        })
+            "results": results,
+        }).encode("utf-8"))
 
-        logger.info(f"Inference completed for job {job_id}")
+        logger.info(f"Inference completed for job {model_id}")
 
     except Exception as e:
-        logger.exception(f"Inference failed for job {job_id}")
-        await nats_service.publish_result("inference", job_id, {
-            "id": job_id,
-            "type": "inference",
+        logger.exception(f"Inference failed for job {model_id}")
+        await msg.respond(json.dumps({
             "status": "failed",
             "error": str(e),
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        }).encode("utf-8"))
         raise
     finally:
-        # Clean up uploaded image file
-        if os.path.exists(image_path):
-            os.remove(image_path)
+        # Clean up local temp files
+        cleanup_temp("uploads", model_id)
 
 
 async def handle_export(data: dict[str, Any]) -> None:
@@ -417,8 +446,8 @@ async def handle_export(data: dict[str, Any]) -> None:
     logger.info(f"Starting export job {job_id} for model {model_id} (format: {export_format})")
 
     try:
-        model_save_dir = os.path.join(MODEL_DIR, model_id)
-        export_path = os.path.join(MODEL_DIR, f"{model_id}.{export_format}")
+        # 1. Download model from S3 (cached locally)
+        model_save_dir = download_model(model_id)
 
         # Find the Ludwig model output directory
         ludwig_model_dir = None
@@ -429,6 +458,10 @@ async def handle_export(data: dict[str, Any]) -> None:
 
         if ludwig_model_dir is None:
             ludwig_model_dir = model_save_dir
+
+        import tempfile
+        export_path = os.path.join(tempfile.gettempdir(), "theseus", "exports", job_id, f"model.{export_format}")
+        os.makedirs(os.path.dirname(export_path), exist_ok=True)
 
         def _run_export():
             model = LudwigModel.load(ludwig_model_dir)
@@ -442,18 +475,25 @@ async def handle_export(data: dict[str, Any]) -> None:
 
         result_path = await asyncio.to_thread(_run_export)
 
+        # 2. Upload exported model to S3
+        export_s3_key = f"{model_id}/model.{export_format}"
+        upload_file(BUCKET_EXPORTS, export_s3_key, result_path)
+
         await nats_service.publish_result("export", job_id, {
             "id": job_id,
             "type": "export",
             "status": "success",
             "result": {
                 "format": export_format,
-                "path": result_path,
+                "export_key": export_s3_key,
             },
             "completed_at": datetime.now(timezone.utc).isoformat(),
         })
 
         logger.info(f"Export completed for job {job_id}")
+
+        # Clean up local temp
+        cleanup_temp("exports", job_id)
 
     except Exception as e:
         logger.exception(f"Export failed for job {job_id}")
@@ -475,13 +515,16 @@ async def main():
     """Start the NATS worker: connect, subscribe to all task subjects, and process."""
     await nats_service.connect()
 
+    # Ensure S3 buckets exist
+    ensure_buckets()
+
     logger.info("AI Worker started. Listening for tasks...")
 
     # Run task consumers and command consumer concurrently
     await asyncio.gather(
-        nats_service.subscribe_tasks("theseus.tasks.train.>", "train-worker", handle_train),
-        nats_service.subscribe_tasks("theseus.tasks.inference.>", "inference-worker", handle_inference),
-        nats_service.subscribe_tasks("theseus.tasks.export.>", "export-worker", handle_export),
+        nats_service.subscribe_tasks("theseus.tasks.train.*", "train-worker", handle_train),
+        nats_service.subscribe("theseus.inference.*", handle_inference),
+        nats_service.subscribe_tasks("theseus.tasks.export.*", "export-worker", handle_export),
         nats_service.subscribe_commands("theseus.commands.>", handle_command),
     )
 

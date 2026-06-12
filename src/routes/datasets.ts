@@ -1,5 +1,6 @@
 import { db } from '@server/db'
 import { datasetImages } from '@server/db/schema'
+import { BUCKET_DATASETS, deleteFile, downloadFile, fileExists, getDownloadUrl, uploadFile } from '@server/lib/storage'
 import { and, asc, desc, eq, ilike, inArray } from 'drizzle-orm'
 import { Elysia, status, t } from 'elysia'
 import { betterAuth } from './auth'
@@ -53,8 +54,16 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
         db.select().from(datasetImages).where(whereClause).orderBy(orderBy).limit(perPage).offset(offset),
       ])
 
+      // Generate presigned S3 URLs for each image
+      const imagesWithUrls = await Promise.all(
+        images.map(async (img) => ({
+          ...img,
+          url: await getDownloadUrl(BUCKET_DATASETS, img.path, 3600),
+        })),
+      )
+
       return {
-        images,
+        images: imagesWithUrls,
         total,
         page,
         perPage,
@@ -99,8 +108,6 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
   .post(
     '/projects/:projectId/images',
     async ({ params, body }) => {
-      const projectDir = `data/${params.projectId}/images`
-
       const images: [File, string | null][] = 'image' in body ? [[body.image, body.classId]] : body.images
 
       const result = await Promise.allSettled(
@@ -108,11 +115,12 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
           const originalName = img.name
           let finalName = originalName
 
-          // Check for existing file with the same name
-          const existingFile = Bun.file(`${projectDir}/${img.name}`)
-          if (await existingFile.exists()) {
+          // Check for existing file with the same name in S3
+          const s3Key = `images/${params.projectId}/${originalName}`
+          if (await fileExists(BUCKET_DATASETS, s3Key)) {
             // Compare content via hash
-            const existingHash = new Bun.CryptoHasher('md5').update(await existingFile.arrayBuffer()).digest('hex')
+            const existingBytes = await downloadFile(BUCKET_DATASETS, s3Key)
+            const existingHash = new Bun.CryptoHasher('md5').update(existingBytes).digest('hex')
             const newHash = new Bun.CryptoHasher('md5').update(await img.arrayBuffer()).digest('hex')
 
             if (existingHash === newHash) {
@@ -131,24 +139,25 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
             }
           }
 
-          const targetPath = `${projectDir}/${finalName}`
+          const targetKey = `images/${params.projectId}/${finalName}`
 
-          // Write file to disk
-          await Bun.write(targetPath, img)
+          // Upload to S3
+          const buffer = new Uint8Array(await img.arrayBuffer())
+          await uploadFile(BUCKET_DATASETS, targetKey, buffer, img.type)
 
           // Read image dimensions
           const imgObj = img.image()
           const width = imgObj.width
           const height = imgObj.height
 
-          // Insert into database
+          // Insert into database (path = S3 key)
           const [row] = await db
             .insert(datasetImages)
             .values({
               projectId: params.projectId,
               filename: finalName,
               classId: classId || null,
-              path: targetPath,
+              path: targetKey,
               width,
               height,
             })
@@ -273,10 +282,37 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
 
       await Promise.all([
         db.delete(datasetImages).where(eq(datasetImages.id, params.imageId)),
-        Bun.file(image.path).delete(),
+        deleteFile(BUCKET_DATASETS, image.path),
       ])
 
       return status(204)
+    },
+    {
+      auth: true,
+      params: t.Object({
+        imageId: t.String(),
+      }),
+    },
+  )
+  /* ── Get presigned URL for viewing an image ── */
+  .get(
+    '/images/:imageId/url',
+    async ({ params, user }) => {
+      const image = await db.query.datasetImages.findFirst({
+        where: { id: params.imageId },
+        with: {
+          projects: {
+            where: {
+              userId: user.id,
+            },
+          },
+        },
+      })
+
+      if (!image) throw new Error('Image not found')
+
+      const url = await getDownloadUrl(BUCKET_DATASETS, image.path, 3600)
+      return { url }
     },
     {
       auth: true,

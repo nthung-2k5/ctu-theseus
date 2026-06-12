@@ -1,10 +1,11 @@
 """
 NATS JetStream client for the AI worker service.
 
-Provides connection management, stream provisioning, and publish/subscribe
-helpers. Replaces Redis/Celery as the task queue and result transport.
+Provides connection management, stream provisioning, and publish/subscribe helpers.
 """
 
+from typing import Awaitable
+from nats.aio.msg import Msg
 import asyncio
 import json
 import logging
@@ -58,7 +59,6 @@ STREAMS: list[StreamConfig] = [
     ),
 ]
 
-
 class NatsService:
     """Manages the NATS connection and JetStream context for the AI worker."""
 
@@ -99,6 +99,14 @@ class NatsService:
                 await jsm.add_stream(stream_config)
                 logger.info(f"Stream '{stream_config.name}' created.")
 
+        # Provision Object Store for inference uploads
+        try:
+            await self._js.object_store("theseus-inferences")
+            logger.info("Object Store 'theseus-inferences' exists.")
+        except nats.js.errors.NotFoundError:
+            await self._js.create_object_store("theseus-inferences", description="Uploads for inference tasks")
+            logger.info("Object Store 'theseus-inferences' created.")
+
         logger.info("NATS JetStream connected and streams provisioned.")
 
     async def close(self) -> None:
@@ -106,6 +114,16 @@ class NatsService:
         if self._nc and self._nc.is_connected:
             await self._nc.drain()
             logger.info("NATS connection closed.")
+
+    # ──────────────────────────────────────────────────────────────
+    # Object Store
+    # ──────────────────────────────────────────────────────────────
+
+    async def get_upload(self, key: str) -> bytes | None:
+        """Download an uploaded image from NATS Object Store."""
+        os = await self.js.object_store("theseus-inferences")
+        obj = await os.get(key)
+        return obj.data
 
     # ──────────────────────────────────────────────────────────────
     # Publishing
@@ -128,6 +146,16 @@ class NatsService:
     # ──────────────────────────────────────────────────────────────
     # Subscribing (pull-based consumers)
     # ──────────────────────────────────────────────────────────────
+
+    # For Request - Reply
+    async def subscribe(
+        self,
+        subject: str,
+        handler: Callable[[Msg], Awaitable[None]],
+    ) -> None:
+        await self.nc.subscribe(subject, cb=handler)
+
+        logger.info(f"Subscribed to '{subject}' with request-reply")
 
     async def subscribe_tasks(
         self,
@@ -208,7 +236,6 @@ class NatsService:
                 if not self._nc or not self._nc.is_connected:
                     break
                 await asyncio.sleep(1)
-
 
 # Module-level singleton
 nats_service = NatsService()

@@ -8,7 +8,6 @@
  * - Results and progress are consumed via NATS durable subscribers
  */
 
-import fs from 'node:fs/promises'
 import { db } from '@server/db'
 import { trainingMetrics, trainingRuns } from '@server/db/schema'
 import { eq } from 'drizzle-orm'
@@ -16,13 +15,13 @@ import { t } from 'elysia'
 import {
   publishAbortCommand,
   publishExportTask,
-  publishInferenceTask,
   publishTrainTask,
   subscribe,
 } from './nats'
+import { BUCKET_DATASETS, downloadFile, uploadFile } from './storage'
 
 /* ------------------------------------------------------------------ */
-/*  Model Registry                                                     */
+/*  Model Registry                                                    */
 /* ------------------------------------------------------------------ */
 
 export interface ModelVariant {
@@ -116,7 +115,6 @@ await refreshModelRegistry()
 export interface TrainPayload {
   id: string
   dataset: {
-    source_uri: string
     num_classes: number
     batch_size?: number
     num_workers?: number
@@ -137,10 +135,10 @@ export interface TrainPayload {
 }
 
 /**
- * Queue a training job: copy dataset images to ai_mount, then publish task to NATS.
+ * Queue a training job: upload dataset images to S3, then publish task to NATS.
  */
 export async function queueTraining(projectId: string, payload: TrainPayload) {
-  // Prepare the dataset images
+  // Query dataset images from DB
   const datasetImages = await db.query.datasetImages.findMany({
     where: { projectId, split: { isNotNull: true }, classId: { isNotNull: true } },
     with: {
@@ -152,22 +150,16 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
     },
   })
 
-  const versionDatasetDir = `./ai_mount/datasets/${payload.id}`
-
-  await Promise.all([
-    fs.mkdir(`${versionDatasetDir}/train`, { recursive: true }),
-    fs.mkdir(`${versionDatasetDir}/validation`, { recursive: true }),
-  ])
-
+  // Copy each image in S3 under the training prefix: {runId}/{split}/{className}/{filename}
   await Promise.all(
     datasetImages
-      .filter((datasetImage) => datasetImage.split === 'train' || datasetImage.split === 'validation')
-      .map((datasetImage) =>
-        Bun.write(
-          `${versionDatasetDir}/${datasetImage.split}/${datasetImage.datasetClasses!.name}/${datasetImage.filename}`,
-          Bun.file(datasetImage.path),
-        ),
-      ),
+      .filter((img) => img.split === 'train' || img.split === 'validation')
+      .map(async (img) => {
+        const destKey = `${payload.id}/${img.split}/${img.filename}`
+        // Download from the original upload key and re-upload under training prefix
+        const data = await downloadFile(BUCKET_DATASETS, img.path)
+        await uploadFile(BUCKET_DATASETS, destKey, data)
+      }),
   )
 
   // Publish training task to NATS
@@ -180,7 +172,7 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
       created_at: new Date().toISOString(),
     })
 
-    // Update status to queued (NATS message ID is the run ID itself)
+    // Update status to queued
     await db
       .update(trainingRuns)
       .set({ taskId: payload.id, status: 'queued' })
@@ -201,32 +193,6 @@ export async function queueTraining(projectId: string, payload: TrainPayload) {
 export async function stopTraining(runId: string): Promise<{ run_id: string; status: string }> {
   await publishAbortCommand(runId)
   return { run_id: runId, status: 'abort_requested' }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Inference                                                          */
-/* ------------------------------------------------------------------ */
-
-export interface InferencePayload {
-  id: string
-  model_id: string
-  image_path: string
-  threshold: number
-}
-
-/**
- * Dispatch an inference job via NATS.
- */
-export async function dispatchInference(projectId: string, payload: InferencePayload): Promise<void> {
-  await publishInferenceTask(projectId, {
-    id: payload.id,
-    type: 'inference',
-    project_id: projectId,
-    model_id: payload.model_id,
-    image_path: payload.image_path,
-    threshold: payload.threshold,
-    created_at: new Date().toISOString(),
-  })
 }
 
 /* ------------------------------------------------------------------ */
@@ -335,7 +301,7 @@ export async function startNatsConsumers(): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  TypeBox schemas (for Elysia route validation)                      */
+/*  TypeBox schemas (for Elysia route validation)                     */
 /* ------------------------------------------------------------------ */
 
 export const DatasetConfigSchema = t.Object({
