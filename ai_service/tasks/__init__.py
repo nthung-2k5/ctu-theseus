@@ -3,11 +3,13 @@
 import asyncio
 import logging
 
+from ai_service.models import list_models
 from ai_service.services.nats import nats_service
 from ai_service.services.storage import ensure_buckets
-from ai_service.tasks.export import handle_export
-from ai_service.tasks.inference import handle_inference
-from ai_service.tasks.train import handle_command, handle_train
+
+from .export import handle_export
+from .inference import handle_inference
+from .train import handle_command, handle_train
 
 __all__ = ["run_task_workers"]
 
@@ -29,6 +31,10 @@ async def run_task_workers():
             "theseus.tasks.train.*", "train-worker", handle_train
         ),
         nats_service.subscribe("theseus.inference.*", handle_inference),
+        nats_service.subscribe(
+            "theseus.models",
+            lambda msg: nats_service.publish("theseus.models.response", list_models()),
+        ),
         nats_service.subscribe_tasks(
             "theseus.tasks.export.*", "export-worker", handle_export
         ),

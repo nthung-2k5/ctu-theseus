@@ -9,7 +9,7 @@ nats-py>=2.15.0
 # S3-compatible storage (RustFS)
 boto3>=1.43.28
 
-# Deep learning (Ludwig handles torch, torchvision, timm internally)
+# Deep learning
 ludwig>=0.17.5
 pandas>=3.0.3
 

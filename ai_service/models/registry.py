@@ -11,41 +11,100 @@ Usage:
     # Returns: {"type": "timm", "model_name": "resnet18", "pretrained": True}
 """
 
+import copy
+from dataclasses import dataclass
 from typing import Any
 
 # ──────────────────────────────────────────────────────────────────
 # Registry data structure
 # ──────────────────────────────────────────────────────────────────
 
-_MODEL_REGISTRY: dict[str, dict[str, Any]] = {}
+@dataclass
+class ModelVariant:
+    variant_id: str
+    display_name: str
+    config: dict[str, Any]
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ModelVariant):
+            return self.variant_id == other.variant_id
+        elif isinstance(other, str):
+            return self.variant_id == other
+        else:
+            return NotImplemented
+
+@dataclass
+class ModelFamily:
+    family_id: str
+    display_name: str
+    variants: list[ModelVariant]
 
 
-def register_model(
-    variant_id: str,
+_MODEL_FAMILY: dict[str, ModelFamily] = {}
+_MODEL_REGISTRY: dict[str, ModelVariant] = {}
+
+def register_image_model_family_with_variants(
+    family_id: str,
     *,
-    family: str,
-    display_name: str,
-    description: str = "",
-    timm_name: str,
+    family_display_name: str,
+    variant_key: str,
+    variants: list[tuple[str, str]],
 ):
     """
-    Register a model variant in the global registry.
+    Register an image model family in the global registry.
 
     Args:
-        variant_id: Unique identifier for the variant (e.g., "resnet50").
-        family: The model family name (e.g., "resnet").
-        display_name: Human-readable name (e.g., "ResNet-50").
-        description: Optional description of the variant.
-        timm_name: The timm model name used by Ludwig's timm encoder.
+        family_id: Unique identifier for the family (e.g., "resnet").
+        family_display_name: Human-readable name (e.g., "ResNet").
+        variant_key: Key for the variant in the Ludwig encoder configuration.
+        variants: List of model variants, each with a unique identifier and display name.
     """
-    if variant_id in _MODEL_REGISTRY:
-        raise ValueError(f"Model variant '{variant_id}' is already registered.")
-    _MODEL_REGISTRY[variant_id] = {
-        "family": family,
-        "display_name": display_name,
-        "description": description,
-        "timm_name": timm_name,
-    }
+
+    if family_id in _MODEL_REGISTRY:
+        raise ValueError(f"Model family '{family_id}' already registered.")
+
+    _MODEL_FAMILY[family_id] = ModelFamily(
+        family_id=family_id,
+        display_name=family_display_name,
+        variants=list(
+            map(
+                lambda x: ModelVariant(
+                    variant_id=x[0],
+                    display_name=x[1],
+                    config={
+                        "type": family_id,
+                        variant_key: x[0],
+                    },
+                ),
+                variants,
+            )
+        ),
+    )
+
+    for variant in _MODEL_FAMILY[family_id].variants:
+        _MODEL_REGISTRY[variant.variant_id] = variant
+
+def register_pytorch_image_model_family(
+    family_id: str,
+    *,
+    family_display_name: str,
+    variants: list[tuple[str, str]],
+):
+    """
+    Register a PyTorch image model family in the global registry.
+
+    Args:
+        family_id: Unique identifier for the family (e.g., "resnet").
+        family_display_name: Human-readable name (e.g., "ResNet").
+        variants: List of model variants, each with a unique identifier and display name.
+    """
+
+    register_image_model_family_with_variants(
+        family_id=family_id,
+        family_display_name=family_display_name,
+        variant_key="model_variant",
+        variants=variants,
+    )
 
 
 def get_model_config(variant_id: str) -> dict[str, Any]:
@@ -56,13 +115,10 @@ def get_model_config(variant_id: str) -> dict[str, Any]:
             f"Available: {list(_MODEL_REGISTRY.keys())}"
         )
     meta = _MODEL_REGISTRY[variant_id]
-    return {
-        "type": "timm",
-        "model_name": meta["timm_name"],
-    }
+    return copy.deepcopy(meta.config)
 
 
-def get_model_meta(variant_id: str) -> dict[str, Any]:
+def get_model_meta(variant_id: str):
     """Retrieve the full metadata for a model variant."""
     if variant_id not in _MODEL_REGISTRY:
         raise KeyError(
@@ -77,21 +133,17 @@ def has_model(variant_id: str) -> bool:
     return variant_id in _MODEL_REGISTRY
 
 
-def list_models() -> list[dict[str, Any]]:
+def list_models() -> dict[str, list[tuple[str, str]]]:
     """Return a list of all registered model variants grouped by family."""
-    families: dict[str, list[dict]] = {}
-    for vid, meta in _MODEL_REGISTRY.items():
-        fam = meta["family"]
-        if fam not in families:
-            families[fam] = []
-        families[fam].append(
-            {
-                "id": vid,
-                "display_name": meta["display_name"],
-                "description": meta["description"],
-            }
+    families: dict[str, list[tuple[str, str]]] = {}
+    for family in _MODEL_FAMILY.values():
+        families[family.display_name] = list(
+            map(
+                lambda x: (
+                    x.variant_id,
+                    x.display_name,
+                ),
+                family.variants,
+            )
         )
-    return [
-        {"family": fam, "variants": variants}
-        for fam, variants in families.items()
-    ]
+    return families
