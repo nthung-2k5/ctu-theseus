@@ -1,8 +1,5 @@
 """
-Model variant registrations for Ludwig (using timm encoders).
-
-Each call to register_model() adds a variant to the global registry.
-The model_name maps directly to Ludwig's timm encoder model_name parameter.
+Model variant registrations for Ludwig.
 """
 
 from ai_service.models.registry import (
