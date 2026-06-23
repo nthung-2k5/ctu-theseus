@@ -1,3 +1,4 @@
+import { AnnotationTypes, AudioCodecs, DatasetModalities, ImageFormats, ProjectTasks, SplitTypes, TrainingStatuses } from '@server/lib/enums'
 import { sql } from 'drizzle-orm'
 import {
   boolean,
@@ -101,34 +102,7 @@ export const verifications = pgTable(
 /* ------------------------------------------------------------------ */
 /*  Projects                                                          */
 /* ------------------------------------------------------------------ */
-export const projectTaskEnum = pgEnum('project_task', [
-  // Text modality
-  'text_classification',
-  'token_classification',
-  'text_generation',
-  'question_answering',
-  'summarization',
-  'sequence_to_sequence', // a.k.a. translation
-  'text_embedding',
-
-  // Vision modality
-  'image_classification',
-  'object_detection',
-  'image_segmentation',
-  'image_captioning',
-
-  // Audio modality
-  'audio_classification',
-  'automatic_speech_recognition',
-  'audio_segmentation',
-  'audio_captioning',
-
-  // Tabular modality
-  'tabular_regression',
-  'tabular_classification',
-  'tabular_clustering',
-  'tabular_anomaly_detection',
-])
+export const projectTaskEnum = pgEnum('project_task', ProjectTasks)
 
 export const projects = pgTable(
   'projects',
@@ -151,18 +125,11 @@ export const projects = pgTable(
 /* ------------------------------------------------------------------ */
 /*  Dataset                                                           */
 /* ------------------------------------------------------------------ */
-export const modalityEnum = pgEnum('modality', ['text', 'vision', 'audio', 'tabular'])
-export const splitTypeEnum = pgEnum('split_type', ['train', 'validation', 'test'])
-export const imageFormatEnum = pgEnum('image_format', ['jpeg', 'png'])
-export const audioCodecEnum = pgEnum('audio_codec', ['wav', 'mp3', 'flac', 'ogg'])
-export const annotationTypeEnum = pgEnum('annotation_type', [
-  'classification',
-  'bounding_box',
-  'segmentation_mask',
-  'text_sequence',
-  'token_tags',
-  'preference_rank',
-])
+export const modalityEnum = pgEnum('modality', DatasetModalities)
+export const splitTypeEnum = pgEnum('split_type', SplitTypes)
+export const imageFormatEnum = pgEnum('image_format', ImageFormats)
+export const audioCodecEnum = pgEnum('audio_codec', AudioCodecs)
+export const annotationTypeEnum = pgEnum('annotation_type', AnnotationTypes)
 
 // --- 1. DATASET REGISTRY ---
 
@@ -406,7 +373,7 @@ export const annotations = pgTable(
 // queued: queued for training, waiting for free GPU
 // training: training
 // completed: training completed (stopped = completed + completedAt is null, failed = completed + failedMessage is not null)
-export const trainingStatusEnum = pgEnum('training_status', ['queued', 'training', 'completed'])
+export const trainingStatusEnum = pgEnum('training_status', TrainingStatuses)
 
 /* ------------------------------------------------------------------ */
 /*  Training Runs                                                     */
