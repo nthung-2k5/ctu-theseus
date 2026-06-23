@@ -1,11 +1,14 @@
 import { db } from '@server/db'
-import { datasetClasses, datasetImages, projects, trainingRuns } from '@server/db/schema'
+import { datasetSplits, datasets, datasetVersions, projects, trainingRuns } from '@server/db/schema'
+import { ProjectTasks } from '@server/lib/enums'
+import { taskToModality } from '@server/lib/helpers'
 import { and, eq } from 'drizzle-orm'
 import { Elysia, NotFoundError, status, t } from 'elysia'
 import { betterAuth } from './auth'
 
 export const projectRoutes = new Elysia({ prefix: '/api/projects' })
   .use(betterAuth)
+  /* ── List all projects for the authenticated user ── */
   .get(
     '/',
     async ({ user }) => {
@@ -20,7 +23,13 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
           id: true,
           name: true,
           description: true,
+          task: true,
           createdAt: true,
+        },
+        with: {
+          draftDataset: {
+            columns: { modality: true },
+          },
         },
       })
 
@@ -28,41 +37,70 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
     },
     { auth: true },
   )
+  /* ── Get single project with aggregated counts ── */
   .get(
     '/:projectId',
     async ({ project }) => {
-      const imageCount = await db.$count(datasetImages, eq(datasetImages.projectId, project.id))
-      const classCount = await db.$count(datasetClasses, eq(datasetClasses.projectId, project.id))
-      const versionCount = await db.$count(trainingRuns, eq(trainingRuns.projectId, project.id))
+      const [versionCount, runCount] = await Promise.all([
+        db.$count(datasetVersions, eq(datasetVersions.datasetId, project.id)),
+        db.$count(trainingRuns, eq(trainingRuns.projectId, project.id)),
+      ])
 
-      return { project: { ...project, imageCount, classCount, versionCount } }
+      return { project: { ...project, runCount, versionCount } }
     },
     {
       projectBelongToUser: true,
     },
   )
+  /* ── Create a new project (also creates the 1:1 dataset + draft version + 3 splits) ── */
   .post(
     '/',
     async ({ body, user }) => {
+      // Derive modality from task
+      const modality = taskToModality(body.task)
+
+      // Create the project
       const [project] = await db
         .insert(projects)
         .values({
-          name: body.name,
-          description: body.description,
+          ...body,
           userId: user.id,
         })
         .returning()
+
+      // Create the 1:1 dataset (PK = project.id)
+      await db.insert(datasets).values({
+        projectId: project.id,
+        modality,
+      })
+
+      // Create the draft version (versionTag = null)
+      const [draftVersion] = await db
+        .insert(datasetVersions)
+        .values({
+          datasetId: project.id, // datasetId references datasets.projectId
+        })
+        .returning()
+
+      // Create train/validation/test splits for the draft
+      await db.insert(datasetSplits).values([
+        { datasetVersionId: draftVersion.id, splitType: 'train' },
+        { datasetVersionId: draftVersion.id, splitType: 'validation' },
+        { datasetVersionId: draftVersion.id, splitType: 'test' },
+      ])
 
       return { project }
     },
     {
       body: t.Object({
-        name: t.String({ minLength: 1 }),
+        name: t.String(),
         description: t.Nullable(t.String()),
+        task: t.UnionEnum(ProjectTasks),
       }),
       auth: true,
     },
   )
+  /* ── Update project ── */
   .patch(
     '/:projectId',
     async ({ project, body }) => {
@@ -72,11 +110,12 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
     {
       projectBelongToUser: true,
       body: t.Object({
-        name: t.Optional(t.String({ minLength: 1 })),
+        name: t.Optional(t.String()),
         description: t.MaybeEmpty(t.String()),
       }),
     },
   )
+  /* ── Delete project (cascades to dataset, versions, items, runs, etc.) ── */
   .delete(
     '/:projectId',
     async ({ params, user }) => {
