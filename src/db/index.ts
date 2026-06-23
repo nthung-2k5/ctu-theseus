@@ -1,6 +1,6 @@
 import { SQL } from 'bun'
 import { drizzle } from 'drizzle-orm/bun-sql'
-import { relations } from './relations'
+import relations from './relations'
 
 const DATABASE_URL = process.env.DATABASE_URL ?? 'postgres://theseus:theseus@localhost:5432/theseus'
 
