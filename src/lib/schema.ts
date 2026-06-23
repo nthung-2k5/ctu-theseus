@@ -104,10 +104,7 @@ import { t } from 'elysia'
 export const TrainingSchema = t.Object(
   {
     runId: t.String({ format: 'uuid', description: 'The run ID' }),
-    dataset: t.Object({
-      projectId: t.String({ format: 'uuid', description: 'The project ID' }),
-      versionId: t.String({ format: 'uuid', description: 'The dataset version ID' }),
-    }),
+    datasetVersionId: t.String({ format: 'uuid', description: 'The dataset version ID' }),
   },
   { title: 'LudwigTrainingConfiguration' },
 )
