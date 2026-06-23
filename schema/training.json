@@ -1,0 +1,34 @@
+{
+  "title": "LudwigTrainingConfiguration",
+  "type": "object",
+  "required": [
+    "runId",
+    "dataset"
+  ],
+  "properties": {
+    "runId": {
+      "format": "uuid",
+      "description": "The run ID",
+      "type": "string"
+    },
+    "dataset": {
+      "type": "object",
+      "required": [
+        "projectId",
+        "versionId"
+      ],
+      "properties": {
+        "projectId": {
+          "format": "uuid",
+          "description": "The project ID",
+          "type": "string"
+        },
+        "versionId": {
+          "format": "uuid",
+          "description": "The dataset version ID",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

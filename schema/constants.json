@@ -1,0 +1,12 @@
+{
+  "DATASET": {
+    "IMAGE_PATH_COLUMN_NAME": "image_path",
+    "CLASS_COLUMN_NAME": "class"
+  },
+  "SPLIT_COLUMN_NAME": "split",
+  "BUCKET_DATASETS": "theseus-datasets",
+  "BUCKET_TRAINING": "theseus-training",
+  "BUCKET_MODELS": "theseus-models",
+  "TRAINING_CONFIG_FILENAME": "training_config.yaml",
+  "DATASET_VERSION_FILENAME": "dataset.parquet"
+}
