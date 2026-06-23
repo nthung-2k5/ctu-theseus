@@ -24,7 +24,7 @@ export const betterAuth = new Elysia({ name: 'better-auth' })
     async resolve({ status, params, user }) {
       const project = await db.query.projects.findFirst({
         where: {
-          id: params.projectId
+          id: params.projectId,
         },
       })
       if (!project) return status(404, 'Project not found')
