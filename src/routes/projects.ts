@@ -93,7 +93,7 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
     },
     {
       body: t.Object({
-        name: t.String(),
+        name: t.String({ minLength: 1 }),
         description: t.Nullable(t.String()),
         task: t.UnionEnum(ProjectTasks),
       }),
@@ -110,7 +110,7 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
     {
       projectBelongToUser: true,
       body: t.Object({
-        name: t.Optional(t.String()),
+        name: t.Optional(t.String({ minLength: 1 })),
         description: t.MaybeEmpty(t.String()),
       }),
     },
