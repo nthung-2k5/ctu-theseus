@@ -1,0 +1,30 @@
+[project]
+name = "ai-service"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  # Schema generation
+  'pydantic',
+
+  # Health endpoint
+  'aiohttp',
+
+  # NATS messaging
+  'nats-py',
+
+  # S3-compatible storage
+  'boto3',
+  's3fs',
+
+  # Deep learning
+  'ludwig',
+  'pandas'
+]
+
+[dependency-groups]
+dev = [
+    "datamodel-code-generator>=0.64.0",
+    "types-boto3[essential]"
+]
