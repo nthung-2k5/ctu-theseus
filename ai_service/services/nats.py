@@ -9,7 +9,8 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Type
+from uuid import UUID
 
 import nats
 import nats.errors
@@ -23,6 +24,9 @@ from nats.js.api import (
     RetentionPolicy,
     StreamConfig,
 )
+from pydantic import BaseModel
+
+from ai_service.schema.training_status import TrainingProgress, TrainingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -149,15 +153,17 @@ class NatsService:
         ack = await self.js.publish(subject, payload)
         logger.debug(f"Published to {subject} (stream={ack.stream}, seq={ack.seq})")
 
-    async def publish_result(
-        self, task_type: str, task_id: str, data: dict[str, Any]
+    async def publish_status(
+        self, task_type: str, task_id: UUID, status: TrainingStatus
     ) -> None:
-        """Publish a result message."""
-        await self.publish(f"theseus.results.{task_type}.{task_id}", data)
+        """Publish a status message."""
+        await self.publish(
+            f"theseus.results.{task_type}.{task_id}", status.model_dump()
+        )
 
-    async def publish_progress(self, run_id: str, data: dict[str, Any]) -> None:
+    async def publish_progress(self, run_id: UUID, progress: TrainingProgress) -> None:
         """Publish a training progress message."""
-        await self.publish(f"theseus.progress.train.{run_id}", data)
+        await self.publish(f"theseus.progress.train.{run_id}", progress.model_dump())
 
     # ──────────────────────────────────────────────────────────────
     # Subscribing (pull-based consumers)
@@ -173,11 +179,12 @@ class NatsService:
         await self.nc.subscribe(subject, cb=handler)
         logger.info(f"Subscribed to '{subject}' with request-reply")
 
-    async def _consume_loop(
+    async def _consume_loop[T: BaseModel](
         self,
         consumer: JetStreamContext.PullSubscription,
         subject: str,
-        handler: Callable[[dict[str, Any]], Awaitable[None]],
+        handler: Callable[[T], Awaitable[None]],
+        message_type: Type[T],
         retry_on_failure: bool = True,
         nak_delay: int = 10,
         fetch_timeout: int = 5,
@@ -190,7 +197,7 @@ class NatsService:
                 messages = await consumer.fetch(batch=1, timeout=fetch_timeout)
                 for msg in messages:
                     try:
-                        data = json.loads(msg.data.decode())
+                        data = message_type.model_validate_json(msg.data.decode())
                         await handler(data)
                         await msg.ack()
                     except json.JSONDecodeError as e:
@@ -221,11 +228,12 @@ class NatsService:
                 logger.exception(f"Consumer polling error on '{subject}': {e}")
                 await asyncio.sleep(1)
 
-    async def subscribe_tasks(
+    async def subscribe_tasks[T: BaseModel](
         self,
         subject: str,
         durable_name: str,
-        handler: Callable[[dict[str, Any]], Awaitable[None]],
+        handler: Callable[[T], Awaitable[None]],
+        message_type: Type[T],
     ) -> None:
         """
         Subscribe to task messages using a pull-based consumer.
@@ -250,14 +258,16 @@ class NatsService:
             consumer=consumer,
             subject=subject,
             handler=handler,
+            message_type=message_type,
             retry_on_failure=True,
             nak_delay=10,
         )
 
-    async def subscribe_commands(
+    async def subscribe_commands[T: BaseModel](
         self,
         subject: str,
-        handler: Callable[[dict[str, Any]], Awaitable[None]],
+        handler: Callable[[T], Awaitable[None]],
+        message_type: Type[T],
     ) -> None:
         """Subscribe to command messages (stop/abort)."""
         consumer = await self.js.pull_subscribe(
@@ -277,6 +287,7 @@ class NatsService:
             consumer=consumer,
             subject=subject,
             handler=handler,
+            message_type=message_type,
             retry_on_failure=False,
             fetch_timeout=1,
         )

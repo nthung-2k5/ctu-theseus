@@ -1,5 +1,6 @@
 """Task workers entry point"""
 
+from ai_service.schema.training import LudwigTrainingConfiguration
 import asyncio
 import logging
 
@@ -28,7 +29,7 @@ async def run_task_workers():
     # Run task consumers and command consumer concurrently
     await asyncio.gather(
         nats_service.subscribe_tasks(
-            "theseus.tasks.train.*", "train-worker", handle_train
+            "theseus.tasks.train.*", "train-worker", handle_train, LudwigTrainingConfiguration
         ),
         nats_service.subscribe("theseus.inference.*", handle_inference),
         nats_service.subscribe(

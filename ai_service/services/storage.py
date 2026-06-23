@@ -7,22 +7,24 @@ Handles downloading datasets before training and uploading model artifacts after
 
 import logging
 import os
-import shutil
 from pathlib import Path
+from uuid import UUID
 
 import boto3
-from botocore.config import Config as BotoConfig
+
+from ai_service.constants import (
+    BUCKET_DATASETS,
+    BUCKET_MODELS,
+    BUCKET_TRAINING,
+    DATASET_VERSION_FILENAME,
+    TRAINING_CONFIG_FILENAME,
+)
 
 logger = logging.getLogger(__name__)
 
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://localhost:9000")
 S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "theseus")
 S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "theseus-secret")
-
-# Bucket names
-BUCKET_DATASETS = "theseus-datasets"
-BUCKET_MODELS = "theseus-models"
-BUCKET_EXPORTS = "theseus-exports"
 
 # Local temp directories for in-flight data
 TEMP_DIR = Path(os.environ.get("TEMP_DIR", "/tmp/theseus"))
@@ -32,14 +34,13 @@ s3 = boto3.client(
     endpoint_url=S3_ENDPOINT,
     aws_access_key_id=S3_ACCESS_KEY,
     aws_secret_access_key=S3_SECRET_KEY,
-    config=BotoConfig(signature_version="s3v4"),
     region_name="us-east-1",
 )
 
 
 def ensure_buckets():
     """Create required buckets if they don't exist (idempotent)."""
-    for bucket in [BUCKET_DATASETS, BUCKET_MODELS, BUCKET_EXPORTS]:
+    for bucket in [BUCKET_DATASETS, BUCKET_TRAINING, BUCKET_MODELS]:
         try:
             s3.head_bucket(Bucket=bucket)
             logger.debug(f"Bucket '{bucket}' exists.")
@@ -130,54 +131,36 @@ def file_exists(bucket: str, key: str) -> bool:
         return False
 
 
+def s3fs_readable_path(bucket: str, key: str) -> str:
+    """Return a path that can be opened with s3fs."""
+    return f"s3://{bucket}/{key}"
+
+
 # ──────────────────────────────────────────────────────────────────
 # High-level helpers for common operations
 # ──────────────────────────────────────────────────────────────────
 
 
-def download_dataset(project_id: str, run_id: str) -> str:
-    """
-    Download a training dataset from S3 to a local temp directory.
-    Returns the local directory path.
-    """
-    local_dir = str(TEMP_DIR / "datasets" / run_id)
-    if os.path.exists(local_dir):
-        shutil.rmtree(local_dir)
-    os.makedirs(local_dir, exist_ok=True)
+def get_training_run_config_path(run_id: UUID) -> str | None:
+    """Get the training run config path in the training bucket."""
+    path = f"{run_id}/{TRAINING_CONFIG_FILENAME}"
 
-    prefix = f"{project_id}/{run_id}/"
-    download_prefix(BUCKET_DATASETS, prefix, local_dir)
-    return local_dir
+    if not file_exists(BUCKET_TRAINING, path):
+        return None
+
+    return s3fs_readable_path(BUCKET_TRAINING, path)
 
 
-def upload_model(run_id: str, local_model_dir: str):
-    """Upload trained model artifacts to S3."""
-    prefix = f"{run_id}/"
-    upload_directory(BUCKET_MODELS, prefix, local_model_dir)
+def get_training_output_path(run_id: UUID) -> str:
+    """Return the training run output path in the models bucket."""
+    return s3fs_readable_path(BUCKET_MODELS, f"{run_id}/")
 
 
-def download_model(run_id: str) -> str:
-    """
-    Download a trained model from S3 to a local temp directory.
-    Returns the local directory path. Uses cache if available.
-    """
-    local_dir = str(TEMP_DIR / "models" / run_id)
-    if os.path.exists(local_dir):
-        # Model already cached locally
-        return local_dir
+def get_training_dataset_path(version_id: UUID) -> str | None:
+    """Return the dataset path in the datasets bucket."""
+    path = f"snapshots/{version_id}/{DATASET_VERSION_FILENAME}"
 
-    os.makedirs(local_dir, exist_ok=True)
-    prefix = f"{run_id}/"
-    count = download_prefix(BUCKET_MODELS, prefix, local_dir)
-    if count == 0:
-        raise FileNotFoundError(
-            f"No model artifacts found in s3://{BUCKET_MODELS}/{prefix}"
-        )
-    return local_dir
+    if not file_exists(BUCKET_DATASETS, path):
+        return None
 
-
-def cleanup_temp(subdir: str, item_id: str):
-    """Remove a temp directory for a specific item."""
-    target = Path(TEMP_DIR / subdir / item_id)
-    if target.exists():
-        target.rmdir()
+    return s3fs_readable_path(BUCKET_DATASETS, path)
