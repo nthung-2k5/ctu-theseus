@@ -1,8 +1,8 @@
 [project]
-name = "ai-service"
+name = "ctu-theseus-ai"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
+readme = "ai_service/README.md"
 requires-python = ">=3.12"
 dependencies = [
   # Schema generation
@@ -20,11 +20,12 @@ dependencies = [
 
   # Deep learning
   'ludwig',
-  'pandas'
+  'pandas',
+
+  # Telemetry
+  "opentelemetry-sdk>=1.44.0",
+  "opentelemetry-exporter-otlp-proto-http>=1.44.0",
 ]
 
 [dependency-groups]
-dev = [
-    "datamodel-code-generator>=0.64.0",
-    "types-boto3[essential]"
-]
+dev = ["datamodel-code-generator>=0.72.3", "types-boto3[essential]"]
