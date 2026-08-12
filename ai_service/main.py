@@ -1,13 +1,10 @@
-"""
-Theseus AI Microservice -- Main entry point.
-"""
-
 import asyncio
 import logging
 
 from aiohttp import web
 
 from ai_service.tasks import close_task_workers, run_task_workers
+from ai_service.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +42,8 @@ async def task_worker_context(_app):
 
 
 def main():
+    init_telemetry()
+
     # Set up the aiohttp app
     app = web.Application()
     app.router.add_get("/health", healthcheck)
