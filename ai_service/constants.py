@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-with open(Path(__file__).parent.parent / "schema" / "constants.json", "r", encoding="utf-8") as file:
+with open(
+    Path(__file__).parent.parent / "schema" / "constants.json", "r", encoding="utf-8"
+) as file:
     CONSTANTS = json.loads(file.read(), object_hook=lambda d: SimpleNamespace(**d))
 
 # Bucket names
