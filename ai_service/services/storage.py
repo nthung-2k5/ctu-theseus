@@ -1,33 +1,19 @@
-"""
-S3-compatible storage client for the AI worker.
-
-Uses boto3 to communicate with RustFS (or any S3-compatible server).
-Handles downloading datasets before training and uploading model artifacts after.
-"""
-
 import logging
 import os
-from pathlib import Path
+import shutil
 from uuid import UUID
 
 import boto3
+from types_boto3_s3.type_defs import ObjectIdentifierTypeDef
 
-from ai_service.constants import (
-    BUCKET_DATASETS,
-    BUCKET_MODELS,
-    BUCKET_TRAINING,
-    DATASET_VERSION_FILENAME,
-    TRAINING_CONFIG_FILENAME,
-)
+from ai_service.config import S3_ACCESS_KEY, S3_ENDPOINT, S3_SECRET_KEY, TEMP_DIR
+from ai_service.constants import BUCKET_DATASETS, BUCKET_MODELS, BUCKET_TRAINING
 
 logger = logging.getLogger(__name__)
 
-S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://localhost:9000")
-S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY", "theseus")
-S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY", "theseus-secret")
-
-# Local temp directories for in-flight data
-TEMP_DIR = Path(os.environ.get("TEMP_DIR", "/tmp/theseus"))
+# Exported model artifacts (onnx/torchscript) are stored alongside trained
+# models. Revisited in the S3 layout rework (models bucket becomes export-only).
+BUCKET_EXPORTS = BUCKET_MODELS
 
 s3 = boto3.client(
     "s3",
@@ -61,7 +47,7 @@ def download_prefix(bucket: str, prefix: str, local_dir: str) -> int:
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
-            key = obj["Key"]
+            key = obj.get("Key") or ""
             # Compute relative path from prefix
             rel_path = key[len(prefix) :].lstrip("/")
             if not rel_path:
@@ -112,7 +98,9 @@ def delete_prefix(bucket: str, prefix: str):
     """Delete all objects under a prefix."""
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+        objects: list[ObjectIdentifierTypeDef] = [
+            {"Key": obj.get("Key") or ""} for obj in page.get("Contents", [])
+        ]
         if objects:
             s3.delete_objects(Bucket=bucket, Delete={"Objects": objects})
 
@@ -141,26 +129,36 @@ def s3fs_readable_path(bucket: str, key: str) -> str:
 # ──────────────────────────────────────────────────────────────────
 
 
-def get_training_run_config_path(run_id: UUID) -> str | None:
-    """Get the training run config path in the training bucket."""
-    path = f"{run_id}/{TRAINING_CONFIG_FILENAME}"
-
-    if not file_exists(BUCKET_TRAINING, path):
-        return None
-
-    return s3fs_readable_path(BUCKET_TRAINING, path)
+def training_logs_key(run_id: UUID) -> str:
+    return f"{run_id}/logs/train.log"
 
 
-def get_training_output_path(run_id: UUID) -> str:
-    """Return the training run output path in the models bucket."""
-    return s3fs_readable_path(BUCKET_MODELS, f"{run_id}/")
+def download_model(run_id: str) -> str:
+    """
+    Download a training run's Ludwig output directory (checkpoint,
+    metadata, hyperparameters — everything LudwigModel.load() needs) to a
+    local cache and return its path. Skips re-downloading if already
+    cached locally.
+    """
+    local_dir = str(TEMP_DIR / "models" / run_id)
+    if not os.path.isdir(local_dir) or not os.listdir(local_dir):
+        download_prefix(BUCKET_TRAINING, f"{run_id}/results/", local_dir)
+    return local_dir
 
 
-def get_training_dataset_path(version_id: UUID) -> str | None:
-    """Return the dataset path in the datasets bucket."""
-    path = f"snapshots/{version_id}/{DATASET_VERSION_FILENAME}"
+def find_model_dir(root: str) -> str:
+    """
+    Ludwig nests the actual saved model under an experiment-run
+    subdirectory it names itself (`results_run_N/model/`), so the layout
+    under `download_model()`'s local cache isn't fixed. Walk for the
+    marker file Ludwig always writes next to a loadable model.
+    """
+    for dirpath, _, filenames in os.walk(root):
+        if "model_hyperparameters.json" in filenames:
+            return dirpath
+    return root
 
-    if not file_exists(BUCKET_DATASETS, path):
-        return None
 
-    return s3fs_readable_path(BUCKET_DATASETS, path)
+def cleanup_temp(subdir: str, job_id: str) -> None:
+    """Remove a local temp working directory for a completed job."""
+    shutil.rmtree(TEMP_DIR / subdir / job_id, ignore_errors=True)
