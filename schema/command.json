@@ -1,0 +1,18 @@
+{
+  "title": "Command",
+  "type": "object",
+  "required": [
+    "command",
+    "runId"
+  ],
+  "properties": {
+    "command": {
+      "const": "abort",
+      "type": "string"
+    },
+    "runId": {
+      "format": "uuid",
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "title": "InferenceRequest",
+  "type": "object",
+  "required": [
+    "runId",
+    "uploadKey",
+    "uploadFilename",
+    "threshold"
+  ],
+  "properties": {
+    "runId": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "uploadKey": {
+      "type": "string"
+    },
+    "uploadFilename": {
+      "type": "string"
+    },
+    "threshold": {
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.5,
+      "type": "number"
+    }
+  }
+}

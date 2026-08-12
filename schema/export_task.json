@@ -1,0 +1,27 @@
+{
+  "title": "ExportTask",
+  "type": "object",
+  "required": [
+    "jobId",
+    "runId",
+    "format"
+  ],
+  "properties": {
+    "jobId": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "runId": {
+      "format": "uuid",
+      "type": "string"
+    },
+    "format": {
+      "default": "onnx",
+      "type": "string",
+      "enum": [
+        "onnx",
+        "torchscript"
+      ]
+    }
+  }
+}

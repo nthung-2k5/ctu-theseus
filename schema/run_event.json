@@ -1,0 +1,134 @@
+{
+  "title": "RunEvent",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "kind",
+        "runId",
+        "ts",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "const": "status",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "default": "queued",
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "canceled"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "kind",
+        "runId",
+        "ts",
+        "epoch",
+        "split",
+        "metrics"
+      ],
+      "properties": {
+        "kind": {
+          "const": "metric",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "epoch": {
+          "minimum": 0,
+          "anyOf": [
+            {
+              "format": "integer",
+              "default": 0,
+              "type": "string"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            }
+          ]
+        },
+        "split": {
+          "default": "train",
+          "type": "string",
+          "enum": [
+            "train",
+            "test",
+            "validation"
+          ]
+        },
+        "metrics": {
+          "type": "object",
+          "patternProperties": {
+            "^(.*)$": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "kind",
+        "runId",
+        "ts",
+        "level",
+        "line"
+      ],
+      "properties": {
+        "kind": {
+          "const": "log",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "level": {
+          "default": "info",
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "line": {
+          "type": "string"
+        }
+      }
+    }
+  ]
+}
