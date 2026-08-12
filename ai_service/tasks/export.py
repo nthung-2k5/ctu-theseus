@@ -1,27 +1,30 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any
+import tempfile
 
 from ludwig.api import LudwigModel
 
+from ai_service.schema.export_task import ExportTask
 from ai_service.services.nats import nats_service
 from ai_service.services.storage import (
     BUCKET_EXPORTS,
     cleanup_temp,
     download_model,
+    find_model_dir,
     upload_file,
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def handle_export(data: dict[str, Any]) -> None:
+async def handle_export(data: ExportTask) -> None:
     """Handle an export task message."""
-    job_id = data["id"]
-    model_id = data["model_id"]
-    export_format = data.get("export_format", "onnx")
+    job_id = str(data.job_id)
+    # The exported model is the trained run's output; run_id doubles as the
+    # model identifier until the S3 layout rework gives exports their own key.
+    model_id = str(data.run_id)
+    export_format = data.format
 
     logger.info(
         f"Starting export job {job_id} for model {model_id} (format: {export_format})"
@@ -29,19 +32,7 @@ async def handle_export(data: dict[str, Any]) -> None:
 
     try:
         # 1. Download model from S3 (cached locally)
-        model_save_dir = download_model(model_id)
-
-        # Find the Ludwig model output directory
-        ludwig_model_dir = None
-        for root, dirs, files in os.walk(model_save_dir):
-            if "model_hyperparameters.json" in files:
-                ludwig_model_dir = root
-                break
-
-        if ludwig_model_dir is None:
-            ludwig_model_dir = model_save_dir
-
-        import tempfile
+        ludwig_model_dir = find_model_dir(download_model(model_id))
 
         export_path = os.path.join(
             tempfile.gettempdir(),
@@ -68,18 +59,17 @@ async def handle_export(data: dict[str, Any]) -> None:
         export_s3_key = f"{model_id}/model.{export_format}"
         upload_file(BUCKET_EXPORTS, export_s3_key, result_path)
 
-        await nats_service.publish_result(
+        # NOTE: not part of the formal status|metric|log RunEvent union yet —
+        # nothing consumes export completion events on the gateway side
+        # until export dispatch is properly wired up.
+        await nats_service.publish_event(
+            model_id,
             "export",
-            job_id,
             {
-                "id": job_id,
-                "type": "export",
+                "jobId": job_id,
                 "status": "success",
-                "result": {
-                    "format": export_format,
-                    "export_key": export_s3_key,
-                },
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "format": export_format,
+                "exportKey": export_s3_key,
             },
         )
 
@@ -90,15 +80,9 @@ async def handle_export(data: dict[str, Any]) -> None:
 
     except Exception as e:
         logger.exception(f"Export failed for job {job_id}")
-        await nats_service.publish_result(
+        await nats_service.publish_event(
+            model_id,
             "export",
-            job_id,
-            {
-                "id": job_id,
-                "type": "export",
-                "status": "failed",
-                "error": str(e),
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-            },
+            {"jobId": job_id, "status": "failed", "error": str(e)},
         )
         raise
