@@ -32,10 +32,6 @@ async def run_task_workers():
             "theseus.tasks.train.*", "train-worker", handle_train, LudwigTrainingConfiguration
         ),
         nats_service.subscribe("theseus.inference.*", handle_inference),
-        nats_service.subscribe(
-            "theseus.models",
-            lambda msg: nats_service.publish("theseus.models.response", list_models()),
-        ),
         nats_service.subscribe_tasks(
             "theseus.tasks.export.*", "export-worker", handle_export
         ),
