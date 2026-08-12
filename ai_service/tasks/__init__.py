@@ -1,10 +1,9 @@
-"""Task workers entry point"""
-
-from ai_service.schema.training import LudwigTrainingConfiguration
 import asyncio
 import logging
 
-from ai_service.models import list_models
+from ai_service.schema.command import Command
+from ai_service.schema.export_task import ExportTask
+from ai_service.schema.train_task import TrainTask
 from ai_service.services.nats import nats_service
 from ai_service.services.storage import ensure_buckets
 
@@ -18,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 async def run_task_workers():
-    """Start the NATS worker: connect, subscribe to all task subjects, and process."""
     await nats_service.connect()
 
     # Ensure S3 buckets exist
@@ -29,13 +27,15 @@ async def run_task_workers():
     # Run task consumers and command consumer concurrently
     await asyncio.gather(
         nats_service.subscribe_tasks(
-            "theseus.tasks.train.*", "train-worker", handle_train, LudwigTrainingConfiguration
+            "theseus.task.train.*", "train-worker", handle_train, TrainTask
         ),
         nats_service.subscribe("theseus.inference.*", handle_inference),
         nats_service.subscribe_tasks(
-            "theseus.tasks.export.*", "export-worker", handle_export
+            "theseus.task.export.*", "export-worker", handle_export, ExportTask
         ),
-        nats_service.subscribe_commands("theseus.commands.>", handle_command),
+        nats_service.subscribe_commands(
+            "theseus.command.run.*", handle_command, Command
+        ),
     )
 
 

@@ -1,16 +1,10 @@
-"""
-NATS + JetStream client for the AI worker service.
-
-Provides connection management, stream provisioning, and publish/subscribe helpers.
-"""
-
 import asyncio
 import json
 import logging
-import os
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Type
-from uuid import UUID
+from typing import Any, Literal
 
 import nats
 import nats.errors
@@ -24,42 +18,42 @@ from nats.js.api import (
     RetentionPolicy,
     StreamConfig,
 )
+from opentelemetry import propagate, trace
 from pydantic import BaseModel
 
-from ai_service.schema.training_status import TrainingProgress, TrainingStatus
+from ai_service.config import NATS_URL
+
+tracer = trace.get_tracer("theseus-worker")
 
 logger = logging.getLogger(__name__)
 
-NATS_URL = os.environ.get("NATS_URL", "nats://localhost:4222")
-
 # ──────────────────────────────────────────────────────────────────
-# Stream definitions
+# Stream definitions — mirrors src/lib/nats.ts.
+#
+#   THESEUS_TASKS    theseus.task.train.{runId}, theseus.task.export.{jobId}
+#   THESEUS_EVENTS   theseus.event.run.{runId}.{kind}   (status|metric|log)
+#   THESEUS_COMMANDS theseus.command.run.{runId}
 # ──────────────────────────────────────────────────────────────────
 
+# NOTE: nats-py's StreamConfig.max_age is in SECONDS.
 STREAMS: list[StreamConfig] = [
     StreamConfig(
-        name="TASKS",
-        subjects=["theseus.tasks.>"],
+        name="THESEUS_TASKS",
+        subjects=["theseus.task.>"],
         retention=RetentionPolicy.WORK_QUEUE,
-        max_age=24 * 3600 * 1_000_000_000,  # 24 hours in nanoseconds
+        max_age=24 * 3600,  # 24 hours in seconds
     ),
     StreamConfig(
-        name="RESULTS",
-        subjects=["theseus.results.>"],
+        name="THESEUS_EVENTS",
+        subjects=["theseus.event.>"],
         retention=RetentionPolicy.LIMITS,
-        max_age=7 * 24 * 3600 * 1_000_000_000,  # 7 days
+        max_age=7 * 24 * 3600,  # 7 days
     ),
     StreamConfig(
-        name="PROGRESS",
-        subjects=["theseus.progress.>"],
-        retention=RetentionPolicy.LIMITS,
-        max_age=3600 * 1_000_000_000,  # 1 hour
-    ),
-    StreamConfig(
-        name="COMMANDS",
-        subjects=["theseus.commands.>"],
+        name="THESEUS_COMMANDS",
+        subjects=["theseus.command.>"],
         retention=RetentionPolicy.WORK_QUEUE,
-        max_age=3600 * 1_000_000_000,  # 1 hour
+        max_age=3600,  # 1 hour
     ),
 ]
 
@@ -95,11 +89,11 @@ class NatsService:
         jsm = self._nc.jsm()
         for stream_config in STREAMS:
             try:
-                # pyrefly: ignore [unsupported-operation]
-                await jsm.find_stream_name_by_subject(stream_config.subjects[0])
-                # Stream exists, update it
-                await jsm.update_stream(stream_config)
-                logger.info(f"Stream '{stream_config.name}' updated.")
+                if stream_config.subjects:
+                    await jsm.find_stream_name_by_subject(stream_config.subjects[0])
+                    # Stream exists, update it
+                    await jsm.update_stream(stream_config)
+                    logger.info(f"Stream '{stream_config.name}' updated.")
             except nats.js.errors.NotFoundError:
                 await jsm.add_stream(stream_config)
                 logger.info(f"Stream '{stream_config.name}' created.")
@@ -148,22 +142,55 @@ class NatsService:
     # ──────────────────────────────────────────────────────────────
 
     async def publish(self, subject: str, data: dict[str, Any]) -> None:
-        """Publish a JSON message to a JetStream subject."""
+        """Publish a JSON message to a JetStream subject. Injects the current
+        span's W3C traceparent into message headers so a consumer on the
+        other side of the NATS hop can continue the same trace."""
         payload = json.dumps(data).encode()
-        ack = await self.js.publish(subject, payload)
+        headers: dict[str, str] = {}
+        propagate.inject(headers)
+        ack = await self.js.publish(subject, payload, headers=headers)
         logger.debug(f"Published to {subject} (stream={ack.stream}, seq={ack.seq})")
 
-    async def publish_status(
-        self, task_type: str, task_id: UUID, status: TrainingStatus
-    ) -> None:
-        """Publish a status message."""
+    def _now(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
+
+    async def publish_event(self, run_id: str, kind: str, data: dict[str, Any]) -> None:
+        """
+        Publish a run event (RunEventSchema in src/lib/schema.ts — status,
+        metric, or log) to the run's subject on THESEUS_EVENTS. The
+        JetStream sequence number becomes the SSE replay cursor, so every
+        event a run emits — status, metrics, logs — goes through here.
+        """
         await self.publish(
-            f"theseus.results.{task_type}.{task_id}", status.model_dump()
+            f"theseus.event.run.{run_id}.{kind}",
+            {"kind": kind, "runId": run_id, "ts": self._now(), **data},
         )
 
-    async def publish_progress(self, run_id: UUID, progress: TrainingProgress) -> None:
-        """Publish a training progress message."""
-        await self.publish(f"theseus.progress.train.{run_id}", progress.model_dump())
+    async def publish_status(
+        self,
+        run_id: str,
+        status: Literal["queued", "running", "succeeded", "failed", "canceled"],
+        message: str | None = None,
+    ) -> None:
+        """Publish a status-kind run event."""
+        data: dict[str, Any] = {"status": status}
+        if message is not None:
+            data["message"] = message
+        await self.publish_event(run_id, "status", data)
+
+    async def publish_metric(
+        self, run_id: str, epoch: int, split: str, metrics: dict[str, float]
+    ) -> None:
+        """Publish a metric-kind run event (one or more named metrics for one epoch/split)."""
+        await self.publish_event(
+            run_id, "metric", {"epoch": epoch, "split": split, "metrics": metrics}
+        )
+
+    async def publish_log(
+        self, run_id: str, line: str, level: Literal["info", "warn", "error"] = "info"
+    ) -> None:
+        """Publish a log-kind run event."""
+        await self.publish_event(run_id, "log", {"level": level, "line": line})
 
     # ──────────────────────────────────────────────────────────────
     # Subscribing (pull-based consumers)
@@ -184,7 +211,7 @@ class NatsService:
         consumer: JetStreamContext.PullSubscription,
         subject: str,
         handler: Callable[[T], Awaitable[None]],
-        message_type: Type[T],
+        message_type: type[T],
         retry_on_failure: bool = True,
         nak_delay: int = 10,
         fetch_timeout: int = 5,
@@ -197,16 +224,20 @@ class NatsService:
                 messages = await consumer.fetch(batch=1, timeout=fetch_timeout)
                 for msg in messages:
                     try:
+                        parent_ctx = propagate.extract(msg.headers or {})
                         data = message_type.model_validate_json(msg.data.decode())
-                        await handler(data)
+                        with tracer.start_as_current_span(
+                            f"nats.consume {subject}", context=parent_ctx
+                        ):
+                            await handler(data)
                         await msg.ack()
                     except json.JSONDecodeError as e:
                         logger.error(
                             f"Malformed JSON in {subject}: {e}. Dropping message."
                         )
                         await msg.ack()  # Prevent poison pill infinite retries
-                    except Exception as e:
-                        logger.exception(f"Handler failed for {subject}: {e}")
+                    except Exception:
+                        logger.exception(f"Handler failed for {subject}")
                         if retry_on_failure:
                             await msg.nak(delay=nak_delay)
                         else:
@@ -220,12 +251,12 @@ class NatsService:
                     f"Consumer loop for '{subject}' cancelled. Shutting down cleanly."
                 )
                 break
-            except Exception as e:
+            except Exception:
                 # Check for disconnects (ensure self.nc is the correct reference)
                 if getattr(self, "nc", None) is None or not self.nc.is_connected:
                     logger.error("NATS disconnected, stopping consumer loop.")
                     break
-                logger.exception(f"Consumer polling error on '{subject}': {e}")
+                logger.exception(f"Consumer polling error on '{subject}'")
                 await asyncio.sleep(1)
 
     async def subscribe_tasks[T: BaseModel](
@@ -233,7 +264,7 @@ class NatsService:
         subject: str,
         durable_name: str,
         handler: Callable[[T], Awaitable[None]],
-        message_type: Type[T],
+        message_type: type[T],
     ) -> None:
         """
         Subscribe to task messages using a pull-based consumer.
@@ -267,7 +298,7 @@ class NatsService:
         self,
         subject: str,
         handler: Callable[[T], Awaitable[None]],
-        message_type: Type[T],
+        message_type: type[T],
     ) -> None:
         """Subscribe to command messages (stop/abort)."""
         consumer = await self.js.pull_subscribe(
