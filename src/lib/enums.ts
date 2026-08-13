@@ -56,6 +56,10 @@ export const AnnotationTypes = [
 
 export type AnnotationType = (typeof AnnotationTypes)[number]
 
-export const TrainingStatuses = ['queued', 'training', 'completed'] as const
+export const TrainingStatuses = ['queued', 'running', 'succeeded', 'failed', 'canceled'] as const
 
 export type TrainingStatus = (typeof TrainingStatuses)[number]
+
+export const DatasetVersionStatuses = ['draft', 'building', 'ready', 'failed'] as const
+
+export type DatasetVersionStatus = (typeof DatasetVersionStatuses)[number]
