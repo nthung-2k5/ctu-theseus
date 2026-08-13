@@ -220,3 +220,8 @@ pyrightconfig.json
 drizzle/
 data/
 ai_mount/
+
+.idea/
+node_modules/
+dist/
+.aspire/

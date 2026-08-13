@@ -1,0 +1,26 @@
+{
+  "appHost": {
+    "path": "apphost.mts",
+    "language": "typescript/nodejs"
+  },
+  "sdk": {
+    "version": "13.4.6"
+  },
+  "channel": "stable",
+  "profiles": {
+    "https": {
+      "applicationUrl": "https://ctu-theseus.dev.localhost:17297;http://ctu-theseus.dev.localhost:15235",
+      "environmentVariables": {
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:21157",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:22218"
+      }
+    }
+  },
+  "packages": {
+    "Aspire.Hosting.PostgreSQL": "13.4.6",
+    "Aspire.Hosting.Nats": "13.4.6",
+    "CommunityToolkit.Aspire.Hosting.RustFs": "13.4.1-beta.706",
+    "Aspire.Hosting.Python": "13.4.6",
+    "Aspire.Hosting.JavaScript": "13.4.6"
+  }
+}
