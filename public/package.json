@@ -1,0 +1,11 @@
+{
+  "name": "ctu-theseus-web",
+  "private": true,
+  "version": "1.5.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b tsconfig.vite.json && vite build",
+    "preview": "vite preview"
+  }
+}
