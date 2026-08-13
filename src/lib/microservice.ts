@@ -5,329 +5,212 @@
  *
  * - Model registry is loaded from the AI worker via NATS request-reply at startup
  * - Training/inference/export tasks are published as NATS messages
- * - Results and progress are consumed via NATS durable subscribers
+ * - Run events (status/metric/log) are consumed from the single THESEUS_EVENTS
+ *   stream via one durable consumer that persists to Postgres
  */
 
+import CONSTANTS from '@schema/constants.json'
 import { db } from '@server/db'
 import { trainingMetrics, trainingRuns } from '@server/db/schema'
+import type { ProjectTask, TrainingStatuses } from '@server/lib/enums'
+import { compileLudwigConfig, serializeLudwigConfig, type TrainerSelections } from '@server/lib/ludwig'
+import { readSnapshotManifest } from '@server/lib/snapshot'
+import { snapshotParquetKey, trainingConfigKey, trainingResultsPrefix, uploadFile } from '@server/lib/storage'
+import { getTaskDescriptor } from '@server/lib/tasks'
+import { record } from '@server/lib/telemetry'
 import { eq } from 'drizzle-orm'
-import { t } from 'elysia'
-import {
-  publishAbortCommand,
-  publishExportTask,
-  publishTrainTask,
-  subscribe,
-} from './nats'
-import { BUCKET_DATASETS, downloadFile, uploadFile } from './storage'
-
-/* ------------------------------------------------------------------ */
-/*  Model Registry                                                    */
-/* ------------------------------------------------------------------ */
-
-export interface ModelVariant {
-  id: string
-  display_name: string
-  description: string
-}
-
-export interface ModelFamilyGroup {
-  family: string
-  variants: ModelVariant[]
-}
-
-/** Flat lookup map: variant id → variant metadata */
-export const modelRegistry = new Map<string, ModelVariant>()
-
-/**
- * Populate the model registry.
- * For now, uses a hardcoded list matching the AI worker's registry.
- * In Phase 3 (plugin system), this will be fetched dynamically from the
- * AI worker via NATS request-reply based on plugin manifests.
- */
-export async function refreshModelRegistry(): Promise<void> {
-  // Hardcoded registry matching ai_service/models/implementations.py
-  // This will be replaced by plugin manifests in Phase 3
-  const families: ModelFamilyGroup[] = [
-    {
-      family: 'resnet',
-      variants: [
-        { id: 'resnet18', display_name: 'ResNet-18', description: '' },
-        { id: 'resnet34', display_name: 'ResNet-34', description: '' },
-        { id: 'resnet50', display_name: 'ResNet-50', description: '' },
-        { id: 'resnet101', display_name: 'ResNet-101', description: '' },
-        { id: 'resnet152', display_name: 'ResNet-152', description: '' },
-      ],
-    },
-    {
-      family: 'vit',
-      variants: [
-        { id: 'vit_tiny', display_name: 'ViT-Tiny', description: '' },
-        { id: 'vit_small', display_name: 'ViT-Small', description: '' },
-        { id: 'vit_base', display_name: 'ViT-Base', description: '' },
-        { id: 'vit_large', display_name: 'ViT-Large', description: '' },
-      ],
-    },
-    {
-      family: 'convnext',
-      variants: [
-        { id: 'convnext_tiny', display_name: 'ConvNeXt-Tiny', description: '' },
-        { id: 'convnext_small', display_name: 'ConvNeXt-Small', description: '' },
-        { id: 'convnext_base', display_name: 'ConvNeXt-Base', description: '' },
-        { id: 'convnext_large', display_name: 'ConvNeXt-Large', description: '' },
-      ],
-    },
-    {
-      family: 'mobilenet',
-      variants: [
-        { id: 'mobilenet_v2', display_name: 'MobileNetV2', description: '' },
-        { id: 'mobilenet_v3_small', display_name: 'MobileNetV3-Small', description: '' },
-        { id: 'mobilenet_v3_large', display_name: 'MobileNetV3-Large', description: '' },
-      ],
-    },
-    {
-      family: 'efficientnet',
-      variants: [
-        { id: 'efficientnet_b0', display_name: 'EfficientNet-B0', description: '' },
-        { id: 'efficientnet_b1', display_name: 'EfficientNet-B1', description: '' },
-        { id: 'efficientnet_b2', display_name: 'EfficientNet-B2', description: '' },
-        { id: 'efficientnet_b3', display_name: 'EfficientNet-B3', description: '' },
-        { id: 'efficientnet_b4', display_name: 'EfficientNet-B4', description: '' },
-      ],
-    },
-  ]
-
-  modelRegistry.clear()
-  for (const family of families) {
-    for (const variant of family.variants) {
-      modelRegistry.set(variant.id, variant)
-    }
-  }
-  console.log(`[microservice] Model registry loaded: ${modelRegistry.size} variants`)
-}
-
-// Eagerly populate on import
-await refreshModelRegistry()
+import { publishAbortCommand, publishExportTask, publishTrainTask, subscribe } from './nats'
 
 /* ------------------------------------------------------------------ */
 /*  Training                                                           */
 /* ------------------------------------------------------------------ */
 
-export interface TrainPayload {
-  id: string
-  dataset: {
-    num_classes: number
-    batch_size?: number
-    num_workers?: number
-  }
-  model: {
-    architecture: string
-    pretrained?: boolean
-    drop_rate?: number
-  }
-  optimization?: {
-    optimizer?: 'adamw' | 'adam' | 'sgd'
-    learning_rate?: number
-    weight_decay?: number
-  }
-  schedule?: {
-    epochs?: number
-  }
+export interface QueueTrainingParams {
+  projectId: string
+  name: string
+  task: ProjectTask
+  datasetVersionId: string
+  trainerSelections?: TrainerSelections
 }
 
+export type QueueTrainingResult =
+  | { ok: true; run: typeof trainingRuns.$inferSelect }
+  | { ok: false; code: 404 | 409 | 400; message: string }
+
 /**
- * Queue a training job: upload dataset images to S3, then publish task to NATS.
+ * Compile the Ludwig config for a run, upload it, persist the run row, and
+ * dispatch the task over NATS — in that order, so an invalid configuration
+ * or a not-ready dataset version surfaces as a 4xx here rather than as a
+ * silent worker failure discovered later.
  */
-export async function queueTraining(projectId: string, payload: TrainPayload) {
-  // Query dataset images from DB
-  const datasetImages = await db.query.datasetImages.findMany({
-    where: { projectId, split: { isNotNull: true }, classId: { isNotNull: true } },
-    with: {
-      datasetClasses: {
-        columns: {
-          name: true,
-        },
-      },
-    },
+export async function queueTraining(params: QueueTrainingParams): Promise<QueueTrainingResult> {
+  return record('train.dispatch', async (span): Promise<QueueTrainingResult> => {
+    span.setAttributes({ 'theseus.project_id': params.projectId, 'theseus.task': params.task })
+
+    const version = await db.query.datasetVersions.findFirst({ where: { id: params.datasetVersionId } })
+    if (!version) return { ok: false, code: 404, message: 'Dataset version not found' }
+    if (version.status !== 'ready') {
+      return { ok: false, code: 409, message: `Dataset version is not ready for training (status: ${version.status})` }
+    }
+
+    const descriptor = getTaskDescriptor(params.task)
+    let configYaml: string
+    let ludwigConfig: ReturnType<typeof compileLudwigConfig>
+    try {
+      const ctx = await readSnapshotManifest(params.datasetVersionId)
+      ludwigConfig = compileLudwigConfig(descriptor, ctx, params.trainerSelections ?? {})
+      configYaml = serializeLudwigConfig(ludwigConfig)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return { ok: false, code: 400, message: `Failed to compile Ludwig config: ${message}` }
+    }
+
+    const runId = crypto.randomUUID()
+    span.setAttribute('theseus.run_id', runId)
+    const configKey = trainingConfigKey(runId)
+    await uploadFile(CONSTANTS.BUCKET_TRAINING, configKey, new TextEncoder().encode(configYaml), 'application/yaml')
+
+    const [run] = await db
+      .insert(trainingRuns)
+      .values({
+        id: runId,
+        projectId: params.projectId,
+        name: params.name,
+        datasetVersionId: params.datasetVersionId,
+        hyperparameters: params.trainerSelections ?? {},
+        ludwigConfig,
+        configKey,
+        status: 'queued',
+        updatedAt: new Date(),
+      })
+      .returning()
+
+    try {
+      await publishTrainTask(runId, {
+        runId,
+        projectId: params.projectId,
+        datasetVersionId: params.datasetVersionId,
+        configKey,
+        datasetKey: snapshotParquetKey(params.datasetVersionId),
+        outputPrefix: trainingResultsPrefix(runId),
+      })
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e)
+      await db
+        .update(trainingRuns)
+        .set({ status: 'failed', failedMessage: message, completedAt: new Date() })
+        .where(eq(trainingRuns.id, runId))
+      console.error(`Training dispatch failed: ${e}`)
+    }
+
+    return { ok: true, run }
   })
-
-  // Copy each image in S3 under the training prefix: {runId}/{split}/{className}/{filename}
-  await Promise.all(
-    datasetImages
-      .filter((img) => img.split === 'train' || img.split === 'validation')
-      .map(async (img) => {
-        const destKey = `${payload.id}/${img.split}/${img.filename}`
-        // Download from the original upload key and re-upload under training prefix
-        const data = await downloadFile(BUCKET_DATASETS, img.path)
-        await uploadFile(BUCKET_DATASETS, destKey, data)
-      }),
-  )
-
-  // Publish training task to NATS
-  try {
-    await publishTrainTask(projectId, {
-      id: payload.id,
-      type: 'train',
-      project_id: projectId,
-      payload,
-      created_at: new Date().toISOString(),
-    })
-
-    // Update status to queued
-    await db
-      .update(trainingRuns)
-      .set({ taskId: payload.id, status: 'queued' })
-      .where(eq(trainingRuns.id, payload.id))
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    await db
-      .update(trainingRuns)
-      .set({ status: 'completed', failedMessage: message, completedAt: new Date() })
-      .where(eq(trainingRuns.id, payload.id))
-    console.error(`Training dispatch failed: ${e}`)
-  }
 }
 
 /**
  * Stop a running training task by publishing an abort command to NATS.
  */
-export async function stopTraining(runId: string): Promise<{ run_id: string; status: string }> {
+export async function stopTraining(runId: string) {
   await publishAbortCommand(runId)
-  return { run_id: runId, status: 'abort_requested' }
 }
 
 /* ------------------------------------------------------------------ */
-/*  Export                                                              */
-/* ------------------------------------------------------------------ */
-
-export interface ExportPayload {
-  id: string
-  model_id: string
-  export_format: 'onnx' | 'torchscript'
-}
-
-/**
- * Dispatch an export job via NATS.
- */
-export async function dispatchExport(projectId: string, payload: ExportPayload): Promise<void> {
-  await publishExportTask(projectId, {
-    id: payload.id,
-    type: 'export',
-    project_id: projectId,
-    model_id: payload.model_id,
-    export_format: payload.export_format,
-    created_at: new Date().toISOString(),
-  })
-}
-
-/* ------------------------------------------------------------------ */
-/*  NATS Result/Progress Consumers                                     */
+/*  Export                                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * Start NATS consumers for training results and progress.
- * Called once at gateway startup after initNats().
+ * Dispatch a model-export job for a succeeded run. `jobId` doubles as the
+ * NATS subject token and, once the worker publishes it, the export key
+ * (`exportKey(runId, format)` — one run, one artifact per format).
  */
-export async function startNatsConsumers(): Promise<void> {
-  // ── Training results ──
-  await subscribe('RESULTS', 'theseus.results.train.>', 'gateway-train-results', async (data) => {
-    const runId = data.id as string
-    const status = data.status as string
+export async function dispatchExport(runId: string, format: 'onnx' | 'torchscript'): Promise<string> {
+  const jobId = crypto.randomUUID()
+  await publishExportTask(jobId, { jobId, runId, format })
+  return jobId
+}
 
-    if (!runId) return
+/* ------------------------------------------------------------------ */
+/*  NATS Event Consumer                                               */
+/* ------------------------------------------------------------------ */
 
-    if (status === 'training') {
-      // Training has started
-      await db
-        .update(trainingRuns)
-        .set({ status: 'training', startedAt: new Date() })
-        .where(eq(trainingRuns.id, runId))
-    } else if (status === 'completed') {
-      await db
-        .update(trainingRuns)
-        .set({
-          status: 'completed',
-          completedAt: new Date(),
-        })
-        .where(eq(trainingRuns.id, runId))
-    } else if (status === 'failed') {
-      await db
-        .update(trainingRuns)
-        .set({
-          status: 'completed',
-          failedMessage: (data.error as string) ?? 'Unknown error',
-          completedAt: new Date(),
-        })
-        .where(eq(trainingRuns.id, runId))
+/**
+ * A run event as published by the worker (RunEventSchema in src/lib/schema.ts).
+ * Tagged union over `kind`. `status` values match the trainingRuns.status
+ * enum 1:1 — no derivation/translation needed on this side anymore.
+ */
+type RunEvent =
+  | { kind: 'status'; runId: string; ts: string; status: (typeof TrainingStatuses)[number]; message?: string }
+  | {
+      kind: 'metric'
+      runId: string
+      ts: string
+      epoch: number
+      split: 'train' | 'validation' | 'test'
+      metrics: Record<string, number>
     }
+  | { kind: 'log'; runId: string; ts: string; level: 'info' | 'warn' | 'error'; line: string }
 
-    console.log(`[nats] Training result: run=${runId}, status=${status}`)
-  })
+const TERMINAL_STATUSES = new Set<(typeof TrainingStatuses)[number]>(['succeeded', 'failed', 'canceled'])
 
-  // ── Training progress ──
-  await subscribe('PROGRESS', 'theseus.progress.train.>', 'gateway-train-progress', async (data) => {
-    const runId = data.id as string
-    const metrics = data.metrics as Record<string, number> | undefined
+/**
+ * Start the durable NATS consumer that persists run events to Postgres.
+ * Called once at gateway startup after initNats().
+ *
+ * This is the single source of truth in the DB; the SSE route (next phase)
+ * reads live events directly off the JetStream stream instead, so a
+ * refreshing browser can replay history without round-tripping Postgres.
+ */
+export async function startNatsConsumers(signal?: AbortSignal): Promise<void> {
+  await subscribe<RunEvent>(
+    'THESEUS_EVENTS',
+    'theseus.event.run.*.>',
+    'gateway-run-events',
+    async (event) => {
+      switch (event.kind) {
+        case 'status': {
+          const patch: Partial<typeof trainingRuns.$inferInsert> = { status: event.status, heartbeatAt: new Date() }
+          if (event.status === 'running') patch.startedAt = new Date()
+          if (TERMINAL_STATUSES.has(event.status)) {
+            patch.completedAt = new Date()
+            if (event.status === 'failed' && event.message) patch.failedMessage = event.message
+          }
+          await db.update(trainingRuns).set(patch).where(eq(trainingRuns.id, event.runId))
+          break
+        }
+        case 'metric': {
+          for (const [metricName, metricValue] of Object.entries(event.metrics)) {
+            await db
+              .insert(trainingMetrics)
+              .values({ trainingRunId: event.runId, epoch: event.epoch, split: event.split, metricName, metricValue })
+              .onConflictDoUpdate({
+                target: [
+                  trainingMetrics.trainingRunId,
+                  trainingMetrics.epoch,
+                  trainingMetrics.split,
+                  trainingMetrics.metricName,
+                ],
+                set: { metricValue },
+              })
+          }
+          // NOTE: bestEpoch tracking (vs. just the latest epoch) needs to
+          // know which metric the task is optimizing for — deferred to the
+          // Ludwig compiler phase, which has that context.
+          await db
+            .update(trainingRuns)
+            .set({ status: 'running', heartbeatAt: new Date() })
+            .where(eq(trainingRuns.id, event.runId))
+          break
+        }
+        case 'log': {
+          // Logs aren't persisted to Postgres — the SSE route replays them
+          // directly from the JetStream stream. Just mark the run alive.
+          await db.update(trainingRuns).set({ heartbeatAt: new Date() }).where(eq(trainingRuns.id, event.runId))
+          break
+        }
+      }
+    },
+    signal,
+  )
 
-    if (!runId || !metrics) return
-
-    await db
-      .insert(trainingMetrics)
-      .values({
-        trainingRunId: runId,
-        epoch: metrics.epoch ?? 0,
-        trainingLoss: metrics.train_loss ?? 0,
-        validationLoss: metrics.val_loss ?? 0,
-        accuracy: metrics.accuracy ?? 0,
-        mAP: metrics.mAP ?? 0,
-      })
-      .onConflictDoUpdate({
-        target: [trainingMetrics.trainingRunId, trainingMetrics.epoch],
-        set: {
-          trainingLoss: metrics.train_loss ?? 0,
-          validationLoss: metrics.val_loss ?? 0,
-          accuracy: metrics.accuracy ?? 0,
-          mAP: metrics.mAP ?? 0,
-        },
-      })
-
-    // Ensure status is 'training'
-    await db.update(trainingRuns).set({ status: 'training' }).where(eq(trainingRuns.id, runId))
-  })
-
-  // ── Inference results (handled in inference.ts via direct subscription) ──
-  // ── Export results (handled in inference.ts via direct subscription) ──
-
-  console.log('[microservice] NATS consumers started for training results and progress.')
+  console.log('[microservice] NATS run-events consumer started.')
 }
-
-/* ------------------------------------------------------------------ */
-/*  TypeBox schemas (for Elysia route validation)                     */
-/* ------------------------------------------------------------------ */
-
-export const DatasetConfigSchema = t.Object({
-  batch_size: t.Optional(t.Integer({ minimum: 1, default: 64 })),
-  num_workers: t.Optional(t.Integer({ minimum: 0, default: 4 })),
-})
-
-export const ModelConfigSchema = t.Object({
-  architecture: t.String({ description: 'Timm model architecture name (registry key)' }),
-  pretrained: t.Optional(t.Boolean({ default: true })),
-  drop_rate: t.Optional(t.Number({ minimum: 0.0, maximum: 1.0, default: 0.0 })),
-})
-
-export const OptimizationConfigSchema = t.Object({
-  optimizer: t.Optional(t.Union([t.Literal('adamw'), t.Literal('adam'), t.Literal('sgd')], { default: 'adamw' })),
-  learning_rate: t.Optional(t.Number({ exclusiveMinimum: 0.0, default: 0.001 })),
-  weight_decay: t.Optional(t.Number({ minimum: 0.0, default: 0.05 })),
-})
-
-export const ScheduleConfigSchema = t.Object({
-  epochs: t.Optional(t.Integer({ minimum: 1, default: 50 })),
-})
-
-export const TrainRequestSchema = t.Object({
-  dataset: DatasetConfigSchema,
-  model: ModelConfigSchema,
-  optimization: t.Optional(OptimizationConfigSchema),
-  schedule: t.Optional(ScheduleConfigSchema),
-})
