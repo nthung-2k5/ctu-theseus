@@ -6,8 +6,10 @@ import { exportRoutes } from '@server/routes/export'
 import { inferenceRoutes } from '@server/routes/inference'
 import { projectRoutes } from '@server/routes/projects'
 import { trainingRoutes } from '@server/routes/training'
+import { migrate } from 'drizzle-orm/bun-sql/postgres/migrator'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
+import { db } from './db'
 import { startNatsConsumers } from './lib/microservice'
 import { closeNats, initNats } from './lib/nats'
 import { ensureBuckets } from './lib/storage'
@@ -15,6 +17,9 @@ import { ensureBuckets } from './lib/storage'
 // Initialize NATS connection and S3 buckets
 await initNats()
 await ensureBuckets()
+
+// Initialize the database and run migrations
+await migrate(db, { migrationsFolder: './drizzle' })
 
 // Stops the durable consumer's background fetch loop cleanly on shutdown,
 // instead of leaving it running against a closing connection.

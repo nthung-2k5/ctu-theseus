@@ -217,10 +217,6 @@ pyrightconfig.json
 !public/lib/
 !src/lib/
 
-drizzle/
-data/
-ai_mount/
-
 .idea/
 node_modules/
 dist/
