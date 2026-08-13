@@ -1,9 +1,9 @@
 import { db } from '@server/db'
-import { datasetSplits, datasets, datasetVersions, projects, trainingRuns } from '@server/db/schema'
+import { datasets, datasetVersions, projects, trainingRuns } from '@server/db/schema'
 import { ProjectTasks } from '@server/lib/enums'
-import { taskToModality } from '@server/lib/helpers'
+import { getTaskDescriptor, taskToModality } from '@server/lib/tasks'
 import { and, eq } from 'drizzle-orm'
-import { Elysia, NotFoundError, status, t } from 'elysia'
+import { Elysia, status, t } from 'elysia'
 import { betterAuth } from './auth'
 
 export const projectRoutes = new Elysia({ prefix: '/api/projects' })
@@ -41,12 +41,20 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
   .get(
     '/:projectId',
     async ({ project }) => {
-      const [versionCount, runCount] = await Promise.all([
+      const [versionCount, runCount, datasetRow] = await Promise.all([
         db.$count(datasetVersions, eq(datasetVersions.datasetId, project.id)),
         db.$count(trainingRuns, eq(trainingRuns.projectId, project.id)),
+        db.query.datasets.findFirst({
+          where: { projectId: project.id },
+          with: {
+            draft: { with: { items: true } },
+            versions: { with: { items: true } },
+            classes: true,
+          },
+        }),
       ])
 
-      return { project: { ...project, runCount, versionCount } }
+      return { project: { ...project, runCount, versionCount, dataset: datasetRow ?? null } }
     },
     {
       projectBelongToUser: true,
@@ -56,6 +64,11 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
   .post(
     '/',
     async ({ body, user }) => {
+      const descriptor = getTaskDescriptor(body.task)
+      if (descriptor.backend !== 'ludwig') {
+        return status(422, `Task "${body.task}" is not yet trainable (${descriptor.status}).`)
+      }
+
       // Derive modality from task
       const modality = taskToModality(body.task)
 
@@ -74,20 +87,12 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
         modality,
       })
 
-      // Create the draft version (versionTag = null)
-      const [draftVersion] = await db
-        .insert(datasetVersions)
-        .values({
-          datasetId: project.id, // datasetId references datasets.projectId
-        })
-        .returning()
-
-      // Create train/validation/test splits for the draft
-      await db.insert(datasetSplits).values([
-        { datasetVersionId: draftVersion.id, splitType: 'train' },
-        { datasetVersionId: draftVersion.id, splitType: 'validation' },
-        { datasetVersionId: draftVersion.id, splitType: 'test' },
-      ])
+      // Create the draft version (versionTag = null). Splits are just a
+      // column on each item's version-membership row now, so there's
+      // nothing else to pre-create here.
+      await db.insert(datasetVersions).values({
+        datasetId: project.id, // datasetId references datasets.projectId
+      })
 
       return { project }
     },
@@ -123,7 +128,7 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
         .delete(projects)
         .where(and(eq(projects.id, params.projectId), eq(projects.userId, user.id)))
         .returning()
-      if (deleted.length === 0) return new NotFoundError('Project not found')
+      if (deleted.length === 0) return status(404, 'Project not found')
       return status(204)
     },
     { auth: true },
