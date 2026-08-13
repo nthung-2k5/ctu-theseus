@@ -21,7 +21,7 @@ from nats.js.api import (
 from opentelemetry import propagate, trace
 from pydantic import BaseModel
 
-from ai_service.config import NATS_URL
+from ai_service.config import NATS_URI
 
 tracer = trace.get_tracer("theseus-worker")
 
@@ -77,9 +77,9 @@ class NatsService:
 
     async def connect(self) -> None:
         """Connect to NATS and provision JetStream streams."""
-        logger.info(f"Connecting to NATS at {NATS_URL}...")
+        logger.info(f"Connecting to NATS at {NATS_URI}...")
         self._nc = await nats.connect(
-            servers=NATS_URL,
+            servers=NATS_URI,
             reconnect_time_wait=2,
             max_reconnect_attempts=-1,  # Retry forever
         )

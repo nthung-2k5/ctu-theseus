@@ -10,7 +10,7 @@ def _env(*names: str) -> str | None:
     return None
 
 
-NATS_URL = _env("NATS_URL", "NATS_URI") or "nats://localhost:4222"
+NATS_URI = _env("NATS_URI") or "nats://localhost:4222"
 S3_ENDPOINT = _env("S3_ENDPOINT") or "http://localhost:9000"
 S3_ACCESS_KEY = _env("S3_ACCESS_KEY") or "theseus"
 S3_SECRET_KEY = _env("S3_SECRET_KEY") or "theseus-secret"
