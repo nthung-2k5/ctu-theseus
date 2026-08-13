@@ -1,7 +1,6 @@
 /**
  * S3-compatible storage client for the ElysiaJS gateway.
  *
- * Uses @aws-sdk/client-s3 to communicate with RustFS (or any S3-compatible server).
  * Handles presigned URLs for direct browser uploads and server-side file operations.
  */
 
@@ -18,22 +17,15 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-
-const S3_ENDPOINT = process.env.S3_ENDPOINT ?? 'http://localhost:9000'
-const S3_ACCESS_KEY = process.env.S3_ACCESS_KEY ?? 'theseus'
-const S3_SECRET_KEY = process.env.S3_SECRET_KEY ?? 'theseus-secret'
-
-// Bucket names
-export const BUCKET_DATASETS = 'theseus-datasets'
-export const BUCKET_MODELS = 'theseus-models'
-export const BUCKET_EXPORTS = 'theseus-exports'
+import CONSTANTS from '@schema/constants.json'
+import { config } from '@server/lib/config'
 
 export const s3 = new S3Client({
-  endpoint: S3_ENDPOINT,
+  endpoint: config.s3Endpoint,
   region: 'us-east-1',
   credentials: {
-    accessKeyId: S3_ACCESS_KEY,
-    secretAccessKey: S3_SECRET_KEY,
+    accessKeyId: config.s3AccessKey,
+    secretAccessKey: config.s3SecretKey,
   },
   forcePathStyle: true, // Required for S3-compatible servers
 })
@@ -47,7 +39,7 @@ export const s3 = new S3Client({
  * Call once at gateway startup.
  */
 export async function ensureBuckets(): Promise<void> {
-  for (const bucket of [BUCKET_DATASETS, BUCKET_MODELS, BUCKET_EXPORTS]) {
+  for (const bucket of [CONSTANTS.BUCKET_DATASETS, CONSTANTS.BUCKET_TRAINING, CONSTANTS.BUCKET_MODELS]) {
     try {
       await s3.send(new HeadBucketCommand({ Bucket: bucket }))
     } catch {
@@ -117,7 +109,7 @@ export async function uploadFile(
 }
 
 /**
- * Copy a file or folder in S3.
+ * Copy a file in S3.
  */
 export async function copyObject(fromBucket: string, fromKey: string, toBucket: string, toKey: string): Promise<void> {
   await s3.send(
@@ -127,6 +119,65 @@ export async function copyObject(fromBucket: string, fromKey: string, toBucket: 
       Key: toKey,
     }),
   )
+}
+
+export async function copyFolder(
+  sourceBucket: string,
+  sourcePrefix: string,
+  targetBucket: string,
+  targetPrefix: string,
+): Promise<void> {
+  // Ensure prefixes end with a trailing slash
+  const src = sourcePrefix.endsWith('/') ? sourcePrefix : `${sourcePrefix}/`
+  const dst = targetPrefix.endsWith('/') ? targetPrefix : `${targetPrefix}/`
+
+  let isTruncated: boolean | undefined = true
+  let continuationToken: string | undefined
+
+  try {
+    while (isTruncated) {
+      const listCommand: ListObjectsV2Command = new ListObjectsV2Command({
+        Bucket: sourceBucket,
+        Prefix: src,
+        ContinuationToken: continuationToken,
+      })
+
+      const listResponse = await s3.send(listCommand)
+
+      if (!listResponse.Contents || listResponse.Contents.length === 0) {
+        console.log('No files found in the source directory.')
+        break
+      }
+
+      const copyPromises = listResponse.Contents.map((object) => {
+        const sourceKey = object.Key
+        // Generate the new target key by replacing the source prefix with target prefix
+        const targetKey = sourceKey?.replace(src, dst)
+
+        const copyCommand = new CopyObjectCommand({
+          Bucket: targetBucket,
+          Key: targetKey,
+          // CopySource format must be: /bucket-name/path/to/object
+          CopySource: encodeURIComponent(`/${sourceBucket}/${sourceKey}`),
+        })
+
+        console.log(`Copying: ${sourceKey} -> ${targetKey}`)
+        return s3.send(copyCommand)
+      })
+
+      // Execute current batch of copies in parallel
+      await Promise.all(copyPromises)
+
+      // Check if more files remain (S3 lists up to 1000 items per request)
+      isTruncated = listResponse.IsTruncated
+      continuationToken = listResponse.NextContinuationToken
+    }
+
+    console.log('Folder copy completed successfully!')
+  } catch (error) {
+    console.error('Error copying folder:', error)
+    throw error
+  }
 }
 
 /**
@@ -181,39 +232,76 @@ export async function listKeys(bucket: string, prefix: string): Promise<string[]
 }
 
 /* ------------------------------------------------------------------ */
-/*  High-level helpers                                                */
+/*  Canonical S3 key builders                                         */
+/*                                                                     */
+/*  theseus-datasets/                                                 */
+/*    pool/{projectId}/{hash[0:2]}/{hash}{ext}   content-addressed,   */
+/*                                                mutable, deduped    */
+/*    snapshots/{versionId}/dataset.parquet      immutable            */
+/*    snapshots/{versionId}/manifest.json                             */
+/*                                                                     */
+/*  theseus-training/                                                 */
+/*    {runId}/config.yaml                        compiled Ludwig cfg  */
+/*    {runId}/results/                           Ludwig output dir    */
+/*    {runId}/logs/train.log                                          */
+/*                                                                     */
+/*  theseus-models/                                                   */
+/*    {runId}/model.{onnx|pt2|safetensors}       exports only         */
 /* ------------------------------------------------------------------ */
 
-/**
- * Copy the project dataset folder to a new folder for the training run.
- */
-export async function copyDataset(projectId: string, runId: string): Promise<void> {
-  const keys = await listKeys(BUCKET_DATASETS, projectId)
-  for (const key of keys) {
-    const newKey = `${runId}/${key}`
-    await copyObject(BUCKET_DATASETS, key, BUCKET_DATASETS, newKey)
-  }
+export function poolKey(projectId: string, hash: string, ext: string): string {
+  return `pool/${projectId}/${hash.slice(0, 2)}/${hash}${ext}`
+}
+
+export function snapshotParquetKey(versionId: string): string {
+  return `snapshots/${versionId}/${CONSTANTS.DATASET_VERSION_FILENAME}`
+}
+
+export function snapshotManifestKey(versionId: string): string {
+  return `snapshots/${versionId}/manifest.json`
+}
+
+export function trainingConfigKey(runId: string): string {
+  return `${runId}/${CONSTANTS.TRAINING_CONFIG_FILENAME}`
+}
+
+export function trainingResultsPrefix(runId: string): string {
+  return `${runId}/results/`
+}
+
+export function trainingLogsKey(runId: string): string {
+  return `${runId}/logs/train.log`
+}
+
+export function exportKey(runId: string, format: string): string {
+  return `${runId}/model.${format}`
 }
 
 /**
- * Upload a dataset image to S3.
- * Key format: {projectId}/{runId}/{split}/{className}/{filename}
+ * Upload bytes to the project's content-addressed pool. Hashes the content
+ * first and skips the upload entirely if that hash already exists for this
+ * project — this is what makes the pool deduplicated.
  */
-export async function uploadDatasetImage(
+export async function uploadToPool(
   projectId: string,
-  filename: string,
-  data: Buffer | Uint8Array | Blob,
+  data: Uint8Array,
+  ext: string,
   contentType?: string,
-): Promise<string> {
-  const key = `${projectId}/${filename}`
-  await uploadFile(BUCKET_DATASETS, key, data, contentType)
-  return key
+): Promise<{ key: string; hash: string; byteSize: number; isDuplicate: boolean }> {
+  const hash = new Bun.CryptoHasher('sha256').update(data).digest('hex')
+  const key = poolKey(projectId, hash, ext)
+
+  const existing = await fileExists(CONSTANTS.BUCKET_DATASETS, key)
+  if (!existing) {
+    await uploadFile(CONSTANTS.BUCKET_DATASETS, key, data, contentType)
+  }
+
+  return { key, hash, byteSize: data.byteLength, isDuplicate: existing !== null }
 }
 
 /**
  * Generate a presigned download URL for a model export.
  */
 export async function getExportDownloadUrl(runId: string, format: string, expiresIn = 3600): Promise<string> {
-  const key = `${runId}/model.${format}`
-  return getDownloadUrl(BUCKET_MODELS, key, expiresIn)
+  return getDownloadUrl(CONSTANTS.BUCKET_MODELS, exportKey(runId, format), expiresIn)
 }
