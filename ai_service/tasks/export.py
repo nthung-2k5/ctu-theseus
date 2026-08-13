@@ -4,10 +4,9 @@ import os
 import tempfile
 
 from ludwig.api import LudwigModel
-
-from ai_service.schema.export_task import ExportTask
-from ai_service.services.nats import nats_service
-from ai_service.services.storage import (
+from schema.export_task import ExportTask
+from services.nats import nats_service
+from services.storage import (
     BUCKET_EXPORTS,
     cleanup_temp,
     download_model,

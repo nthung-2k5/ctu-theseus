@@ -10,9 +10,16 @@ export const auth = betterAuth({
     usePlural: true,
     schema, // Wait until Better Auth merges PR#9489 (https://github.com/better-auth/better-auth/pull/9489)
   }),
+  baseURL: {
+    allowedHosts: ['*.dev.localhost:*', 'localhost:*'],
+    protocol: 'auto',
+    fallback: 'http://localhost:3000',
+  },
   basePath: '/api/auth',
   advanced: {
     database: { generateId: 'uuid' },
+    // Force Better Auth to trust the headers passed by Aspire's proxy
+    trustedProxyHeaders: true,
   },
   emailAndPassword: {
     enabled: true,

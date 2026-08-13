@@ -5,17 +5,16 @@ from typing import ClassVar, Literal
 from uuid import UUID
 
 import ludwig.constants as ludwig_consts
+from config import TEMP_DIR
 from ludwig.api import LudwigModel
 from ludwig.callbacks import Callback
 from ludwig.utils.metric_utils import TrainerMetric
 from ludwig.utils.trainer_utils import ProgressTracker
 from opentelemetry import trace
-
-from ai_service.config import TEMP_DIR
-from ai_service.schema.command import Command
-from ai_service.schema.train_task import TrainTask
-from ai_service.services.nats import nats_service
-from ai_service.services.storage import (
+from schema.command import Command
+from schema.train_task import TrainTask
+from services.nats import nats_service
+from services.storage import (
     BUCKET_DATASETS,
     BUCKET_TRAINING,
     file_exists,

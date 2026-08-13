@@ -2,7 +2,7 @@
 // For more information, see: https://aspire.dev
 
 import { createBuilder } from './.aspire/modules/aspire.mjs'
-import CONSTANTS from './schema/constants.json'
+import CONSTANTS from './schema/constants.json' with { type: 'json' }
 
 const builder = await createBuilder()
 
@@ -15,15 +15,15 @@ const db = await builder
     name: 'ctu-theseus-database',
     isReadOnly: false,
   })
-  .addDatabase('ctu-theseus')
+  .addDatabase('ctu-theseus-db')
 
 const nats = await builder.addNats('nats').withJetStream().withDataVolume({
   name: 'ctu-theseus-nats',
   isReadOnly: false,
 })
 
-var s3AccessKey = await builder.addParameter('S3_ACCESS_KEY', { secret: true, value: 'ctu-theseus' })
-var s3SecretKey = await builder.addParameter('S3_SECRET_KEY', { secret: true, value: 'ctu-theseus-secret' })
+const s3AccessKey = await builder.addParameter('s3-access-key', { secret: true, value: 'ctu-theseus' })
+const s3SecretKey = await builder.addParameter('s3-secret-key', { secret: true, value: 'ctu-theseus-secret' })
 
 const rustfs = await builder
   .addRustFs('rustfs', {
@@ -36,16 +36,14 @@ const rustfs = await builder
   })
   .addBuckets([CONSTANTS.BUCKET_DATASETS, CONSTANTS.BUCKET_TRAINING, CONSTANTS.BUCKET_MODELS])
 
-var s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/CommunityToolkit/Aspire/blob/ef0aa306095fb4c7fd0c3ad2fc8c92caa18d5e2d/src/CommunityToolkit.Aspire.Hosting.RustFs/RustFsResource.cs#L12
+const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/CommunityToolkit/Aspire/blob/ef0aa306095fb4c7fd0c3ad2fc8c92caa18d5e2d/src/CommunityToolkit.Aspire.Hosting.RustFs/RustFsResource.cs#L12
 
-var worker = await builder
-  .addPythonModule('ai-worker', './ai_service', 'ai_service.main')
+const worker = await builder
+  .addPythonModule('ai-worker', './ai_service', 'main')
   .withUv()
   .withHttpEndpoint({
-    port: 8000,
-    targetPort: 8000,
     name: 'health',
-    isProxied: false,
+    env: 'PORT',
   })
   .withHttpHealthCheck({
     path: '/health',
@@ -58,12 +56,13 @@ var worker = await builder
   .waitFor(nats)
   .waitFor(rustfs)
 
-var gateway = await builder
+const gateway = await builder
   .addBunApp('gateway', './server', 'index.ts')
   .withHttpEndpoint({
     port: 3000,
     targetPort: 3000,
     isProxied: false,
+    env: 'PORT',
   })
   .withReference(db)
   .withReference(nats)
@@ -77,7 +76,7 @@ var gateway = await builder
   .waitFor(rustfs)
   .waitFor(worker)
 
-await builder
+const web = await builder
   .addViteApp('web', './web')
   .withBun()
   .withEndpoint({
@@ -88,5 +87,11 @@ await builder
   .withReference(gateway)
   .waitFor(gateway)
   .withExternalHttpEndpoints()
+
+await builder.addYarp('proxy')
+  .withConfiguration(async config => {
+    await config.addCatchAllRoute(web)
+    await config.addRoute('/api/{**catch-all}', gateway)
+  })
 
 await builder.build().run()

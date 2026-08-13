@@ -1,11 +1,11 @@
 import asyncio
 import logging
 
-from ai_service.schema.command import Command
-from ai_service.schema.export_task import ExportTask
-from ai_service.schema.train_task import TrainTask
-from ai_service.services.nats import nats_service
-from ai_service.services.storage import ensure_buckets
+from schema.command import Command
+from schema.export_task import ExportTask
+from schema.train_task import TrainTask
+from services.nats import nats_service
+from services.storage import ensure_buckets
 
 from .export import handle_export
 from .inference import handle_inference

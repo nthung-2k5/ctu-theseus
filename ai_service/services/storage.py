@@ -4,10 +4,9 @@ import shutil
 from uuid import UUID
 
 import boto3
+from config import S3_ACCESS_KEY, S3_ENDPOINT, S3_SECRET_KEY, TEMP_DIR
+from constants import BUCKET_DATASETS, BUCKET_MODELS, BUCKET_TRAINING
 from types_boto3_s3.type_defs import ObjectIdentifierTypeDef
-
-from ai_service.config import S3_ACCESS_KEY, S3_ENDPOINT, S3_SECRET_KEY, TEMP_DIR
-from ai_service.constants import BUCKET_DATASETS, BUCKET_MODELS, BUCKET_TRAINING
 
 logger = logging.getLogger(__name__)
 

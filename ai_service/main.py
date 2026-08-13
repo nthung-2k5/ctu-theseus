@@ -1,10 +1,10 @@
 import asyncio
 import logging
+import os
 
 from aiohttp import web
-
-from ai_service.tasks import close_task_workers, run_task_workers
-from ai_service.telemetry import init_telemetry
+from tasks import close_task_workers, run_task_workers
+from telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,8 @@ def main():
 
     # web.run_app automatically handles the asyncio event loop,
     # OS signals (SIGINT/SIGTERM), and graceful shutdown.
-    web.run_app(app, host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", "8080"))
+    web.run_app(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

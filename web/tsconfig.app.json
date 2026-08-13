@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
-    "types": ["vite/client"],
+    "types": ["bun", "react", "vite/client"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 
@@ -23,8 +23,9 @@
     "noFallthroughCasesInSwitch": true,
 
     "paths": {
-      "@server": ["../src/index.ts"],
-      "@server/*": ["../src/*"],
+      "@schema/*": ["../schema/*"],
+      "@server": ["../server/index.ts"],
+      "@server/*": ["../server/*"],
       "@public/*": ["./*"]
     }
   },

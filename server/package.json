@@ -16,7 +16,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",
     "@aws-sdk/s3-request-presigner": "^3.1101.0",
-    "@elysia/eden": "^1.4.10",
     "@elysia/jwt": "^1.4.2",
     "@elysia/opentelemetry": "^1.4.12",
     "@elysia/static": "^1.4.11",

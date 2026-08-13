@@ -9,6 +9,7 @@ from typing import Any, Literal
 import nats
 import nats.errors
 import nats.js.errors
+from config import NATS_URI
 from nats.aio.client import Client as NatsClient
 from nats.aio.msg import Msg
 from nats.js import JetStreamContext
@@ -20,8 +21,6 @@ from nats.js.api import (
 )
 from opentelemetry import propagate, trace
 from pydantic import BaseModel
-
-from ai_service.config import NATS_URI
 
 tracer = trace.get_tracer("theseus-worker")
 

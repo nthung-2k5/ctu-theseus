@@ -1,4 +1,3 @@
-import { staticPlugin } from '@elysia/static'
 import { telemetry } from '@server/lib/telemetry'
 import { classRoutes } from '@server/routes/classes'
 import { datasetRoutes } from '@server/routes/datasets'
@@ -42,13 +41,6 @@ const app = new Elysia()
     console.error(error)
     return 'Internal Server Error'
   })
-  .use(
-    await staticPlugin({
-      prefix: '/',
-      bunFullstack: true,
-      alwaysStatic: true,
-    }),
-  )
   /* ── Authentication ── */
   .mount(auth.handler)
   /* ── API Routes ── */

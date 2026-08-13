@@ -8,10 +8,9 @@ import pandas as pd
 from ludwig.api import LudwigModel
 from nats.aio.msg import Msg
 from opentelemetry import trace
-
-from ai_service.schema.inference_request import InferenceRequest
-from ai_service.services.nats import nats_service
-from ai_service.services.storage import download_model, find_model_dir
+from schema.inference_request import InferenceRequest
+from services.nats import nats_service
+from services.storage import download_model, find_model_dir
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("theseus-worker")
