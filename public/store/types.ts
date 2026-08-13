@@ -1,69 +1,164 @@
 /**
  * Shared type definitions used across all stores.
+ * Derived from the Elysia API types via Eden treaty.
  */
 
-import type { Treaty } from '@elysia/eden'
-import type { api } from '@public/lib/api'
+import type { ProjectTask as ServerProjectTask } from '@server/lib/enums'
 
-export type Project = Treaty.Data<ReturnType<typeof api.projects>['get']>['project']
+/* ── Modality ── */
+export type Modality = 'text' | 'vision' | 'audio' | 'tabular'
 
-export type DatasetClass = NonNullable<
-  Treaty.Data<ReturnType<ReturnType<typeof api.projects>['classes']['get']>>['classes']
->[number]
+/* ── Dataset (1:1 with project, PK = projectId) ── */
+export type SplitType = 'train' | 'validation' | 'test'
 
-export interface BoundingBox {
+export type DatasetVersionStatus = 'draft' | 'building' | 'ready' | 'failed'
+
+export type DatasetSplit = {
+  splitType: SplitType
+  itemCount?: number
+}
+
+/** A pool item's membership in a version (draft or snapshot), from GET /projects/:id. */
+export type DatasetVersionItem = {
+  versionId: string
+  itemId: string
+  splitType: SplitType
+}
+
+export type DatasetVersion = {
   id: string
-  imageId: string
+  datasetId: string
+  versionTag: string | null
+  augmentationConfig: unknown
+  status: DatasetVersionStatus
+  itemCount: number | null
+  classCount: number | null
+  failedMessage: string | null
+  createdAt: string | Date
+  /** Raw pool membership rows. GET /versions/:id returns computed `splits` instead. */
+  items?: DatasetVersionItem[]
+  splits?: DatasetSplit[]
+}
+
+/* ── Label Classes (for classification tasks) ── */
+export type LabelClass = {
   classId: string
-  x: number
-  y: number
-  width: number
-  height: number
+  datasetId: string
+  name: string
+  description: string | null
+  uiColorHex: string | null
+  createdAt: string | Date | null
 }
 
-export type DatasetImage = NonNullable<
-  Treaty.Data<ReturnType<ReturnType<typeof api.projects>['images']['get']>>['images'][number]
->
-
-export type DatasetSplitValue = 'train' | 'validation' | 'test'
-
-export interface SplitConfig {
-  train: number
-  validate: number
-  test: number
+export type Dataset = {
+  projectId: string
+  modality: Modality
+  createdAt: string | Date
+  updatedAt: string | Date
+  draft: DatasetVersion | null
+  versions: DatasetVersion[]
+  classes: LabelClass[]
 }
 
-// export interface AugmentationConfig {
-//   id: string
-//   name: string
-//   enabled: boolean
-//   params: Record<string, number | boolean | string>
-// }
-
-export interface TrainingConfig {
-  modelId: string
-  variantId: string
-  epochs: number
-  batchSize: number
-  learningRate: number
-  imageSize: number
+/* ── Project ── */
+export type Project = {
+  id: string
+  name: string
+  description: string | null
+  task: ProjectTask
+  createdAt: string | Date
+  draftDataset?: { modality: Modality } | null
 }
 
-export interface TrainingMetrics {
+export type ProjectDetail = {
+  id: string
+  name: string
+  description: string | null
+  task: ProjectTask
+  userId: string
+  createdAt: string | Date
+  updatedAt: string | Date
+  runCount: number
+  versionCount: number
+  dataset: Dataset | null
+}
+
+/* ── Dataset Items ── */
+export type DatasetItem = {
+  id: string
+  datasetId: string
+  externalId: string | null
+  storageUrl: string | null
+  downloadUrl: string | null
+  createdAt: string | Date
+  textFeatures: unknown
+  visionFeatures: unknown
+  audioFeatures: unknown
+  tabularFeatures: unknown
+  annotations: Annotation[]
+}
+
+/* ── Annotations ── */
+export type AnnotationType =
+  | 'classification'
+  | 'bounding_box'
+  | 'segmentation_mask'
+  | 'text_sequence'
+  | 'token_tags'
+  | 'preference_rank'
+
+export type Annotation = {
+  id: string
+  itemId: string
+  annotatorId: string | null
+  annotationType: AnnotationType
+  classId: string | null
+  labelTextSequence: string | null
+  labelStructured: unknown
+  confidenceScore: string | null
+  createdAt: string | Date | null
+}
+
+/* ── Training ── */
+export type TrainingRunSummary = {
+  id: string
+  name: string
+  status: TrainingStatus
+  datasetVersionId: string
+  startedAt: string | Date | null
+  createdAt: string | Date
+}
+
+export type TrainingRunDetail = {
+  id: string
+  name: string
+  status: TrainingStatus
+  hyperparameters: unknown
+  failedMessage: string | null
+  startedAt: string | Date | null
+  completedAt: string | Date | null
+  createdAt: string | Date
+  datasetVersion: {
+    dataset?: { projectId?: string; modality?: Modality }
+  } | null
+  metrics: TrainingMetric[]
+}
+
+export type TrainingMetric = {
+  trainingRunId: string
   epoch: number
-  trainLoss: number
-  valLoss: number
-  accuracy: number
-  mAP: number
+  split: SplitType
+  metricName: string
+  metricValue: number
+  createdAt: string | Date
 }
 
-export type TrainingStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed'
+export type TrainingStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 
-export type TrainingRunSummary = Treaty.Data<ReturnType<typeof api.projects>['runs']['get']>['runs'][number]
-
-export type TrainingRunDetail = Treaty.Data<ReturnType<typeof api.runs>['get']>
-
-export type TrainingRunStatus = Treaty.Data<ReturnType<typeof api.runs>['status']['get']>
-
-export type TrainingVersionConfig = Parameters<ReturnType<typeof api.projects>['train']['post']>[0]
-
+/**
+ * The task registry (`@server/lib/tasks`) is the single source of truth for
+ * task→modality/label-classes/trainer-knob behavior; `isClassificationTask`
+ * lives there now. This re-export just points ML task IDs at the
+ * authoritative enum instead of a second hand-maintained list.
+ */
+export type ProjectTask = ServerProjectTask

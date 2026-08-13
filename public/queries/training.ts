@@ -12,15 +12,13 @@ export const training = createQueryKeys('training', {
     queryKey: [runId],
     queryFn: wrapEdenFn(() => api.runs({ runId }).get()),
   }),
-  runStatus: (runId: string) => ({
-    queryKey: [runId, 'status'],
-    queryFn: wrapEdenFn(() => api.runs({ runId }).status.get()),
-  }),
 })
 
 /**
- * Fetch all training runs for a project.
- * Polls every 5s when any run is not completed.
+ * Fetch all training runs for a project. Polls every 3s while any run is
+ * queued or running — cheap, and it's what catches a run moving out of
+ * `queued`. Once a run is active its live status/metrics come from the SSE
+ * stream (useRunEvents) instead of polling.
  */
 export function useTrainingRuns(projectId: string) {
   return useQuery({
@@ -28,9 +26,7 @@ export function useTrainingRuns(projectId: string) {
     refetchInterval: (query) => {
       const data = query.state.data as { runs: { status: string }[] } | undefined
       if (!data) return false
-      const hasActive = data.runs.some(
-        (r) => r.status !== 'completed',
-      )
+      const hasActive = data.runs.some((r) => r.status === 'queued' || r.status === 'running')
       return hasActive ? 3000 : false
     },
   })
@@ -38,23 +34,10 @@ export function useTrainingRuns(projectId: string) {
 
 /**
  * Fetch the full detail (with metrics) for a single run.
- * Only enabled when the run is completed.
  */
 export function useTrainingRunDetail(runId: string | undefined, enabled: boolean) {
   return useQuery({
     ...training.runDetail(runId ?? ''),
     enabled: !!runId && enabled,
-  })
-}
-
-/**
- * Short-poll the current status + latest metrics for an active run.
- * Polls every 2s while the run is still training/queued.
- */
-export function useTrainingRunStatus(runId: string | undefined, isActive: boolean) {
-  return useQuery({
-    ...training.runStatus(runId ?? ''),
-    enabled: !!runId && isActive,
-    refetchInterval: isActive ? 2000 : false,
   })
 }

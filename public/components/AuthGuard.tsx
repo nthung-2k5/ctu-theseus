@@ -9,8 +9,8 @@ interface AuthGuardProps {
 }
 
 /**
- * Wraps protected routes. On mount it checks the session.
- * While loading it shows a spinner; if not authenticated it redirects to /login.
+ * Wraps protected routes. On mount, it checks the session.
+ * While loading, it shows a spinner; if not authenticated it redirects to /login.
  */
 export function AuthGuard({ children }: AuthGuardProps) {
   const [, setLocation] = useLocation()

@@ -34,7 +34,9 @@ import {
   WarningCircleIcon,
   XCircleIcon,
 } from '@phosphor-icons/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '@public/lib/api'
+import { useTrainingRuns } from '@public/queries/training'
+import { useState } from 'react'
 import { useParams } from 'wouter'
 
 /* ------------------------------------------------------------------ */
@@ -47,15 +49,6 @@ type InferenceResult = Record<string, number>
 interface DetectionEntry {
   className: string
   confidence: number
-}
-
-type InferenceStatus = 'idle' | 'connecting' | 'connected' | 'inferring' | 'exporting'
-
-interface ExportJob {
-  jobId: string
-  format: string
-  status: 'pending' | 'success' | 'failed'
-  error?: string
 }
 
 const EXPORT_FORMATS = [
@@ -79,148 +72,18 @@ export function InferencePage() {
   // Confidence threshold
   const [threshold, setThreshold] = useState(0.5)
 
-  // WebSocket
-  const wsRef = useRef<WebSocket | null>(null)
-  const [wsStatus, setWsStatus] = useState<InferenceStatus>('idle')
-  const [wsConnected, setWsConnected] = useState(false)
+  // Selected model (training run)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+
+  // Status
+  const [isInferring, setIsInferring] = useState(false)
 
   // Export
   const [exportFormat, setExportFormat] = useState('onnx')
-  const [exportJobs, setExportJobs] = useState<ExportJob[]>([])
 
-  // Reconnect
-  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
-  const mountedRef = useRef(true)
-
-  /* ── WebSocket connection ──────────────────────────────────────── */
-  const connectWs = useCallback(() => {
-    if (!mountedRef.current) return
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
-
-    setWsStatus('connecting')
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/inference/${projectId}/ws`)
-
-    ws.onopen = () => {
-      if (!mountedRef.current) { ws.close(); return }
-      setWsConnected(true)
-      setWsStatus('connected')
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-
-        switch (msg.type) {
-          case 'connected':
-            break
-
-          case 'inference_queued':
-            // Job dispatched, wait for result
-            break
-
-          case 'inference_result':
-            setWsStatus('connected')
-            if (msg.status === 'success' && msg.result) {
-              // Result is a dict: { className: confidence }
-              const resultDict: InferenceResult = msg.result
-              setDetections(resultDict)
-              notifications.show({
-                title: 'Inference Complete',
-                message: `${Object.keys(resultDict).length} class(es) predicted`,
-                color: 'teal',
-                icon: <CheckCircleIcon size={18} />,
-              })
-            } else {
-              notifications.show({
-                title: 'Inference Failed',
-                message: msg.error ?? 'Unknown error',
-                color: 'red',
-                icon: <XCircleIcon size={18} />,
-              })
-            }
-            break
-
-          case 'export_queued':
-            setExportJobs((prev) => [
-              ...prev,
-              { jobId: msg.jobId, format: msg.format, status: 'pending' },
-            ])
-            notifications.show({
-              title: 'Export Started',
-              message: `Exporting model to ${msg.format.toUpperCase()}...`,
-              color: 'blue',
-              icon: <ExportIcon size={18} />,
-            })
-            break
-
-          case 'export_result':
-            setWsStatus('connected')
-            setExportJobs((prev) =>
-              prev.map((j) =>
-                j.jobId === msg.jobId
-                  ? { ...j, status: msg.status, error: msg.error }
-                  : j,
-              ),
-            )
-            if (msg.status === 'success') {
-              notifications.show({
-                title: 'Export Complete',
-                message: 'Model exported successfully! Click download below.',
-                color: 'teal',
-                icon: <CheckCircleIcon size={18} />,
-              })
-            } else {
-              notifications.show({
-                title: 'Export Failed',
-                message: msg.error ?? 'Unknown error',
-                color: 'red',
-                icon: <XCircleIcon size={18} />,
-              })
-            }
-            break
-
-          case 'error':
-            setWsStatus('connected')
-            notifications.show({
-              title: 'Error',
-              message: msg.message,
-              color: 'red',
-              icon: <WarningCircleIcon size={18} />,
-            })
-            break
-        }
-      } catch {
-        // ignore parse errors
-      }
-    }
-
-    ws.onclose = () => {
-      setWsConnected(false)
-      setWsStatus('idle')
-      // Auto-reconnect after 3s
-      if (mountedRef.current) {
-        reconnectTimeoutRef.current = setTimeout(connectWs, 3000)
-      }
-    }
-
-    ws.onerror = () => {
-      ws.close()
-    }
-
-    wsRef.current = ws
-  }, [projectId])
-
-  useEffect(() => {
-    mountedRef.current = true
-    connectWs()
-    return () => {
-      mountedRef.current = false
-      clearTimeout(reconnectTimeoutRef.current)
-      wsRef.current?.close()
-    }
-  }, [connectWs])
+  // Fetch succeeded training runs
+  const { data: runsData } = useTrainingRuns(projectId)
+  const completedRuns = (runsData?.runs ?? []).filter((r) => r.status === 'succeeded')
 
   /* ── Handlers ──────────────────────────────────────────────────── */
   const handleDrop = (files: File[]) => {
@@ -232,46 +95,60 @@ export function InferencePage() {
   }
 
   const handleInfer = async () => {
-    if (!imageFile || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      notifications.show({ title: 'Not Ready', message: 'WebSocket is not connected.', color: 'orange' })
+    if (!imageFile || !selectedRunId) {
+      notifications.show({ title: 'Not Ready', message: 'Please select a model and upload an image.', color: 'orange' })
       return
     }
-    setWsStatus('inferring')
+    setIsInferring(true)
     setDetections(null)
 
-    // Read file as base64
-    const reader = new FileReader()
-    reader.onload = () => {
-      const base64 = reader.result as string
-      wsRef.current?.send(
-        JSON.stringify({
-          type: 'inference',
-          image: base64,
-          imageName: imageFile.name,
-          threshold,
-        }),
-      )
-    }
-    reader.readAsDataURL(imageFile)
-  }
+    try {
+      const response = await api.inference({ runId: selectedRunId }).post({
+        image: imageFile,
+        threshold,
+      })
 
-  const handleExport = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      notifications.show({ title: 'Not Ready', message: 'WebSocket is not connected.', color: 'orange' })
-      return
+      if (response.error) {
+        notifications.show({
+          title: 'Inference Failed',
+          message: typeof response.error.value === 'string' ? response.error.value : 'Unknown error',
+          color: 'red',
+          icon: <XCircleIcon size={18} />,
+        })
+      } else if (response.data) {
+        const data = response.data as any
+        if (data.status === 'success' && data.results) {
+          setDetections(data.results)
+          notifications.show({
+            title: 'Inference Complete',
+            message: `${Object.keys(data.results).length} class(es) predicted`,
+            color: 'teal',
+            icon: <CheckCircleIcon size={18} />,
+          })
+        } else if (data.status === 'failed') {
+          notifications.show({
+            title: 'Inference Failed',
+            message: data.error ?? 'Unknown error',
+            color: 'red',
+            icon: <XCircleIcon size={18} />,
+          })
+        }
+      }
+    } catch (err) {
+      notifications.show({
+        title: 'Inference Error',
+        message: err instanceof Error ? err.message : 'Unknown error',
+        color: 'red',
+      })
+    } finally {
+      setIsInferring(false)
     }
-    setWsStatus('exporting')
-    wsRef.current.send(
-      JSON.stringify({
-        type: 'export',
-        format: exportFormat,
-      }),
-    )
   }
 
   const handleDownload = (format: string) => {
+    if (!selectedRunId) return
     const a = document.createElement('a')
-    a.href = `/api/inference/${projectId}/download/${format}`
+    a.href = `/api/runs/${selectedRunId}/download/${format}`
     a.download = `model.${format}`
     document.body.appendChild(a)
     a.click()
@@ -292,51 +169,17 @@ export function InferencePage() {
         .sort((a, b) => b.confidence - a.confidence)
     : null
 
-  const isInferring = wsStatus === 'inferring'
-  const isExporting = wsStatus === 'exporting'
-
   /* ── Render ────────────────────────────────────────────────────── */
   return (
     <Box>
       <Stack gap="xl">
         {/* Page header */}
-        <Group justify="space-between" align="flex-end">
-          <div>
-            <Title order={2}>Inference & Export</Title>
-            <Text size="sm" c="dimmed" mt={4}>
-              Run predictions with your trained model and export weights
-            </Text>
-          </div>
-          <Badge
-            size="lg"
-            variant="dot"
-            color={wsConnected ? 'teal' : 'red'}
-            style={{ textTransform: 'none' }}
-          >
-            {wsConnected ? 'WebSocket Connected' : 'Disconnected'}
-          </Badge>
-        </Group>
-
-        {/* Warning if not connected */}
-        <Transition mounted={!wsConnected} transition="slide-down" duration={200}>
-          {(styles) => (
-            <Card withBorder p="lg" radius="md" bg="dark.7" style={styles}>
-              <Group gap="sm">
-                <ThemeIcon variant="light" color="yellow">
-                  <WarningCircleIcon size={18} />
-                </ThemeIcon>
-                <div>
-                  <Text size="sm" fw={500}>
-                    WebSocket disconnected
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Attempting to reconnect automatically...
-                  </Text>
-                </div>
-              </Group>
-            </Card>
-          )}
-        </Transition>
+        <div>
+          <Title order={2}>Inference & Export</Title>
+          <Text size="sm" c="dimmed" mt={4}>
+            Run predictions with your trained model and export weights
+          </Text>
+        </div>
 
         <Grid gap="xl">
           {/* ── Left: Image & Results ── */}
@@ -387,10 +230,7 @@ export function InferencePage() {
                   </Dropzone>
                 ) : (
                   <Box pos="relative">
-                    <Paper
-                      radius="md"
-                      style={{ overflow: 'hidden', position: 'relative' }}
-                    >
+                    <Paper radius="md" style={{ overflow: 'hidden', position: 'relative' }}>
                       <img
                         src={imageUrl}
                         alt="Test"
@@ -402,12 +242,7 @@ export function InferencePage() {
                         }}
                       />
                       {isInferring && (
-                        <Overlay
-                          center
-                          backgroundOpacity={0.4}
-                          blur={2}
-                          radius="md"
-                        >
+                        <Overlay center backgroundOpacity={0.4} blur={2} radius="md">
                           <Stack align="center" gap="xs">
                             <Loader size="lg" color="white" />
                             <Text size="sm" c="white" fw={500}>
@@ -421,18 +256,14 @@ export function InferencePage() {
                       <Button
                         onClick={handleInfer}
                         loading={isInferring}
-                        disabled={!wsConnected}
+                        disabled={!selectedRunId}
                         leftSection={<LightningIcon size={18} weight="fill" />}
                         variant="gradient"
                         gradient={{ from: 'primary', to: 'secondary' }}
                       >
                         Run Inference
                       </Button>
-                      <Button
-                        variant="subtle"
-                        color="gray"
-                        onClick={handleClear}
-                      >
+                      <Button variant="subtle" color="gray" onClick={handleClear}>
                         Clear
                       </Button>
                     </Group>
@@ -461,11 +292,9 @@ export function InferencePage() {
                         {filteredDetections.map((d) => (
                           <Paper key={d.className} p="sm" radius="sm" withBorder>
                             <Group justify="space-between">
-                              <Group gap="sm">
-                                <Badge variant="filled" color="primary" size="sm">
-                                  {d.className}
-                                </Badge>
-                              </Group>
+                              <Badge variant="filled" color="primary" size="sm">
+                                {d.className}
+                              </Badge>
                               <Group gap="xs">
                                 <Progress
                                   value={d.confidence * 100}
@@ -500,6 +329,29 @@ export function InferencePage() {
           {/* ── Right: Controls ── */}
           <Grid.Col span={{ base: 12, md: 4 }}>
             <Stack gap="md">
+              {/* Model Selection */}
+              <Card withBorder padding="lg" radius="md">
+                <Title order={5} mb="md">
+                  Trained Model
+                </Title>
+                <Select
+                  label="Select a completed training run"
+                  placeholder="Choose model..."
+                  data={completedRuns.map((r) => ({
+                    value: r.id,
+                    label: r.name,
+                  }))}
+                  value={selectedRunId}
+                  onChange={setSelectedRunId}
+                  searchable
+                />
+                {completedRuns.length === 0 && (
+                  <Text size="xs" c="dimmed" mt="sm">
+                    No completed training runs available. Train a model first.
+                  </Text>
+                )}
+              </Card>
+
               {/* Confidence Threshold */}
               <Card withBorder padding="lg" radius="md">
                 <Title order={5} mb="md">
@@ -536,7 +388,7 @@ export function InferencePage() {
                   <Title order={5}>Export Model</Title>
                 </Group>
                 <Text size="sm" c="dimmed" mb="md">
-                  Export trained weights for deployment on mobile or edge devices
+                  Download trained weights for deployment
                 </Text>
                 <Select
                   label="Export Format"
@@ -549,103 +401,12 @@ export function InferencePage() {
                   fullWidth
                   variant="gradient"
                   gradient={{ from: 'secondary.5', to: 'primary.5' }}
-                  leftSection={<ExportIcon size={18} />}
-                  onClick={handleExport}
-                  loading={isExporting}
-                  disabled={!wsConnected}
+                  leftSection={<DownloadSimpleIcon size={18} />}
+                  onClick={() => handleDownload(exportFormat)}
+                  disabled={!selectedRunId}
                 >
-                  Start Export
+                  Download {exportFormat.toUpperCase()}
                 </Button>
-
-                {/* Export History */}
-                {exportJobs.length > 0 && (
-                  <>
-                    <Divider my="md" label="Export History" labelPosition="center" />
-                    <Stack gap="xs">
-                      {exportJobs.map((job) => (
-                        <Paper key={job.jobId} p="xs" radius="sm" withBorder>
-                          <Group justify="space-between">
-                            <Group gap="xs">
-                              <Badge
-                                size="xs"
-                                variant="light"
-                                color={
-                                  job.status === 'success'
-                                    ? 'teal'
-                                    : job.status === 'failed'
-                                      ? 'red'
-                                      : 'yellow'
-                                }
-                              >
-                                {job.status === 'pending' && <Loader size={8} mr={4} />}
-                                {job.status}
-                              </Badge>
-                              <Text size="xs" fw={500}>
-                                {job.format.toUpperCase()}
-                              </Text>
-                            </Group>
-                            {job.status === 'success' && (
-                              <Tooltip label={`Download ${job.format.toUpperCase()}`}>
-                                <ActionIcon
-                                  variant="light"
-                                  color="teal"
-                                  size="sm"
-                                  onClick={() => handleDownload(job.format)}
-                                >
-                                  <DownloadSimpleIcon size={14} />
-                                </ActionIcon>
-                              </Tooltip>
-                            )}
-                            {job.status === 'failed' && (
-                              <Tooltip label={job.error ?? 'Export failed'}>
-                                <ThemeIcon variant="light" color="red" size="sm">
-                                  <XCircleIcon size={14} />
-                                </ThemeIcon>
-                              </Tooltip>
-                            )}
-                          </Group>
-                        </Paper>
-                      ))}
-                    </Stack>
-                  </>
-                )}
-              </Card>
-
-              {/* Connection Info */}
-              <Card withBorder padding="lg" radius="md" bg="dark.8">
-                <Title order={6} mb="xs" c="dimmed">
-                  Connection Info
-                </Title>
-                <Stack gap={4}>
-                  <Group justify="space-between">
-                    <Text size="xs" c="dimmed">
-                      Protocol
-                    </Text>
-                    <Badge size="xs" variant="outline" color="gray">
-                      WebSocket
-                    </Badge>
-                  </Group>
-                  <Group justify="space-between">
-                    <Text size="xs" c="dimmed">
-                      Status
-                    </Text>
-                    <Badge
-                      size="xs"
-                      variant="dot"
-                      color={wsConnected ? 'teal' : 'red'}
-                    >
-                      {wsStatus}
-                    </Badge>
-                  </Group>
-                  <Group justify="space-between">
-                    <Text size="xs" c="dimmed">
-                      Delivery
-                    </Text>
-                    <Badge size="xs" variant="outline" color="gray">
-                      Webhook → WS Push
-                    </Badge>
-                  </Group>
-                </Stack>
               </Card>
             </Stack>
           </Grid.Col>

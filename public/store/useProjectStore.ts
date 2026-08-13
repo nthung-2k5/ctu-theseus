@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import type { Project } from './types'
+import type { ProjectDetail } from './types'
 
 interface ProjectState {
-  activeProject: Project | null
-  setActiveProject: (project: Project | null) => void
+  activeProject: ProjectDetail | null
+  setActiveProject: (project: ProjectDetail | null) => void
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({

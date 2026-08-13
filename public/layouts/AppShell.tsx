@@ -23,14 +23,17 @@ import {
   GearIcon,
   HouseIcon,
   ListIcon,
+  PackageIcon,
   SignOutIcon,
-  TagChevronIcon,
-  UploadIcon,
+  StackIcon,
+  TagIcon,
+  UploadSimpleIcon,
   UserIcon,
 } from '@phosphor-icons/react'
 import { authClient } from '@public/lib/auth'
-import type { Project } from '@public/store/types'
+import type { ProjectDetail } from '@public/store/types'
 import { useProjectStore } from '@public/store/useProjectStore'
+import { isClassificationTask } from '@server/lib/tasks'
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'wouter'
 
@@ -40,38 +43,45 @@ interface AppShellProps {
 
 const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
 
+const hasReadyVersion = (project: ProjectDetail) =>
+  project.dataset?.versions?.some((v) => v.status === 'ready') ?? false
+
 const PROJECT_NAV_ITEMS = [
   { label: 'Overview', icon: DatabaseIcon, path: '' },
-  { label: 'Classes', icon: TagChevronIcon, path: '/classes' },
   {
-    label: 'Upload',
-    icon: UploadIcon,
-    path: '/upload',
-    disabled: (project: Project) => project.classCount === 0,
+    label: 'Data',
+    icon: UploadSimpleIcon,
+    path: '/data',
   },
   {
     label: 'Dataset',
-    icon: DatabaseIcon,
+    icon: StackIcon,
     path: '/dataset',
-    disabled: (project: Project) => project.classCount === 0,
   },
-  // {
-  //   label: 'Labeling',
-  //   icon: TagIcon,
-  //   path: '/labeling',
-  //   disabled: (project: Project) => project.imageCount === 0,
-  // },
+  {
+    label: 'Classes',
+    icon: TagIcon,
+    path: '/classes',
+    /** Only visible for tasks that use label classes */
+    hidden: (project: ProjectDetail) => !isClassificationTask(project.task),
+  },
   {
     label: 'Training',
     icon: BrainIcon,
     path: '/training',
-    disabled: (project: Project) => project.imageCount === 0,
+    disabled: (project: ProjectDetail) => !hasReadyVersion(project),
+  },
+  {
+    label: 'Models',
+    icon: PackageIcon,
+    path: '/models',
+    disabled: (project: ProjectDetail) => (project.runCount ?? 0) === 0,
   },
   {
     label: 'Inference',
     icon: CrosshairIcon,
     path: '/inference',
-    disabled: (project: Project) => project.versionCount === 0,
+    disabled: (project: ProjectDetail) => (project.runCount ?? 0) === 0,
   },
 ]
 
@@ -175,7 +185,7 @@ export function AppShell({ children }: AppShellProps) {
                   variant="light"
                 />
                 <Divider my="xs" label="Project" labelPosition="left" />
-                {PROJECT_NAV_ITEMS.map((item) => {
+                {PROJECT_NAV_ITEMS.filter((item) => !item.hidden?.(activeProject)).map((item) => {
                   const fullPath = `/project/${activeProject.id}${item.path}`
                   return (
                     <NavLink
@@ -198,7 +208,7 @@ export function AppShell({ children }: AppShellProps) {
           <Divider my="xs" />
           <Box px="xs" py={4}>
             <Text size="xs" c="dimmed">
-              CTU Theseus v0.1
+              CTU Theseus v0.2
             </Text>
           </Box>
         </MantineAppShell.Section>

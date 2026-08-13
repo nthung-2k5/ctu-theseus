@@ -21,53 +21,60 @@ import {
   BrainIcon,
   CrosshairIcon,
   DatabaseIcon,
-  MagicWandIcon,
   PencilSimpleIcon,
-  TabsIcon,
-  TagChevronIcon,
+  StackIcon,
   TagIcon,
 } from '@phosphor-icons/react'
 import { api } from '@public/lib/api'
 import { assert } from '@public/lib/assert'
+import { MODALITY_COLORS } from '@public/lib/constants'
 import { useEdenMutation } from '@public/lib/eden-query'
 import { queries } from '@public/queries'
-import type { Project } from '@public/store/types'
+import type { ProjectDetail } from '@public/store/types'
 import { useProjectStore } from '@public/store/useProjectStore'
+import { isClassificationTask } from '@server/lib/tasks'
 import { useLocation, useParams } from 'wouter'
 
-const WORKFLOW_STEPS = [
+const BASE_WORKFLOW_STEPS = [
   {
-    label: 'Dataset',
-    desc: 'Upload images and define classes',
+    label: 'Data',
+    desc: 'Upload items and build a labeled pool for training',
     icon: DatabaseIcon,
-    path: '/dataset',
+    path: '/data',
     color: 'primary',
   },
   {
-    label: 'Labeling',
-    desc: 'Label images manually or auto-detect',
-    icon: TagIcon,
-    path: '/labeling',
-    color: 'secondary',
+    label: 'Dataset',
+    desc: 'Assign splits and create version snapshots for training',
+    icon: StackIcon,
+    path: '/dataset',
+    color: 'blue',
   },
   {
-    label: 'Augmentation',
-    desc: 'Configure data augmentation',
-    icon: MagicWandIcon,
-    path: '/augmentation',
-    color: 'violet',
+    label: 'Training',
+    desc: 'Train models on dataset versions and monitor progress',
+    icon: BrainIcon,
+    path: '/training',
+    color: 'teal',
   },
-  { label: 'Training', desc: 'Select model and train', icon: BrainIcon, path: '/training', color: 'teal' },
   {
     label: 'Inference',
-    desc: 'Test model and export weights',
+    desc: 'Test trained models and export weights for deployment',
     icon: CrosshairIcon,
     path: '/inference',
     color: 'orange',
   },
 ]
 
-const UpdateProjectModal = ({ project }: { project: Project }) => {
+const CLASSES_STEP = {
+  label: 'Classes',
+  desc: 'Define label classes for classification annotations',
+  icon: TagIcon,
+  path: '/classes',
+  color: 'violet',
+}
+
+const UpdateProjectModal = ({ project }: { project: ProjectDetail }) => {
   const form = useForm({
     initialValues: { name: project.name, description: project.description },
     validate: {
@@ -75,21 +82,25 @@ const UpdateProjectModal = ({ project }: { project: Project }) => {
     },
   })
 
-  const updateProject = useEdenMutation(api.projects({ projectId: project.id }).patch, [queries.projects.all.queryKey, queries.projects.detail(project.id).queryKey], {
-    onSuccess: ({ project }) => {
-      notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
-      form.reset()
-      modals.closeAll()
+  const updateProject = useEdenMutation(
+    api.projects({ projectId: project.id }).patch,
+    [queries.projects.all.queryKey, queries.projects.detail(project.id).queryKey],
+    {
+      onSuccess: ({ project }) => {
+        notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
+        form.reset()
+        modals.closeAll()
+      },
+      onError: (error) => {
+        assert(error.status === 404 || error.status === 422)
+        notifications.show({
+          title: 'Error',
+          message: error.status === 404 ? error.value : (error.value?.message ?? 'Failed to update project'),
+          color: 'red',
+        })
+      },
     },
-    onError: (error) => {
-      assert(error.status === 404 || error.status === 422)
-      notifications.show({
-        title: 'Error',
-        message: error.status === 404 ? error.value : (error.value?.message ?? 'Failed to update project'),
-        color: 'red',
-      })
-    },
-  })
+  )
 
   return (
     <form onSubmit={form.onSubmit((values) => updateProject.mutate(values))}>
@@ -97,7 +108,7 @@ const UpdateProjectModal = ({ project }: { project: Project }) => {
         <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
         <Textarea
           label="Description"
-          placeholder="What are you training the model to detect?"
+          placeholder="What is this project about?"
           autosize
           minRows={3}
           {...form.getInputProps('description')}
@@ -117,6 +128,13 @@ export function ProjectPage() {
   const params = useParams<{ id: string }>()
   const [, setLocation] = useLocation()
   const activeProject = useProjectStore((s) => s.activeProject)
+
+  const dataset = activeProject?.dataset
+  const versionCount = (dataset?.versions?.length ?? 0) + (dataset?.draft ? 1 : 0)
+
+  const WORKFLOW_STEPS = isClassificationTask(activeProject?.task)
+    ? [BASE_WORKFLOW_STEPS[0], CLASSES_STEP, ...BASE_WORKFLOW_STEPS.slice(1)]
+    : BASE_WORKFLOW_STEPS
 
   const handleEditClick = () => {
     assert(activeProject)
@@ -143,6 +161,18 @@ export function ProjectPage() {
           <Text size="sm" c="dimmed" mt={4}>
             {activeProject?.description ?? 'Project overview and workflow'}
           </Text>
+          <Group gap="xs" mt="xs">
+            {activeProject?.task && (
+              <Badge variant="light" size="sm">
+                {activeProject.task.replace(/_/g, ' ')}
+              </Badge>
+            )}
+            {dataset && (
+              <Badge variant="light" color={MODALITY_COLORS[dataset.modality]} size="sm">
+                {dataset.modality}
+              </Badge>
+            )}
+          </Group>
         </div>
 
         {/* Stats */}
@@ -154,25 +184,25 @@ export function ProjectPage() {
               </ThemeIcon>
               <div>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Dataset Images
+                  Dataset Versions
                 </Text>
                 <Text size="xl" fw={700}>
-                  {activeProject?.imageCount}
+                  {versionCount}
                 </Text>
               </div>
             </Group>
           </Card>
           <Card withBorder padding="lg" radius="md">
             <Group>
-              <ThemeIcon size="lg" variant="light" color="secondary">
-                <TagChevronIcon size={22} />
+              <ThemeIcon size="lg" variant="light" color="teal">
+                <BrainIcon size={22} />
               </ThemeIcon>
               <div>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Classes
+                  Training Runs
                 </Text>
                 <Text size="xl" fw={700}>
-                  {activeProject?.classCount}
+                  {activeProject?.runCount ?? 0}
                 </Text>
               </div>
             </Group>
@@ -180,38 +210,18 @@ export function ProjectPage() {
           <Card withBorder padding="lg" radius="md">
             <Group>
               <ThemeIcon size="lg" variant="light" color="violet">
-                <TabsIcon size={22} />
+                <StackIcon size={22} />
               </ThemeIcon>
               <div>
                 <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Versions
+                  Modality
                 </Text>
-                <Text size="xl" fw={700}>
-                  {activeProject?.versionCount}
+                <Text size="sm" fw={500} tt="capitalize">
+                  {dataset?.modality ?? '—'}
                 </Text>
               </div>
             </Group>
           </Card>
-          {/* <Card withBorder padding="lg" radius="md">
-            <Group>
-              <ThemeIcon size="lg" variant="light" color="violet">
-                <ChartBarIcon size={22} />
-              </ThemeIcon>
-              <div>
-                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Dataset Split
-                </Text>
-                <Text size="sm" fw={500}>
-                  {splitConfig.train}/{splitConfig.validate}/{splitConfig.test}
-                </Text>
-              </div>
-            </Group>
-            <Progress.Root size="sm" mt="sm">
-              <Progress.Section value={splitConfig.train} color="green" />
-              <Progress.Section value={splitConfig.validate} color="yellow" />
-              <Progress.Section value={splitConfig.test} color="red" />
-            </Progress.Root>
-          </Card> */}
         </SimpleGrid>
 
         {/* Workflow */}

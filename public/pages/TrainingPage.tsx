@@ -1,13 +1,12 @@
 import { Badge, Box, Button, Card, Grid, Group, Loader, ScrollArea, Stack, Text, ThemeIcon, Title } from '@mantine/core'
 import { BrainIcon, PlusIcon } from '@phosphor-icons/react'
-import { CreateVersionPanel } from '@public/components/training/CreateVersionPanel'
+import { CreateRunPanel } from '@public/components/training/CreateRunPanel'
 import { STATUS_COLORS } from '@public/components/training/constants'
 import { VersionDetailPanel } from '@public/components/training/VersionDetailPanel'
 import { api } from '@public/lib/api'
 import { useEdenMutation } from '@public/lib/eden-query'
 import { training, useTrainingRuns } from '@public/queries/training'
-import type { TrainingRunSummary, TrainingVersionConfig } from '@public/store/types'
-import { useQueryClient } from '@tanstack/react-query'
+import type { TrainingRunSummary } from '@public/store/types'
 import { useState } from 'react'
 import { useParams } from 'wouter'
 
@@ -15,7 +14,6 @@ export function TrainingPage() {
   const params = useParams<{ id: string }>()
   const projectId = params.id
 
-  const queryClient = useQueryClient()
   const [selectedView, setSelectedView] = useState<'create' | string>('create')
 
   /* ── Fetch runs from API (polls while any run is active) ── */
@@ -26,33 +24,28 @@ export function TrainingPage() {
 
   /* ── Start training mutation ── */
   const startTraining = useEdenMutation(
-    (config: TrainingVersionConfig) => api.projects({ projectId }).train.post(config),
+    (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) =>
+      api.projects({ projectId }).train.post(config),
     [training.runs(projectId).queryKey],
+    {
+      onSuccess: ({ run }) => setSelectedView(run.id),
+    },
   )
 
   /* ── Stop training mutation ── */
   const stopTraining = useEdenMutation(
-    (runId: string) => api.runs({ runId }).stop.post(),
+    (runId: string) => api.runs({ runId }).cancel.post(),
     [training.runs(projectId).queryKey],
   )
 
   /* ── Handlers ── */
-  const handleStartTraining = (config: TrainingVersionConfig) => {
-    startTraining.mutate(config, {
-      onSuccess: () => {
-        // Refetch runs to get the new run
-        queryClient.invalidateQueries({ queryKey: training.runs(projectId).queryKey })
-      },
-    })
+  const handleStartTraining = (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) => {
+    startTraining.mutate(config)
   }
 
   const handleStopTraining = () => {
     if (!selectedRun) return
-    stopTraining.mutate(selectedRun.id, {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: training.runs(projectId).queryKey })
-      },
-    })
+    stopTraining.mutate(selectedRun.id)
   }
 
   return (
@@ -62,12 +55,12 @@ export function TrainingPage() {
         <div>
           <Title order={2}>Training</Title>
           <Text size="sm" c="dimmed" mt={4}>
-            Manage training versions and monitor progress
+            Manage training runs and monitor progress
           </Text>
         </div>
 
         <Grid gap="lg">
-          {/* ── Left sidebar: version list ── */}
+          {/* ── Left sidebar: run list ── */}
           <Grid.Col span={{ base: 12, md: 3 }}>
             <Stack gap="sm">
               <Button
@@ -76,7 +69,7 @@ export function TrainingPage() {
                 variant={selectedView === 'create' ? 'filled' : 'light'}
                 onClick={() => setSelectedView('create')}
               >
-                New Version
+                New Run
               </Button>
 
               <ScrollArea h="calc(100vh - 260px)" offsetScrollbars>
@@ -88,8 +81,7 @@ export function TrainingPage() {
                   )}
 
                   {runs.map((run, index) => {
-                    const versionNumber = runs.length - index
-                    const isActive = run.status === 'training' || run.status === 'queued' || run.status === 'preparing'
+                    const isActive = run.status === 'running' || run.status === 'queued'
 
                     return (
                       <Card
@@ -110,17 +102,14 @@ export function TrainingPage() {
                         <Group justify="space-between" wrap="nowrap">
                           <div style={{ minWidth: 0 }}>
                             <Text size="sm" fw={600} truncate="end">
-                              Version {versionNumber}
-                            </Text>
-                            <Text size="xs" c="dimmed">
-                              {run.modelName}
+                              {run.name}
                             </Text>
                             <Text size="xs" c="dimmed">
                               {new Date(run.createdAt).toLocaleDateString()}
                             </Text>
                           </div>
-                          <Badge size="xs" variant="light" color={STATUS_COLORS[run.status]} tt="capitalize">
-                            {isActive && <Loader size={8} color={STATUS_COLORS[run.status]} mr={4} />}
+                          <Badge size="xs" variant="light" color={STATUS_COLORS[run.status] ?? 'gray'} tt="capitalize">
+                            {isActive && <Loader size={8} color={STATUS_COLORS[run.status] ?? 'gray'} mr={4} />}
                             {run.status}
                           </Badge>
                         </Group>
@@ -135,10 +124,10 @@ export function TrainingPage() {
                           <BrainIcon size={24} />
                         </ThemeIcon>
                         <Text size="sm" c="dimmed">
-                          No versions yet
+                          No runs yet
                         </Text>
                         <Text size="xs" c="dimmed">
-                          Create your first training version
+                          Create your first training run
                         </Text>
                       </Stack>
                     </Card>
@@ -151,13 +140,12 @@ export function TrainingPage() {
           {/* ── Right panel ── */}
           <Grid.Col span={{ base: 12, md: 9 }}>
             {selectedView === 'create' ? (
-              <CreateVersionPanel projectId={projectId} onStartTraining={handleStartTraining} />
+              <CreateRunPanel projectId={projectId} onStartTraining={handleStartTraining} />
             ) : selectedRun ? (
               <VersionDetailPanel
                 run={selectedRun}
-                versionNumber={runs.length - runs.indexOf(selectedRun)}
                 onStop={
-                  selectedRun.status === 'training' || selectedRun.status === 'queued' ? handleStopTraining : undefined
+                  selectedRun.status === 'running' || selectedRun.status === 'queued' ? handleStopTraining : undefined
                 }
               />
             ) : (
@@ -166,9 +154,9 @@ export function TrainingPage() {
                   <ThemeIcon size={48} variant="light" color="primary" radius="xl">
                     <BrainIcon size={28} />
                   </ThemeIcon>
-                  <Title order={5}>Select a version</Title>
+                  <Title order={5}>Select a run</Title>
                   <Text size="sm" c="dimmed">
-                    Choose a training version from the sidebar or create a new one
+                    Choose a training run from the sidebar or create a new one
                   </Text>
                 </Stack>
               </Card>

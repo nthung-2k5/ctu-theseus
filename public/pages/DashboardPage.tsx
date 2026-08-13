@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Group,
+  Select,
   SimpleGrid,
   Skeleton,
   Stack,
@@ -26,11 +27,78 @@ import { useProjectStore } from '@public/store/useProjectStore'
 import { useEffect } from 'react'
 import { useLocation } from 'wouter'
 
+const TASK_OPTIONS = [
+  {
+    group: 'Text',
+    items: [
+      { value: 'text_classification', label: 'Text Classification' },
+      { value: 'token_classification', label: 'Token Classification (NER)' },
+      { value: 'text_generation', label: 'Text Generation' },
+      { value: 'question_answering', label: 'Question Answering' },
+      { value: 'summarization', label: 'Summarization' },
+      { value: 'sequence_to_sequence', label: 'Sequence-to-Sequence' },
+      { value: 'text_embedding', label: 'Text Embedding' },
+    ],
+  },
+  {
+    group: 'Vision',
+    items: [
+      { value: 'image_classification', label: 'Image Classification' },
+      { value: 'object_detection', label: 'Object Detection' },
+      { value: 'image_segmentation', label: 'Image Segmentation' },
+      { value: 'image_captioning', label: 'Image Captioning' },
+    ],
+  },
+  {
+    group: 'Audio',
+    items: [
+      { value: 'audio_classification', label: 'Audio Classification' },
+      { value: 'automatic_speech_recognition', label: 'Speech Recognition (ASR)' },
+      { value: 'audio_segmentation', label: 'Audio Segmentation' },
+      { value: 'audio_captioning', label: 'Audio Captioning' },
+    ],
+  },
+  {
+    group: 'Tabular',
+    items: [
+      { value: 'tabular_regression', label: 'Tabular Regression' },
+      { value: 'tabular_classification', label: 'Tabular Classification' },
+      { value: 'tabular_clustering', label: 'Tabular Clustering' },
+      { value: 'tabular_anomaly_detection', label: 'Anomaly Detection' },
+    ],
+  },
+]
+
+/** Human-readable task label */
+function taskLabel(task: string): string {
+  for (const group of TASK_OPTIONS) {
+    const item = group.items.find((i) => i.value === task)
+    if (item) return item.label
+  }
+  return task
+}
+
+/** Modality color */
+function taskColor(task: string): string {
+  if (
+    task.startsWith('text_') ||
+    task === 'question_answering' ||
+    task === 'summarization' ||
+    task === 'sequence_to_sequence'
+  )
+    return 'blue'
+  if (task.startsWith('image_') || task === 'object_detection') return 'green'
+  if (task.startsWith('audio_') || task === 'automatic_speech_recognition') return 'orange'
+  if (task.startsWith('tabular_')) return 'grape'
+  return 'gray'
+}
+
 const CreateProjectModal = () => {
   const form = useForm({
-    initialValues: { name: '', description: '' },
+    initialValues: { name: '', description: '', task: '' as string },
     validate: {
       name: (v) => (v.trim().length > 0 ? null : 'Project name is required'),
+      task: (v) => (v ? null : 'Please select a task'),
     },
   })
 
@@ -50,15 +118,22 @@ const CreateProjectModal = () => {
   })
 
   return (
-    <form onSubmit={form.onSubmit((values) => createProject.mutate(values))}>
+    <form onSubmit={form.onSubmit((values) => createProject.mutate(values as any))}>
       <Stack gap="md">
         <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
         <Textarea
           label="Description"
-          placeholder="What are you training the model to detect?"
+          placeholder="What is this project about?"
           autosize
           minRows={3}
           {...form.getInputProps('description')}
+        />
+        <Select
+          label="Task"
+          placeholder="Select ML task"
+          data={TASK_OPTIONS}
+          searchable
+          {...form.getInputProps('task')}
         />
         <Group justify="flex-end">
           <Button variant="subtle" onClick={modals.closeAll}>
@@ -109,7 +184,7 @@ const UpdateProjectModal = ({
         <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
         <Textarea
           label="Description"
-          placeholder="What are you training the model to detect?"
+          placeholder="What is this project about?"
           autosize
           minRows={3}
           {...form.getInputProps('description')}
@@ -171,7 +246,7 @@ export function DashboardPage() {
         <div>
           <Title order={2}>Projects</Title>
           <Text size="sm" c="dimmed" mt={4}>
-            Manage your image detection projects
+            Manage your machine learning projects
           </Text>
         </div>
         <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal}>
@@ -191,7 +266,7 @@ export function DashboardPage() {
             <FolderSimpleIcon size={48} weight="thin" />
             <Title order={4}>No projects yet</Title>
             <Text size="sm" c="dimmed">
-              Create your first project to get started with AI image detection.
+              Create your first project to get started with AI training.
             </Text>
             <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal}>
               Create project
@@ -214,8 +289,8 @@ export function DashboardPage() {
                 <Group justify="space-between">
                   <Title order={5}>{project.name}</Title>
                   <Group gap="xs">
-                    <Badge variant="light" color="primary" size="sm">
-                      Active
+                    <Badge variant="light" color={taskColor(project.task)} size="sm">
+                      {taskLabel(project.task)}
                     </Badge>
                     <ActionIcon
                       variant="subtle"
@@ -229,20 +304,6 @@ export function DashboardPage() {
                 <Text size="sm" c="dimmed" lineClamp={2}>
                   {project.description || 'No description provided'}
                 </Text>
-                {/* <Group gap="lg" mt="xs">
-                  <Group gap={4}>
-                    <ImageIcon size={16} />
-                    <Text size="xs" c="dimmed">
-                      {project.imageCount} images
-                    </Text>
-                  </Group>
-                  <Group gap={4}>
-                    <TagChevronIcon size={16} />
-                    <Text size="xs" c="dimmed">
-                      {project.classCount} classes
-                    </Text>
-                  </Group>
-                </Group> */}
               </Stack>
             </Card>
           ))}
