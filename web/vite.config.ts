@@ -9,9 +9,12 @@ export default defineConfig({
   plugins: [react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
   resolve: {
     alias: {
-      '@schema': path.resolve(__dirname, '../schema'),
-      '@server': path.resolve(__dirname, '../server'),
-      '@public': path.resolve(__dirname, '.'),
+      '@schema': path.resolve(import.meta.dirname, '../schema'),
+      '@server': path.resolve(import.meta.dirname, '../server'),
+      '@public': path.resolve(import.meta.dirname, '.'),
     },
+  },
+  server: {
+    allowedHosts: ['aspire.dev.internal'],
   },
 })

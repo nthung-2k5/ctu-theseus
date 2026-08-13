@@ -88,10 +88,13 @@ const web = await builder
   .waitFor(gateway)
   .withExternalHttpEndpoints()
 
-await builder.addYarp('proxy')
-  .withConfiguration(async config => {
+await builder
+  .addYarp('proxy')
+  .withConfiguration(async (config) => {
     await config.addCatchAllRoute(web)
     await config.addRoute('/api/{**catch-all}', gateway)
   })
+  .waitFor(gateway)
+  .waitFor(web)
 
 await builder.build().run()
