@@ -59,7 +59,7 @@ var worker = await builder
   .waitFor(rustfs)
 
 var gateway = await builder
-  .addBunApp('gateway', './src', 'index.ts')
+  .addBunApp('gateway', './server', 'index.ts')
   .withHttpEndpoint({
     port: 3000,
     targetPort: 3000,
@@ -78,7 +78,7 @@ var gateway = await builder
   .waitFor(worker)
 
 await builder
-  .addViteApp('web', './public')
+  .addViteApp('web', './web')
   .withBun()
   .withEndpoint({
     name: 'http',
