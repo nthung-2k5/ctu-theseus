@@ -1,7 +1,17 @@
-import { AnnotationTypes, AudioCodecs, DatasetModalities, ImageFormats, ProjectTasks, SplitTypes, TrainingStatuses } from '@server/lib/enums'
+import {
+  AnnotationTypes,
+  AudioCodecs,
+  DatasetModalities,
+  DatasetVersionStatuses,
+  ImageFormats,
+  ProjectTasks,
+  SplitTypes,
+  TrainingStatuses,
+} from '@server/lib/enums'
 import { sql } from 'drizzle-orm'
 import {
   boolean,
+  char,
   check,
   index,
   integer,
@@ -130,6 +140,7 @@ export const splitTypeEnum = pgEnum('split_type', SplitTypes)
 export const imageFormatEnum = pgEnum('image_format', ImageFormats)
 export const audioCodecEnum = pgEnum('audio_codec', AudioCodecs)
 export const annotationTypeEnum = pgEnum('annotation_type', AnnotationTypes)
+export const datasetVersionStatusEnum = pgEnum('dataset_version_status', DatasetVersionStatuses)
 
 // --- 1. DATASET REGISTRY ---
 
@@ -138,8 +149,6 @@ export const datasets = pgTable('datasets', {
     .notNull()
     .primaryKey()
     .references(() => projects.id, { onDelete: 'cascade' }),
-  // name: varchar('name', { length: 255 }).notNull(),
-  // description: text('description'),
   modality: modalityEnum('modality').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
@@ -162,6 +171,15 @@ export const datasetVersions = pgTable(
     // If NOT NULL => immutable snapshot (used for training runs)
     versionTag: varchar('version_tag', { length: 50 }),
 
+    // The draft row is permanently 'draft'. Snapshots move
+    // building -> ready|failed as the parquet is built.
+    status: datasetVersionStatusEnum('status').default('draft').notNull(),
+    itemCount: integer('item_count'),
+    classCount: integer('class_count'),
+    parquetKey: text('parquet_key'),
+    failedMessage: text('failed_message'),
+    builtAt: timestamp('built_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -170,39 +188,48 @@ export const datasetVersions = pgTable(
   ],
 )
 
-export const datasetSplits = pgTable(
-  'dataset_splits',
-  {
-    id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    datasetVersionId: uuid('dataset_version_id')
-      .notNull()
-      .references(() => datasetVersions.id, { onDelete: 'cascade' }),
-    splitType: splitTypeEnum('split_type').notNull(),
-  },
-  (table) => [
-    index('datasetSplits_datasetVersionId_idx').on(table.datasetVersionId),
-    unique('datasetSplits_datasetVersionId_splitType_key').on(table.datasetVersionId, table.splitType),
-  ],
-)
-
-// --- 2. CENTRAL DATA ITEM TABLE ---
+// --- 2. CENTRAL DATA ITEM TABLE (the project-wide deduplicated pool) ---
 
 export const datasetItems = pgTable(
   'dataset_items',
   {
     id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    datasetSplitId: uuid('dataset_split_id')
+    datasetId: uuid('dataset_id')
       .notNull()
-      .references(() => datasetSplits.id, { onDelete: 'cascade' }),
+      .references(() => datasets.projectId, { onDelete: 'cascade' }),
     externalId: varchar('external_id', { length: 255 }), // ID mapping back to source cloud storage or local path
     storageUrl: text('storage_url'), // Path to raw files (S3, GCS) if unstructured (images/audio/raw text files)
+    contentHash: char('content_hash', { length: 64 }), // sha256 of the raw bytes, for pool dedup
+    byteSize: integer('byte_size'),
     // embedding: vector('embedding', { dimensions: 1536 }), // Vector representation of the data item for semantic filtering/filtering out duplicates
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index('dataset_items_datasetSplitId_idx').on(table.datasetSplitId),
+    index('dataset_items_datasetId_idx').on(table.datasetId),
+    unique('dataset_items_datasetId_contentHash_key').on(table.datasetId, table.contentHash),
     // TODO: Add embedding index when we decide to use it
     // index('dataset_items_embedding_idx').using('hnsw', table.embedding.op('vector_cosine_ops')),
+  ],
+)
+
+// --- 2b. VERSION <-> ITEM MEMBERSHIP (a snapshot is a set of pool items + their split) ---
+
+export const datasetVersionItems = pgTable(
+  'dataset_version_items',
+  {
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: 'cascade' }),
+    // restrict: an item referenced by any snapshot can't be deleted from the
+    // pool — this is what makes a snapshot genuinely immutable.
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => datasetItems.id, { onDelete: 'restrict' }),
+    splitType: splitTypeEnum('split_type').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.versionId, table.itemId] }),
+    index('datasetVersionItems_versionId_splitType_idx').on(table.versionId, table.splitType),
   ],
 )
 
@@ -261,19 +288,6 @@ export const tabularFeatures = pgTable(
   ],
 )
 
-// E. Reinforcement Learning Modality (RLHF, PPO, DPO Trajectories)
-// export const rlTrajectories = pgTable('rl_trajectories', {
-//   itemId: uuid('item_id')
-//     .primaryKey()
-//     .references(() => datasetItems.id, { onDelete: 'cascade' }),
-//   stateRepresentation: jsonb('state_representation').notNull(),
-//   actionTaken: jsonb('action_taken').notNull(),
-//   nextStateRepresentation: jsonb('next_state_representation'),
-//   reward: numeric('reward', { precision: 12, scale: 6 }),
-//   isTerminal: boolean('is_terminal').default(false),
-//   timestepIndex: integer('timestep_index').notNull(),
-// })
-
 /* ------------------------------------------------------------------ */
 /*  GLOBAL ANNOTATIONS & GROUND TRUTH LABELS                          */
 /* ------------------------------------------------------------------ */
@@ -300,6 +314,7 @@ export const labelClasses = pgTable(
   },
   (table) => [
     index('idx_label_classes_dataset').on(table.datasetId),
+    unique('labelClasses_datasetId_name_key').on(table.datasetId, table.name),
   ],
 )
 
@@ -307,7 +322,9 @@ export const annotations = pgTable(
   'annotations',
   {
     id: uuid('id').primaryKey().default(sql`uuidv7()`),
-    itemId: uuid('item_id').references(() => datasetItems.id, { onDelete: 'cascade' }),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => datasetItems.id, { onDelete: 'cascade' }),
     annotatorId: varchar('annotator_id', { length: 100 }),
     annotationType: annotationTypeEnum('annotation_type').notNull(),
 
@@ -327,57 +344,11 @@ export const annotations = pgTable(
   ],
 )
 
-// export const datasetClasses = pgTable(
-//   'dataset_classes',
-//   {
-//     id: uuid('id').primaryKey().default(sql`uuidv7()`),
-//     projectId: uuid('project_id')
-//       .notNull()
-//       .references(() => projects.id, { onDelete: 'cascade' }),
-//     name: text('name').notNull(),
-//     color: text('color').notNull().default('#e03131'),
-//   },
-//   (table) => [
-//     index('datasetClasses_projectId_idx').on(table.projectId),
-//     unique('datasetClasses_projectId_name_key').on(table.projectId, table.name),
-//   ],
-// )
-
-// export const splitEnum = pgEnum('dataset_split', ['train', 'validation', 'test'])
-
-/* ------------------------------------------------------------------ */
-/*  Dataset Images                                                    */
-/* ------------------------------------------------------------------ */
-// export const datasetImages = pgTable(
-//   'dataset_images',
-//   {
-//     id: uuid('id').primaryKey().default(sql`uuidv7()`),
-//     projectId: uuid('project_id')
-//       .notNull()
-//       .references(() => projects.id, { onDelete: 'cascade' }),
-//     classId: uuid('class_id').references(() => datasetClasses.id, { onDelete: 'set null' }),
-//     filename: text('filename').notNull(),
-//     path: text('path').notNull(),
-//     width: integer('width').notNull(),
-//     height: integer('height').notNull(),
-//     split: splitEnum(),
-//     uploadedAt: timestamp('uploaded_at', { withTimezone: true }).defaultNow().notNull(),
-//   },
-//   (table) => [
-//     index('datasetImages_projectId_idx').on(table.projectId),
-//     index('datasetImages_classId_idx').on(table.classId),
-//   ],
-// )
-
-// Status explained:
-// queued: queued for training, waiting for free GPU
-// training: training
-// completed: training completed (stopped = completed + completedAt is null, failed = completed + failedMessage is not null)
-export const trainingStatusEnum = pgEnum('training_status', TrainingStatuses)
-
 /* ------------------------------------------------------------------ */
 /*  Training Runs                                                     */
 /* ------------------------------------------------------------------ */
+export const trainingStatusEnum = pgEnum('training_status', TrainingStatuses)
+
 export const trainingRuns = pgTable(
   'training_runs',
   {
@@ -393,8 +364,16 @@ export const trainingRuns = pgTable(
       .notNull()
       .references(() => datasetVersions.id, { onDelete: 'cascade' }),
 
-    // Configuration (Using JSONB for flexible hyperparams)
+    // User-facing hyperparameter selections (trainer knobs, encoder choice, ...)
     hyperparameters: jsonb('hyperparameters').notNull(),
+    // The exact compiled Ludwig config sent to the worker, for reproducibility
+    ludwigConfig: jsonb('ludwig_config'),
+    // S3 key of the compiled config.yaml
+    configKey: text('config_key'),
+    bestEpoch: integer('best_epoch'),
+    // Last time the worker reported progress; lets the gateway detect and
+    // fail orphaned runs after a restart.
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
 
     startedAt: timestamp('started_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
@@ -418,25 +397,10 @@ export const trainingMetrics = pgTable(
       .notNull()
       .references(() => trainingRuns.id, { onDelete: 'cascade' }),
     epoch: integer('epoch').notNull(),
-    trainingLoss: real('training_loss').notNull(),
-    validationLoss: real('validation_loss').notNull(),
-    accuracy: real('accuracy').notNull(),
-    mAP: real('mean_average_precision').notNull(),
+    split: splitTypeEnum('split').notNull(),
+    metricName: varchar('metric_name', { length: 64 }).notNull(),
+    metricValue: real('metric_value').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [primaryKey({ columns: [table.trainingRunId, table.epoch] })],
+  (table) => [primaryKey({ columns: [table.trainingRunId, table.epoch, table.split, table.metricName] })],
 )
-
-// export const trainingMetrics = pgTable(
-//   'training_metrics',
-//   {
-//     trainingRunId: uuid('training_run_id')
-//       .notNull()
-//       .references(() => trainingRuns.id, { onDelete: 'cascade' }),
-//     epoch: integer('epoch').notNull(),
-//     metricName: varchar('metric_name', { length: 255 }).notNull(),
-//     metricValue: numeric('metric_value', { precision: 12, scale: 6 }).notNull(),
-//     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-//   },
-//   (table) => [primaryKey({ columns: [table.trainingRunId, table.epoch, table.metricName] })],
-// )

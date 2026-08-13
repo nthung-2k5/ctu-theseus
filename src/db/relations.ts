@@ -1,6 +1,7 @@
 import { defineRelationsPart } from 'drizzle-orm'
 import * as schema from './schema'
 
+
 const authRelations = defineRelationsPart(schema, (r) => ({
   accounts: {
     users: r.one.users({
@@ -9,9 +10,18 @@ const authRelations = defineRelationsPart(schema, (r) => ({
     }),
   },
   users: {
-    accounts: r.many.accounts(),
-    projects: r.many.projects(),
-    sessions: r.many.sessions(),
+    accounts: r.many.accounts({
+      from: r.users.id,
+      to: r.accounts.userId,
+    }),
+    projects: r.many.projects({
+      from: r.users.id,
+      to: r.projects.userId,
+    }),
+    sessions: r.many.sessions({
+      from: r.users.id,
+      to: r.sessions.userId,
+    }),
   },
   sessions: {
     users: r.one.users({
@@ -23,8 +33,14 @@ const authRelations = defineRelationsPart(schema, (r) => ({
 
 const projectRelations = defineRelationsPart(schema, (r) => ({
   projects: {
-    draftDataset: r.one.datasets(),
-    trainingRuns: r.many.trainingRuns(),
+    draftDataset: r.one.datasets({
+      from: r.projects.id,
+      to: r.datasets.projectId,
+    }),
+    trainingRuns: r.many.trainingRuns({
+      from: r.projects.id,
+      to: r.trainingRuns.projectId,
+    }),
     user: r.one.users({
       from: r.projects.userId,
       to: r.users.id,
@@ -53,7 +69,15 @@ const datasetRelations = defineRelationsPart(schema, (r) => ({
         versionTag: { isNotNull: true },
       },
     }),
-    classes: r.many.labelClasses(),
+    classes: r.many.labelClasses({
+      from: r.datasets.projectId,
+      to: r.labelClasses.datasetId,
+    }),
+    // The project-wide deduplicated item pool
+    items: r.many.datasetItems({
+      from: r.datasets.projectId,
+      to: r.datasetItems.datasetId,
+    }),
   },
 
   labelClasses: {
@@ -70,35 +94,65 @@ const datasetRelations = defineRelationsPart(schema, (r) => ({
       to: r.datasets.projectId,
       optional: false,
     }),
-    splits: r.many.datasetSplits(),
-    runs: r.many.trainingRuns(),
+    // Pool items this snapshot (or the draft) includes, with their split.
+    items: r.many.datasetVersionItems({
+      from: r.datasetVersions.id,
+      to: r.datasetVersionItems.versionId,
+    }),
+    runs: r.many.trainingRuns({
+      from: r.datasetVersions.id,
+      to: r.trainingRuns.datasetVersionId,
+    }),
   },
 
-  datasetSplits: {
+  datasetVersionItems: {
     version: r.one.datasetVersions({
-      from: r.datasetSplits.datasetVersionId,
+      from: r.datasetVersionItems.versionId,
       to: r.datasetVersions.id,
       optional: false,
     }),
-    items: r.many.datasetItems(),
+    item: r.one.datasetItems({
+      from: r.datasetVersionItems.itemId,
+      to: r.datasetItems.id,
+      optional: false,
+    }),
   },
 }))
 
 const datasetItemsRelations = defineRelationsPart(schema, (r) => ({
   datasetItems: {
-    split: r.one.datasetSplits({
-      from: r.datasetItems.datasetSplitId,
-      to: r.datasetSplits.id,
+    dataset: r.one.datasets({
+      from: r.datasetItems.datasetId,
+      to: r.datasets.projectId,
       optional: false,
+    }),
+    versionMemberships: r.many.datasetVersionItems({
+      from: r.datasetItems.id,
+      to: r.datasetVersionItems.itemId,
     }),
 
     // Note: textFeatures, visionFeatures, audioFeatures, tabularFeatures are on-to-one, so only one can exist per item.
     // This is handled by the database schema (uniqueness constraints).
-    textFeatures: r.one.textFeatures(),
-    visionFeatures: r.one.visionFeatures(),
-    audioFeatures: r.one.audioFeatures(),
-    tabularFeatures: r.one.tabularFeatures(),
-    annotations: r.many.annotations(),
+    textFeatures: r.one.textFeatures({
+      from: r.datasetItems.id,
+      to: r.textFeatures.itemId,
+    }),
+    visionFeatures: r.one.visionFeatures({
+      from: r.datasetItems.id,
+      to: r.visionFeatures.itemId,
+    }),
+    audioFeatures: r.one.audioFeatures({
+      from: r.datasetItems.id,
+      to: r.audioFeatures.itemId,
+    }),
+    tabularFeatures: r.one.tabularFeatures({
+      from: r.datasetItems.id,
+      to: r.tabularFeatures.itemId,
+    }),
+    annotations: r.many.annotations({
+      from: r.datasetItems.id,
+      to: r.annotations.itemId,
+    }),
   },
 
   textFeatures: {
@@ -148,7 +202,10 @@ const trainingRelations = defineRelationsPart(schema, (r) => ({
       from: r.trainingRuns.datasetVersionId,
       to: r.datasetVersions.id,
     }),
-    metrics: r.many.trainingMetrics(),
+    metrics: r.many.trainingMetrics({
+      from: r.trainingRuns.id,
+      to: r.trainingMetrics.trainingRunId,
+    }),
   },
   trainingMetrics: {
     run: r.one.trainingRuns({
