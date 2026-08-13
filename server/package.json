@@ -1,0 +1,43 @@
+{
+  "name": "ctu-theseus",
+  "version": "1.0.50",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "bun run --watch index.ts",
+    "build": "bun build --compile --target bun --outfile server index.ts",
+    "compile:schema": "bun run compile_schema.ts",
+    "db:generate": "bunx drizzle-kit generate",
+    "db:migrate": "bunx drizzle-kit migrate",
+    "db:push": "bunx drizzle-kit push",
+    "db:studio": "bunx drizzle-kit studio"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1101.0",
+    "@aws-sdk/s3-request-presigner": "^3.1101.0",
+    "@elysia/eden": "^1.4.10",
+    "@elysia/jwt": "^1.4.2",
+    "@elysia/opentelemetry": "^1.4.12",
+    "@elysia/static": "^1.4.11",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/obj": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "@opentelemetry/sdk-trace-node": "^2.10.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
+    "better-auth": "^1.6.25",
+    "better-auth-drizzle-adapter": "^1.2.1",
+    "drizzle-orm": "^1.0.0-beta.22",
+    "elysia": "1.4.29",
+    "hyparquet-writer": "^0.16.3",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "drizzle-kit": "^1.0.0-beta.22",
+    "typescript": "5.9.3"
+  },
+  "module": "index.js"
+}
