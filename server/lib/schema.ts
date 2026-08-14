@@ -27,17 +27,33 @@ export const ExportTaskSchema = t.Object(
     jobId: t.String({ format: 'uuid' }),
     runId: t.String({ format: 'uuid' }),
     format: t.UnionEnum(['onnx', 'torchscript']),
+    /**
+     * S3 key of the run's dataset.parquet, in the datasets bucket — lets the
+     * worker pull one real test-split row to verify the export against
+     * (writes `expected.json` next to the artifact). Omitted if the run's
+     * source snapshot is no longer available.
+     */
+    datasetKey: t.Optional(t.String()),
   },
   { title: 'ExportTask' },
 )
 
-/** Gateway ↔ worker: synchronous inference request/response over core NATS. */
+/**
+ * Gateway ↔ worker: synchronous inference request/response over core NATS.
+ * `payload` mirrors the task registry's `itemSpec.payload` (see
+ * server/lib/tasks/types.ts): file-backed modalities (vision/audio) upload
+ * through the NATS object store first and reference it by key; text/record
+ * payloads carry their value inline since there's no file involved.
+ */
 export const InferenceRequestSchema = t.Object(
   {
     runId: t.String({ format: 'uuid' }),
-    uploadKey: t.String(),
-    uploadFilename: t.String(),
     threshold: t.Number({ minimum: 0, maximum: 1, default: 0.5 }),
+    payload: t.Union([
+      t.Object({ kind: t.Literal('file'), uploadKey: t.String(), uploadFilename: t.String() }),
+      t.Object({ kind: t.Literal('text'), text: t.String() }),
+      t.Object({ kind: t.Literal('record'), record: t.Record(t.String(), t.Union([t.String(), t.Number()])) }),
+    ]),
   },
   { title: 'InferenceRequest' },
 )
@@ -78,6 +94,16 @@ export const RunEventSchema = t.Union(
       ts: t.String({ format: 'date-time' }),
       level: t.UnionEnum(['info', 'warn', 'error']),
       line: t.String(),
+    }),
+    t.Object({
+      kind: t.Literal('export'),
+      runId: t.String({ format: 'uuid' }),
+      ts: t.String({ format: 'date-time' }),
+      jobId: t.String({ format: 'uuid' }),
+      status: t.UnionEnum(['success', 'failed']),
+      format: t.Optional(t.UnionEnum(['onnx', 'torchscript'])),
+      exportKey: t.Optional(t.String()),
+      error: t.Optional(t.String()),
     }),
   ],
   { title: 'RunEvent' },
