@@ -1,0 +1,1 @@
+ALTER TABLE "dataset_versions" DROP COLUMN "augmentation_config";

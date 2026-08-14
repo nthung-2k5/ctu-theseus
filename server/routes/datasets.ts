@@ -68,7 +68,6 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
         .values({
           datasetId: project.id,
           versionTag: body.versionTag,
-          augmentationConfig: body.augmentationConfig,
           status: 'building',
         })
         .returning()
@@ -104,7 +103,6 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
       projectBelongToUser: true,
       body: t.Object({
         versionTag: t.String({ minLength: 1, maxLength: 50 }),
-        augmentationConfig: t.Optional(t.Any()),
       }),
     },
   )

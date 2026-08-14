@@ -164,9 +164,6 @@ export const datasetVersions = pgTable(
       .notNull()
       .references(() => datasets.projectId, { onDelete: 'cascade' }),
 
-    // Only NOT NULL when modality is vision and is a snapshot version
-    augmentationConfig: jsonb('augmentation_config'),
-
     // If NULL => draft dataset (project's working copy)
     // If NOT NULL => immutable snapshot (used for training runs)
     versionTag: varchar('version_tag', { length: 50 }),
