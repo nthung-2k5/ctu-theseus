@@ -9,7 +9,7 @@ import { migrate } from 'drizzle-orm/bun-sql/postgres/migrator'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
 import { db } from './db'
-import { startNatsConsumers } from './lib/microservice'
+import { startNatsConsumers, startOrphanReaper } from './lib/microservice'
 import { closeNats, initNats } from './lib/nats'
 import { ensureBuckets } from './lib/storage'
 
@@ -24,6 +24,7 @@ await migrate(db, { migrationsFolder: './drizzle' })
 // instead of leaving it running against a closing connection.
 const shutdownController = new AbortController()
 await startNatsConsumers(shutdownController.signal)
+startOrphanReaper(shutdownController.signal)
 
 async function shutdown() {
   console.log('[index] Shutting down...')

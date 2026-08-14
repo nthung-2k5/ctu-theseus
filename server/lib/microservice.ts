@@ -214,3 +214,55 @@ export async function startNatsConsumers(signal?: AbortSignal): Promise<void> {
 
   console.log('[microservice] NATS run-events consumer started.')
 }
+
+/* ------------------------------------------------------------------ */
+/*  Orphaned-run reaper                                               */
+/* ------------------------------------------------------------------ */
+
+/** A run with no heartbeat for this long (worker crash/restart, lost NATS messages) is presumed dead. */
+const HEARTBEAT_STALE_MS = 5 * 60 * 1000
+/** A `queued` run that never got a heartbeat at all (dispatch never reached the worker) waits longer before being reaped, since queueing delay alone is normal. */
+const NEVER_STARTED_STALE_MS = 15 * 60 * 1000
+const REAP_INTERVAL_MS = 60 * 1000
+
+/**
+ * Periodically fails `queued`/`running` runs whose heartbeat (see the
+ * `status`/`metric`/`log` cases above — all three bump it) has gone stale.
+ * Without this, a gateway or worker restart mid-run leaves the run stuck
+ * "running" forever, since nothing else ever transitions it out.
+ */
+export function startOrphanReaper(signal?: AbortSignal): void {
+  const reap = async () => {
+    try {
+      const heartbeatCutoff = new Date(Date.now() - HEARTBEAT_STALE_MS)
+      const neverStartedCutoff = new Date(Date.now() - NEVER_STARTED_STALE_MS)
+
+      const reaped = await db
+        .update(trainingRuns)
+        .set({
+          status: 'failed',
+          failedMessage: 'Run heartbeat timed out — the worker likely crashed or restarted mid-run',
+          completedAt: new Date(),
+        })
+        .where(
+          and(
+            inArray(trainingRuns.status, ['queued', 'running']),
+            or(
+              lt(trainingRuns.heartbeatAt, heartbeatCutoff),
+              and(isNull(trainingRuns.heartbeatAt), lt(trainingRuns.createdAt, neverStartedCutoff)),
+            ),
+          ),
+        )
+        .returning({ id: trainingRuns.id })
+
+      for (const run of reaped) console.warn(`[reaper] Marked orphaned run ${run.id} as failed`)
+    } catch (e) {
+      console.error('[reaper] Sweep failed:', e)
+    }
+  }
+
+  const interval = setInterval(reap, REAP_INTERVAL_MS)
+  signal?.addEventListener('abort', () => clearInterval(interval))
+
+  console.log('[microservice] Orphan-run reaper started.')
+}
