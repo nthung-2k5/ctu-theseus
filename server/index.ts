@@ -37,9 +37,22 @@ process.on('SIGINT', shutdown)
 
 const app = new Elysia()
   .use(telemetry)
-  .onError(({ error }) => {
+  .onError(({ error, code, set }) => {
     console.error(error)
-    return 'Internal Server Error'
+    switch (code) {
+      case 'VALIDATION':
+        set.status = 422
+        return { error: { code: 'VALIDATION', message: error.message } }
+      case 'NOT_FOUND':
+        set.status = 404
+        return { error: { code: 'NOT_FOUND', message: 'Not found' } }
+      case 'PARSE':
+        set.status = 400
+        return { error: { code: 'PARSE', message: 'Malformed request body' } }
+      default:
+        set.status = 500
+        return { error: { code: 'INTERNAL', message: 'Internal Server Error' } }
+    }
   })
   /* ── Authentication ── */
   .mount(auth.handler)
