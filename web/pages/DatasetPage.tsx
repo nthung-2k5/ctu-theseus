@@ -1,4 +1,5 @@
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -7,9 +8,7 @@ import {
   Modal,
   Pagination,
   SimpleGrid,
-  Skeleton,
   Stack,
-  Table,
   Text,
   TextInput,
   ThemeIcon,
@@ -18,19 +17,29 @@ import {
 import { useForm } from '@mantine/form'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { DatabaseIcon, PlusIcon, StackIcon } from '@phosphor-icons/react'
-import { api } from '@public/lib/api'
+import { DatabaseIcon, PlusIcon, StackIcon, WarningCircleIcon } from '@phosphor-icons/react'
+import { LabelingProgress } from '@public/components/dataset/LabelingProgress'
+import { DataTable, type DataTableColumn, EmptyState, PageHeader, StatusBadge } from '@public/components/ui'
+import { useEden } from '@public/lib/api'
 import { MODALITY_COLORS, SPLIT_COLORS } from '@public/lib/constants'
-import { useEdenMutation } from '@public/lib/eden-query'
-import { queries } from '@public/queries'
-import { useProjectItems } from '@public/queries/dataset'
+import { projectDetailQueryOptions, useProjectItems } from '@public/lib/queries'
 import type { DatasetVersion } from '@public/store/types'
-import { useProjectStore } from '@public/store/useProjectStore'
-import { useState } from 'react'
-import { useParams } from 'wouter'
+import { getTaskDescriptor } from '@server/lib/tasks'
+import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
+
+const routeApi = getRouteApi('/_app/project/$projectId/dataset')
 
 /* ── Create Version Modal ── */
-const CreateVersionModal = ({ projectId, onClose }: { projectId: string; onClose: () => void }) => {
+const CreateVersionModal = ({
+  projectId,
+  needsAnnotations,
+  onClose,
+}: {
+  projectId: string
+  needsAnnotations: boolean
+  onClose: () => void
+}) => {
   const form = useForm({
     initialValues: { versionTag: '' },
     validate: {
@@ -38,24 +47,39 @@ const CreateVersionModal = ({ projectId, onClose }: { projectId: string; onClose
     },
   })
 
-  const createVersion = useEdenMutation(
-    (body: any) => api.projects({ projectId }).versions.post(body),
-    [queries.projects.detail(projectId)._ctx.summary.queryKey],
-    {
-      onSuccess: () => {
-        notifications.show({ title: 'Version created', message: 'New snapshot version created', color: 'green' })
-        form.reset()
-        onClose()
-      },
-      onError: () => {
-        notifications.show({ title: 'Error', message: 'Failed to create version', color: 'red' })
-      },
+  const eden = useEden()
+  const queryClient = useQueryClient()
+
+  // Cheap way to get the draft's total/labeledCount without fetching every
+  // row — the aggregate counts are computed server-side regardless of
+  // perPage (see GET /projects/:projectId/items).
+  const { data: draftCounts } = useProjectItems(needsAnnotations ? projectId : undefined, { perPage: 1 })
+  const total = draftCounts?.total ?? 0
+  const labeledCount = draftCounts?.labeledCount ?? 0
+  const unlabeledCount = total - labeledCount
+
+  const createVersion = useMutation({
+    ...eden.api.projects({ projectId }).versions.post.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
+      notifications.show({ title: 'Version created', message: 'New snapshot version created', color: 'green' })
+      form.reset()
+      onClose()
     },
-  )
+    onError: () => {
+      notifications.show({ title: 'Error', message: 'Failed to create version', color: 'red' })
+    },
+  })
 
   return (
-    <form onSubmit={form.onSubmit((values) => createVersion.mutate(values as any))}>
+    <form onSubmit={form.onSubmit((values) => createVersion.mutate(values))}>
       <Stack gap="md">
+        {needsAnnotations && unlabeledCount > 0 && (
+          <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unlabeled items in the draft">
+            {unlabeledCount} of {total} items have no label yet — they'll snapshot with a null label column and won't
+            contribute a usable training signal. Label them on the Data page before snapshotting, or continue anyway.
+          </Alert>
+        )}
         <TextInput
           label="Version tag"
           placeholder="e.g. v1.0, snapshot-2024-01"
@@ -79,18 +103,85 @@ const SplitItemsPanel = ({
   projectId,
   versionId,
   splitType,
+  page,
+  onPageChange,
 }: {
   projectId: string
   versionId: string
   splitType: 'train' | 'validation' | 'test'
+  page: number
+  onPageChange: (page: number) => void
 }) => {
-  const [page, setPage] = useState(1)
   const perPage = 20
 
   const { data, isLoading } = useProjectItems(projectId, { versionId, split: splitType, page, perPage })
   const items = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / perPage))
+
+  type SplitItem = (typeof items)[number]
+  const columns: DataTableColumn<SplitItem>[] = [
+    {
+      key: 'id',
+      header: 'ID',
+      render: (item) => (
+        <Text size="xs" ff="monospace">
+          {item.id.slice(0, 8)}…
+        </Text>
+      ),
+    },
+    {
+      key: 'externalId',
+      header: 'External ID',
+      render: (item) => <Text size="xs">{item.externalId ?? '—'}</Text>,
+    },
+    {
+      key: 'features',
+      header: 'Features',
+      render: (item) => (
+        <Group gap={4}>
+          {item.textFeatures && (
+            <Badge size="xs" color="blue">
+              text
+            </Badge>
+          )}
+          {item.visionFeatures && (
+            <Badge size="xs" color="green">
+              vision
+            </Badge>
+          )}
+          {item.audioFeatures && (
+            <Badge size="xs" color="orange">
+              audio
+            </Badge>
+          )}
+          {item.tabularFeatures && (
+            <Badge size="xs" color="grape">
+              tabular
+            </Badge>
+          )}
+        </Group>
+      ),
+    },
+    {
+      key: 'annotations',
+      header: 'Annotations',
+      render: (item) => (
+        <Badge size="xs" variant="light">
+          {item.annotations?.length ?? 0}
+        </Badge>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: 'Created',
+      render: (item) => (
+        <Text size="xs" c="dimmed">
+          {new Date(item.createdAt).toLocaleDateString()}
+        </Text>
+      ),
+    },
+  ]
 
   return (
     <Stack gap="md">
@@ -103,86 +194,18 @@ const SplitItemsPanel = ({
         </Badge>
       </Group>
 
-      {isLoading ? (
-        <Stack gap="xs">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} height={40} radius="sm" />
-          ))}
-        </Stack>
-      ) : items.length === 0 ? (
-        <Card withBorder p="lg" radius="md" ta="center">
-          <Text size="sm" c="dimmed">
-            No items in this split yet
-          </Text>
-        </Card>
-      ) : (
-        <>
-          <Table striped highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>ID</Table.Th>
-                <Table.Th>External ID</Table.Th>
-                <Table.Th>Features</Table.Th>
-                <Table.Th>Annotations</Table.Th>
-                <Table.Th>Created</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {items.map((item) => (
-                <Table.Tr key={item.id}>
-                  <Table.Td>
-                    <Text size="xs" ff="monospace">
-                      {item.id.slice(0, 8)}…
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs">{item.externalId ?? '—'}</Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <Group gap={4}>
-                      {item.textFeatures && (
-                        <Badge size="xs" color="blue">
-                          text
-                        </Badge>
-                      )}
-                      {item.visionFeatures && (
-                        <Badge size="xs" color="green">
-                          vision
-                        </Badge>
-                      )}
-                      {item.audioFeatures && (
-                        <Badge size="xs" color="orange">
-                          audio
-                        </Badge>
-                      )}
-                      {item.tabularFeatures && (
-                        <Badge size="xs" color="grape">
-                          tabular
-                        </Badge>
-                      )}
-                    </Group>
-                  </Table.Td>
-                  <Table.Td>
-                    <Badge size="xs" variant="light">
-                      {item.annotations?.length ?? 0}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="xs" c="dimmed">
-                      {new Date(item.createdAt).toLocaleDateString()}
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+      <DataTable
+        columns={columns}
+        data={items}
+        getRowKey={(item) => item.id}
+        loading={isLoading}
+        emptyMessage="No items in this split yet"
+      />
 
-          {totalPages > 1 && (
-            <Group justify="center">
-              <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
-            </Group>
-          )}
-        </>
+      {totalPages > 1 && (
+        <Group justify="center">
+          <Pagination total={totalPages} value={page} onChange={onPageChange} size="sm" />
+        </Group>
       )}
     </Stack>
   )
@@ -248,52 +271,60 @@ const VersionCard = ({
 
 /* ── Main Dataset Page ── */
 export function DatasetPage() {
-  const params = useParams<{ id: string }>()
-  const projectId = params.id
-  const activeProject = useProjectStore((s) => s.activeProject)
-  const dataset = activeProject?.dataset
+  const { projectId } = routeApi.useParams()
+  const { page, versionId, split } = routeApi.useSearch()
+  const navigate = routeApi.useNavigate()
+  const {
+    data: { project: activeProject },
+  } = useSuspenseQuery({
+    ...projectDetailQueryOptions(projectId),
+    // Snapshot builds are async (see server/lib/snapshot.ts) — poll while
+    // any version is still building so 'building' -> 'ready' shows up
+    // without a manual refresh.
+    refetchInterval: (query) => {
+      const dataset = query.state.data?.project.dataset
+      const versions = [dataset?.draft, ...(dataset?.versions ?? [])]
+      return versions.some((v) => v?.status === 'building') ? 3000 : false
+    },
+  })
+  const dataset = activeProject.dataset
+  const needsAnnotations = getTaskDescriptor(activeProject.task).columns.some((c) => c.kind === 'label')
 
   const [createVersionOpened, { open: openCreateVersion, close: closeCreateVersion }] = useDisclosure(false)
-  const [selectedSplit, setSelectedSplit] = useState<{
-    versionId: string
-    type: 'train' | 'validation' | 'test'
-  } | null>(null)
+  const selectedSplit = versionId && split ? { versionId, type: split } : null
+  const setSelectedSplit = (next: { versionId: string; type: 'train' | 'validation' | 'test' } | null) =>
+    navigate({ search: (prev) => ({ ...prev, versionId: next?.versionId, split: next?.type, page: 1 }) })
+
+  // Cheap aggregate-only fetch (perPage=1) for the draft's labeling progress.
+  const { data: draftCounts } = useProjectItems(needsAnnotations ? projectId : undefined, { perPage: 1 })
 
   return (
     <Box>
       <Stack gap="xl">
-        {/* Header */}
-        <Group justify="space-between" align="flex-start">
-          <div>
-            <Title order={2}>Dataset</Title>
-            <Text size="sm" c="dimmed" mt={4}>
-              {activeProject ? `Manage dataset for "${activeProject.name}"` : 'Manage dataset'}
-            </Text>
-          </div>
-          {dataset && (
-            <Group gap="sm">
-              <Badge color={MODALITY_COLORS[dataset.modality]} variant="light">
-                {dataset.modality}
-              </Badge>
-              <Button size="xs" leftSection={<PlusIcon size={14} />} variant="light" onClick={openCreateVersion}>
-                Create Snapshot
-              </Button>
-            </Group>
-          )}
-        </Group>
+        <PageHeader
+          title="Dataset"
+          description={`Manage dataset for "${activeProject.name}"`}
+          actions={
+            dataset && (
+              <Group gap="sm">
+                {needsAnnotations && draftCounts && (
+                  <LabelingProgress labeled={draftCounts.labeledCount} total={draftCounts.total} />
+                )}
+                <StatusBadge value={dataset.modality} colorMap={MODALITY_COLORS} />
+                <Button size="xs" leftSection={<PlusIcon size={14} />} variant="light" onClick={openCreateVersion}>
+                  Create Snapshot
+                </Button>
+              </Group>
+            )
+          }
+        />
 
         {!dataset ? (
-          <Card withBorder p="xl" radius="md" ta="center">
-            <Stack align="center" gap="md">
-              <ThemeIcon size={56} variant="light" color="gray" radius="xl">
-                <DatabaseIcon size={30} weight="thin" />
-              </ThemeIcon>
-              <Title order={5}>No dataset found</Title>
-              <Text size="sm" c="dimmed">
-                This project's dataset hasn't been initialized yet.
-              </Text>
-            </Stack>
-          </Card>
+          <EmptyState
+            icon={DatabaseIcon}
+            title="No dataset found"
+            description="This project's dataset hasn't been initialized yet."
+          />
         ) : (
           <Stack gap="lg">
             {/* Draft version */}
@@ -325,11 +356,10 @@ export function DatasetPage() {
             )}
 
             {(dataset.versions?.length ?? 0) === 0 && (
-              <Card withBorder p="md" radius="md">
-                <Text size="sm" c="dimmed" ta="center">
-                  No snapshots yet. Create one to freeze the current dataset state for training.
-                </Text>
-              </Card>
+              <EmptyState
+                description="No snapshots yet. Create one to freeze the current dataset state for training."
+                compact
+              />
             )}
 
             {/* Selected split items */}
@@ -345,6 +375,8 @@ export function DatasetPage() {
                   projectId={projectId}
                   versionId={selectedSplit.versionId}
                   splitType={selectedSplit.type}
+                  page={page}
+                  onPageChange={(page) => navigate({ search: (prev) => ({ ...prev, page }) })}
                 />
               </Card>
             )}
@@ -354,7 +386,7 @@ export function DatasetPage() {
 
       {/* Create Version Modal */}
       <Modal opened={createVersionOpened} onClose={closeCreateVersion} title="Create Snapshot Version" centered>
-        <CreateVersionModal projectId={projectId} onClose={closeCreateVersion} />
+        <CreateVersionModal projectId={projectId} needsAnnotations={needsAnnotations} onClose={closeCreateVersion} />
       </Modal>
     </Box>
   )
