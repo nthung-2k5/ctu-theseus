@@ -11,6 +11,7 @@ import nats.errors
 import nats.js.errors
 from config import NATS_URI
 from nats.aio.client import Client as NatsClient
+from nats.aio.errors import NatsError
 from nats.aio.msg import Msg
 from nats.js import JetStreamContext
 from nats.js.api import (
@@ -129,10 +130,14 @@ class NatsService:
         """Download an uploaded image from NATS Object Store to a specific path."""
         os = await self.js.object_store(bucket)
         try:
-            with open(downloadTo, "wb") as f:
+            f = await asyncio.to_thread(lambda: downloadTo.open("wb"))
+            try:
                 await os.get(key, writeinto=f)
+            finally:
+                await asyncio.to_thread(f.close)
+
             return True
-        except Exception as e:
+        except (NatsError, OSError) as e:
             logger.error(f"Failed to download {key} from NATS Object Store: {e}")
             return False
 
