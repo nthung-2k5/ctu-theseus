@@ -18,79 +18,48 @@ import { useForm } from '@mantine/form'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import { FolderSimpleIcon, PencilSimpleIcon, PlusIcon } from '@phosphor-icons/react'
-import { api } from '@public/lib/api'
-import { assert } from '@public/lib/assert'
-import { useEdenMutation } from '@public/lib/eden-query'
-import { queries } from '@public/queries'
-import { useProjects } from '@public/queries/project'
-import { useProjectStore } from '@public/store/useProjectStore'
-import { useEffect } from 'react'
-import { useLocation } from 'wouter'
+import { UpdateProjectModal } from '@public/components/UpdateProjectModal'
+import { EmptyState, PageHeader } from '@public/components/ui'
+import { useEden } from '@public/lib/api'
+import { useProjects } from '@public/lib/queries'
+import type { DatasetModality, ProjectTask } from '@server/lib/enums'
+import { taskRegistry } from '@server/lib/tasks'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 
-const TASK_OPTIONS = [
-  {
-    group: 'Text',
-    items: [
-      { value: 'text_classification', label: 'Text Classification' },
-      { value: 'token_classification', label: 'Token Classification (NER)' },
-      { value: 'text_generation', label: 'Text Generation' },
-      { value: 'question_answering', label: 'Question Answering' },
-      { value: 'summarization', label: 'Summarization' },
-      { value: 'sequence_to_sequence', label: 'Sequence-to-Sequence' },
-      { value: 'text_embedding', label: 'Text Embedding' },
-    ],
-  },
-  {
-    group: 'Vision',
-    items: [
-      { value: 'image_classification', label: 'Image Classification' },
-      { value: 'object_detection', label: 'Object Detection' },
-      { value: 'image_segmentation', label: 'Image Segmentation' },
-      { value: 'image_captioning', label: 'Image Captioning' },
-    ],
-  },
-  {
-    group: 'Audio',
-    items: [
-      { value: 'audio_classification', label: 'Audio Classification' },
-      { value: 'automatic_speech_recognition', label: 'Speech Recognition (ASR)' },
-      { value: 'audio_segmentation', label: 'Audio Segmentation' },
-      { value: 'audio_captioning', label: 'Audio Captioning' },
-    ],
-  },
-  {
-    group: 'Tabular',
-    items: [
-      { value: 'tabular_regression', label: 'Tabular Regression' },
-      { value: 'tabular_classification', label: 'Tabular Classification' },
-      { value: 'tabular_clustering', label: 'Tabular Clustering' },
-      { value: 'tabular_anomaly_detection', label: 'Anomaly Detection' },
-    ],
-  },
-]
-
-/** Human-readable task label */
-function taskLabel(task: string): string {
-  for (const group of TASK_OPTIONS) {
-    const item = group.items.find((i) => i.value === task)
-    if (item) return item.label
-  }
-  return task
+const MODALITY_GROUP_LABELS: Record<DatasetModality, string> = {
+  text: 'Text',
+  vision: 'Vision',
+  audio: 'Audio',
+  tabular: 'Tabular',
 }
 
-/** Modality color */
-function taskColor(task: string): string {
-  if (
-    task.startsWith('text_') ||
-    task === 'question_answering' ||
-    task === 'summarization' ||
-    task === 'sequence_to_sequence'
-  )
-    return 'blue'
-  if (task.startsWith('image_') || task === 'object_detection') return 'green'
-  if (task.startsWith('audio_') || task === 'automatic_speech_recognition') return 'orange'
-  if (task.startsWith('tabular_')) return 'grape'
-  return 'gray'
+const MODALITY_COLORS: Record<DatasetModality, string> = {
+  text: 'blue',
+  vision: 'green',
+  audio: 'orange',
+  tabular: 'grape',
+}
+
+/**
+ * Every task in the registry, grouped by modality — planned (non-Ludwig)
+ * tasks are shown disabled with a "coming soon" label instead of hidden, so
+ * users can see the roadmap without being able to submit a task the backend
+ * would 422 on (see server/routes/projects.ts's descriptor.backend check).
+ */
+const TASK_OPTIONS = (Object.keys(MODALITY_GROUP_LABELS) as DatasetModality[]).map((modality) => ({
+  group: MODALITY_GROUP_LABELS[modality],
+  items: Object.values(taskRegistry)
+    .filter((d) => d.modality === modality)
+    .map((d) => ({
+      value: d.id,
+      label: d.backend === 'ludwig' ? d.label : `${d.label} (coming soon)`,
+      disabled: d.backend !== 'ludwig',
+    })),
+}))
+
+function taskLabel(task: string): string {
+  return taskRegistry[task as ProjectTask]?.label ?? task
 }
 
 const CreateProjectModal = () => {
@@ -102,23 +71,30 @@ const CreateProjectModal = () => {
     },
   })
 
-  const createProject = useEdenMutation(api.projects.post, [queries.projects.all.queryKey], {
-    onSuccess: async ({ project }) => {
+  const eden = useEden()
+  const queryClient = useQueryClient()
+
+  const createProject = useMutation({
+    ...eden.api.projects.post.mutationOptions(),
+    onSuccess: ({ project }) => {
+      queryClient.invalidateQueries({ queryKey: eden.api.projects.get.queryKey() })
       notifications.show({ title: 'Project created', message: `"${project.name}" is ready`, color: 'green' })
       form.reset()
       modals.closeAll()
     },
     onError: (error) => {
-      notifications.show({
-        title: 'Error',
-        message: typeof error.value === 'string' ? error.value : (error.value?.message ?? 'Failed to create project'),
-        color: 'red',
-      })
+      const value: unknown = error.value
+      const message = typeof value === 'string' ? value : (value as { message?: string } | undefined)?.message
+      notifications.show({ title: 'Error', message: message ?? 'Failed to create project', color: 'red' })
     },
   })
 
   return (
-    <form onSubmit={form.onSubmit((values) => createProject.mutate(values as any))}>
+    <form
+      onSubmit={form.onSubmit((values) =>
+        createProject.mutate({ name: values.name, description: values.description, task: values.task as ProjectTask }),
+      )}
+    >
       <Stack gap="md">
         <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
         <Textarea
@@ -146,74 +122,15 @@ const CreateProjectModal = () => {
   )
 }
 
-const UpdateProjectModal = ({
-  projectId,
-  projectName,
-  projectDescription,
-}: {
-  projectId: string
-  projectName: string
-  projectDescription: string | null
-}) => {
-  const form = useForm({
-    initialValues: { name: projectName, description: projectDescription },
-    validate: {
-      name: (v) => (v.trim().length > 0 ? null : 'Project name is required'),
-    },
-  })
-
-  const updateProject = useEdenMutation(api.projects({ projectId }).patch, [queries.projects.all.queryKey], {
-    onSuccess: async ({ project }) => {
-      notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
-      form.reset()
-      modals.closeAll()
-    },
-    onError: (error) => {
-      assert(error.status === 404 || error.status === 422)
-      notifications.show({
-        title: 'Error',
-        message: error.status === 404 ? error.value : (error.value?.message ?? 'Failed to update project'),
-        color: 'red',
-      })
-    },
-  })
-
-  return (
-    <form onSubmit={form.onSubmit((values) => updateProject.mutate(values))}>
-      <Stack gap="md">
-        <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
-        <Textarea
-          label="Description"
-          placeholder="What is this project about?"
-          autosize
-          minRows={3}
-          {...form.getInputProps('description')}
-        />
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={modals.closeAll}>
-            Cancel
-          </Button>
-          <Button type="submit">Save Changes</Button>
-        </Group>
-      </Stack>
-    </form>
-  )
-}
-
 export function DashboardPage() {
-  const [, setLocation] = useLocation()
+  const navigate = useNavigate()
 
   const { data, isLoading } = useProjects()
-  const setActiveProject = useProjectStore((s) => s.setActiveProject)
 
   const projects = data?.projects ?? []
 
-  useEffect(() => {
-    setActiveProject(null)
-  }, [setActiveProject])
-
   const openProject = (projectId: string) => {
-    setLocation(`/project/${projectId}`)
+    navigate({ to: '/project/$projectId', params: { projectId } })
   }
 
   const openCreateProjectModal = () => {
@@ -242,73 +159,71 @@ export function DashboardPage() {
 
   return (
     <Box>
-      <Group justify="space-between" mb="xl">
-        <div>
-          <Title order={2}>Projects</Title>
-          <Text size="sm" c="dimmed" mt={4}>
-            Manage your machine learning projects
-          </Text>
-        </div>
-        <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal}>
-          New project
-        </Button>
-      </Group>
+      <PageHeader
+        title="Projects"
+        description="Manage your machine learning projects"
+        actions={
+          <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal}>
+            New project
+          </Button>
+        }
+      />
 
-      {isLoading ? (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} height={160} radius="md" />
-          ))}
-        </SimpleGrid>
-      ) : projects.length === 0 ? (
-        <Card withBorder p="xl" radius="md" ta="center">
-          <Stack align="center" gap="md">
-            <FolderSimpleIcon size={48} weight="thin" />
-            <Title order={4}>No projects yet</Title>
-            <Text size="sm" c="dimmed">
-              Create your first project to get started with AI training.
-            </Text>
-            <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal}>
-              Create project
-            </Button>
-          </Stack>
-        </Card>
-      ) : (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              withBorder
-              padding="lg"
-              radius="md"
-              className="card-elevated"
-              style={{ cursor: 'pointer' }}
-              onClick={() => openProject(project.id)}
-            >
-              <Stack gap="sm">
-                <Group justify="space-between">
-                  <Title order={5}>{project.name}</Title>
-                  <Group gap="xs">
-                    <Badge variant="light" color={taskColor(project.task)} size="sm">
-                      {taskLabel(project.task)}
-                    </Badge>
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      onClick={(e) => openUpdateProjectModal(e, project.id, project.name, project.description)}
-                    >
-                      <PencilSimpleIcon size={16} />
-                    </ActionIcon>
+      <Box mt="xl">
+        {isLoading ? (
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
+            {Array.from({ length: 6 }, (_, i) => `skeleton-${i}`).map((key) => (
+              <Skeleton key={key} height={160} radius="md" />
+            ))}
+          </SimpleGrid>
+        ) : projects.length === 0 ? (
+          <EmptyState
+            icon={FolderSimpleIcon}
+            title="No projects yet"
+            description="Create your first project to get started with AI training."
+            action={
+              <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal}>
+                Create project
+              </Button>
+            }
+          />
+        ) : (
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
+            {projects.map((project) => (
+              <Card
+                key={project.id}
+                withBorder
+                padding="lg"
+                radius="md"
+                className="card-elevated"
+                style={{ cursor: 'pointer' }}
+                onClick={() => openProject(project.id)}
+              >
+                <Stack gap="sm">
+                  <Group justify="space-between">
+                    <Title order={5}>{project.name}</Title>
+                    <Group gap="xs">
+                      <Badge variant="light" color={MODALITY_COLORS[taskRegistry[project.task].modality]} size="sm">
+                        {taskLabel(project.task)}
+                      </Badge>
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        onClick={(e) => openUpdateProjectModal(e, project.id, project.name, project.description)}
+                      >
+                        <PencilSimpleIcon size={16} />
+                      </ActionIcon>
+                    </Group>
                   </Group>
-                </Group>
-                <Text size="sm" c="dimmed" lineClamp={2}>
-                  {project.description || 'No description provided'}
-                </Text>
-              </Stack>
-            </Card>
-          ))}
-        </SimpleGrid>
-      )}
+                  <Text size="sm" c="dimmed" lineClamp={2}>
+                    {project.description || 'No description provided'}
+                  </Text>
+                </Stack>
+              </Card>
+            ))}
+          </SimpleGrid>
+        )}
+      </Box>
     </Box>
   )
 }
