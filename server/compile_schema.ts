@@ -4,7 +4,7 @@ import { compiledSchemas } from './lib/schema'
 
 const compileSchema = async <T>(schema: T, name: string) => {
   await writeFile(`./schema/${name}.json`, JSON.stringify(schema, null, 2))
-  await $`uv run datamodel-codegen --input schema/${name}.json --output ai_service/schema/${name}.py \
+  await $`uv run --project ai_service datamodel-codegen --input schema/${name}.json --output ai_service/schema/${name}.py \
     --input-file-type jsonschema \
     --output-model-type pydantic_v2.BaseModel \
     --use-type-alias \
