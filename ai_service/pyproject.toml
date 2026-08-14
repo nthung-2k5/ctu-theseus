@@ -28,4 +28,13 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["datamodel-code-generator>=0.72.3", "types-boto3[essential]"]
+dev = [
+  "datamodel-code-generator>=0.72.3",
+  "pytest>=9.1.1",
+  "types-boto3[essential]",
+]
+
+[tool.pytest.ini_options]
+# Modules are imported as top-level (e.g. `from services.predict import ...`)
+# relative to ai_service/ — same as how main.py resolves them at runtime.
+pythonpath = ["."]
