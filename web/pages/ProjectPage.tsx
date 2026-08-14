@@ -1,21 +1,5 @@
-import {
-  ActionIcon,
-  Badge,
-  Box,
-  Button,
-  Card,
-  Group,
-  SimpleGrid,
-  Stack,
-  Text,
-  Textarea,
-  TextInput,
-  ThemeIcon,
-  Title,
-} from '@mantine/core'
-import { useForm } from '@mantine/form'
+import { ActionIcon, Badge, Box, Card, Group, SimpleGrid, Stack, Text, ThemeIcon, Title } from '@mantine/core'
 import { modals } from '@mantine/modals'
-import { notifications } from '@mantine/notifications'
 import {
   ArrowRightIcon,
   BrainIcon,
@@ -25,43 +9,43 @@ import {
   StackIcon,
   TagIcon,
 } from '@phosphor-icons/react'
-import { api } from '@public/lib/api'
-import { assert } from '@public/lib/assert'
+import { UpdateProjectModal } from '@public/components/UpdateProjectModal'
+import { StatCard } from '@public/components/ui'
 import { MODALITY_COLORS } from '@public/lib/constants'
-import { useEdenMutation } from '@public/lib/eden-query'
-import { queries } from '@public/queries'
-import type { ProjectDetail } from '@public/store/types'
-import { useProjectStore } from '@public/store/useProjectStore'
+import { projectDetailQueryOptions } from '@public/lib/queries'
 import { isClassificationTask } from '@server/lib/tasks'
-import { useLocation, useParams } from 'wouter'
+import { useSuspenseQuery } from '@tanstack/react-query'
+import { getRouteApi, useNavigate } from '@tanstack/react-router'
+
+const routeApi = getRouteApi('/_app/project/$projectId/')
 
 const BASE_WORKFLOW_STEPS = [
   {
     label: 'Data',
     desc: 'Upload items and build a labeled pool for training',
     icon: DatabaseIcon,
-    path: '/data',
+    to: '/project/$projectId/data' as const,
     color: 'primary',
   },
   {
     label: 'Dataset',
     desc: 'Assign splits and create version snapshots for training',
     icon: StackIcon,
-    path: '/dataset',
+    to: '/project/$projectId/dataset' as const,
     color: 'blue',
   },
   {
     label: 'Training',
     desc: 'Train models on dataset versions and monitor progress',
     icon: BrainIcon,
-    path: '/training',
+    to: '/project/$projectId/training' as const,
     color: 'teal',
   },
   {
     label: 'Inference',
     desc: 'Test trained models and export weights for deployment',
     icon: CrosshairIcon,
-    path: '/inference',
+    to: '/project/$projectId/inference' as const,
     color: 'orange',
   },
 ]
@@ -70,78 +54,34 @@ const CLASSES_STEP = {
   label: 'Classes',
   desc: 'Define label classes for classification annotations',
   icon: TagIcon,
-  path: '/classes',
+  to: '/project/$projectId/classes' as const,
   color: 'violet',
 }
 
-const UpdateProjectModal = ({ project }: { project: ProjectDetail }) => {
-  const form = useForm({
-    initialValues: { name: project.name, description: project.description },
-    validate: {
-      name: (v) => (v.trim().length > 0 ? null : 'Project name is required'),
-    },
-  })
-
-  const updateProject = useEdenMutation(
-    api.projects({ projectId: project.id }).patch,
-    [queries.projects.all.queryKey, queries.projects.detail(project.id).queryKey],
-    {
-      onSuccess: ({ project }) => {
-        notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
-        form.reset()
-        modals.closeAll()
-      },
-      onError: (error) => {
-        assert(error.status === 404 || error.status === 422)
-        notifications.show({
-          title: 'Error',
-          message: error.status === 404 ? error.value : (error.value?.message ?? 'Failed to update project'),
-          color: 'red',
-        })
-      },
-    },
-  )
-
-  return (
-    <form onSubmit={form.onSubmit((values) => updateProject.mutate(values))}>
-      <Stack gap="md">
-        <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
-        <Textarea
-          label="Description"
-          placeholder="What is this project about?"
-          autosize
-          minRows={3}
-          {...form.getInputProps('description')}
-        />
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={modals.closeAll}>
-            Cancel
-          </Button>
-          <Button type="submit">Save Changes</Button>
-        </Group>
-      </Stack>
-    </form>
-  )
-}
-
 export function ProjectPage() {
-  const params = useParams<{ id: string }>()
-  const [, setLocation] = useLocation()
-  const activeProject = useProjectStore((s) => s.activeProject)
+  const { projectId } = routeApi.useParams()
+  const navigate = useNavigate()
+  const {
+    data: { project: activeProject },
+  } = useSuspenseQuery(projectDetailQueryOptions(projectId))
 
-  const dataset = activeProject?.dataset
+  const dataset = activeProject.dataset
   const versionCount = (dataset?.versions?.length ?? 0) + (dataset?.draft ? 1 : 0)
 
-  const WORKFLOW_STEPS = isClassificationTask(activeProject?.task)
+  const WORKFLOW_STEPS = isClassificationTask(activeProject.task)
     ? [BASE_WORKFLOW_STEPS[0], CLASSES_STEP, ...BASE_WORKFLOW_STEPS.slice(1)]
     : BASE_WORKFLOW_STEPS
 
   const handleEditClick = () => {
-    assert(activeProject)
-
     modals.open({
       title: 'Edit project',
-      children: <UpdateProjectModal project={activeProject} />,
+      children: (
+        <UpdateProjectModal
+          projectId={activeProject.id}
+          projectName={activeProject.name}
+          projectDescription={activeProject.description}
+        />
+      ),
     })
   }
 
@@ -151,22 +91,18 @@ export function ProjectPage() {
         {/* Header */}
         <div>
           <Group gap="xs">
-            <Title order={2}>{activeProject?.name ?? 'Project'}</Title>
-            {activeProject && (
-              <ActionIcon variant="subtle" color="gray" onClick={handleEditClick} size="lg">
-                <PencilSimpleIcon size={20} />
-              </ActionIcon>
-            )}
+            <Title order={2}>{activeProject.name}</Title>
+            <ActionIcon variant="subtle" color="gray" onClick={handleEditClick} size="lg">
+              <PencilSimpleIcon size={20} />
+            </ActionIcon>
           </Group>
           <Text size="sm" c="dimmed" mt={4}>
-            {activeProject?.description ?? 'Project overview and workflow'}
+            {activeProject.description || 'Project overview and workflow'}
           </Text>
           <Group gap="xs" mt="xs">
-            {activeProject?.task && (
-              <Badge variant="light" size="sm">
-                {activeProject.task.replace(/_/g, ' ')}
-              </Badge>
-            )}
+            <Badge variant="light" size="sm">
+              {activeProject.task.replace(/_/g, ' ')}
+            </Badge>
             {dataset && (
               <Badge variant="light" color={MODALITY_COLORS[dataset.modality]} size="sm">
                 {dataset.modality}
@@ -177,51 +113,14 @@ export function ProjectPage() {
 
         {/* Stats */}
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
-          <Card withBorder padding="lg" radius="md">
-            <Group>
-              <ThemeIcon size="lg" variant="light" color="primary">
-                <DatabaseIcon size={22} />
-              </ThemeIcon>
-              <div>
-                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Dataset Versions
-                </Text>
-                <Text size="xl" fw={700}>
-                  {versionCount}
-                </Text>
-              </div>
-            </Group>
-          </Card>
-          <Card withBorder padding="lg" radius="md">
-            <Group>
-              <ThemeIcon size="lg" variant="light" color="teal">
-                <BrainIcon size={22} />
-              </ThemeIcon>
-              <div>
-                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Training Runs
-                </Text>
-                <Text size="xl" fw={700}>
-                  {activeProject?.runCount ?? 0}
-                </Text>
-              </div>
-            </Group>
-          </Card>
-          <Card withBorder padding="lg" radius="md">
-            <Group>
-              <ThemeIcon size="lg" variant="light" color="violet">
-                <StackIcon size={22} />
-              </ThemeIcon>
-              <div>
-                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                  Modality
-                </Text>
-                <Text size="sm" fw={500} tt="capitalize">
-                  {dataset?.modality ?? '—'}
-                </Text>
-              </div>
-            </Group>
-          </Card>
+          <StatCard icon={DatabaseIcon} color="primary" label="Dataset Versions" value={versionCount} />
+          <StatCard icon={BrainIcon} color="teal" label="Training Runs" value={activeProject.runCount ?? 0} />
+          <StatCard
+            icon={StackIcon}
+            color="violet"
+            label="Modality"
+            value={<Text tt="capitalize">{dataset?.modality ?? '—'}</Text>}
+          />
         </SimpleGrid>
 
         {/* Workflow */}
@@ -238,7 +137,7 @@ export function ProjectPage() {
                 radius="md"
                 className="card-elevated"
                 style={{ cursor: 'pointer' }}
-                onClick={() => setLocation(`/project/${params.id}${step.path}`)}
+                onClick={() => navigate({ to: step.to, params: { projectId } })}
               >
                 <Group justify="space-between" mb="sm">
                   <Group gap="sm">
