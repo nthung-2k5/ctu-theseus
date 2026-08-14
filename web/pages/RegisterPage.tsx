@@ -2,11 +2,13 @@ import { Anchor, Box, Button, Card, Center, PasswordInput, Stack, Text, TextInpu
 import { useForm } from '@mantine/form'
 import { notifications } from '@mantine/notifications'
 import { EnvelopeSimpleIcon, LockIcon, UserCircleIcon } from '@phosphor-icons/react'
-import { authClient } from '@public/lib/auth'
-import { useLocation } from 'wouter'
+import { authClient, sessionQueryOptions } from '@public/lib/auth'
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 
 export function RegisterPage() {
-  const [, setLocation] = useLocation()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const form = useForm({
     initialValues: { name: '', email: '', password: '', confirmPassword: '' },
@@ -33,7 +35,8 @@ export function RegisterPage() {
       return
     }
     notifications.show({ title: 'Account created', message: `Welcome, ${data.user.name}`, color: 'green' })
-    setLocation('/')
+    await queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
+    navigate({ to: '/' })
   }
 
   return (
@@ -83,7 +86,7 @@ export function RegisterPage() {
 
           <Text ta="center" size="sm" c="dimmed">
             Already have an account?{' '}
-            <Anchor component="button" type="button" size="sm" onClick={() => setLocation('/login')}>
+            <Anchor component="button" type="button" size="sm" onClick={() => navigate({ to: '/login' })}>
               Sign in
             </Anchor>
           </Text>
