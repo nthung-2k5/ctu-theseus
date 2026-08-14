@@ -1,5 +1,6 @@
 import {
   ActionIcon,
+  Alert,
   Badge,
   Box,
   Button,
@@ -8,6 +9,7 @@ import {
   Divider,
   Grid,
   Group,
+  JsonInput,
   Loader,
   Overlay,
   Paper,
@@ -16,34 +18,36 @@ import {
   Slider,
   Stack,
   Text,
+  Textarea,
   ThemeIcon,
   Title,
   Tooltip,
   Transition,
 } from '@mantine/core'
-import { Dropzone, IMAGE_MIME_TYPE } from '@mantine/dropzone'
+import { Dropzone } from '@mantine/dropzone'
 import { notifications } from '@mantine/notifications'
 import {
   ArrowCounterClockwiseIcon,
   CheckCircleIcon,
   CloudArrowUpIcon,
   CrosshairIcon,
-  DownloadSimpleIcon,
-  ExportIcon,
   LightningIcon,
-  WarningCircleIcon,
   XCircleIcon,
 } from '@phosphor-icons/react'
-import { api } from '@public/lib/api'
-import { useTrainingRuns } from '@public/queries/training'
+import { rest } from '@public/lib/api'
+import { projectDetailQueryOptions, useTrainingRuns } from '@public/lib/queries'
+import { getTaskDescriptor } from '@server/lib/tasks'
+import { useSuspenseQuery } from '@tanstack/react-query'
+import { getRouteApi, Link } from '@tanstack/react-router'
 import { useState } from 'react'
-import { useParams } from 'wouter'
+
+const routeApi = getRouteApi('/_app/project/$projectId/inference')
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-/** Raw inference result: { className: confidence } */
+/** Raw inference result: { className: confidence } (or { value: number } for regression). */
 type InferenceResult = Record<string, number>
 
 interface DetectionEntry {
@@ -51,62 +55,78 @@ interface DetectionEntry {
   confidence: number
 }
 
-const EXPORT_FORMATS = [
-  { value: 'onnx', label: 'ONNX (.onnx)' },
-  { value: 'torchscript', label: 'TorchScript (.pt)' },
-]
-
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export function InferencePage() {
-  const params = useParams<{ id: string }>()
-  const projectId = params.id
+  const { projectId } = routeApi.useParams()
+  const { runId: selectedRunId } = routeApi.useSearch()
+  const navigate = routeApi.useNavigate()
+  const setSelectedRunId = (runId: string | null) =>
+    navigate({ search: (prev) => ({ ...prev, runId: runId ?? undefined }) })
 
-  // Image state
-  const [imageUrl, setImageUrl] = useState<string | null>(null)
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const {
+    data: { project: activeProject },
+  } = useSuspenseQuery(projectDetailQueryOptions(projectId))
+  const descriptor = getTaskDescriptor(activeProject.task)
+
+  // File input (vision/audio tasks)
+  const [inputFile, setInputFile] = useState<File | null>(null)
+  const [inputFileUrl, setInputFileUrl] = useState<string | null>(null)
+  // Text input (text tasks)
+  const [textValue, setTextValue] = useState('')
+  // Record input (tabular tasks) — JSON-encoded, one value per feature column
+  const [recordJson, setRecordJson] = useState('')
+
   const [detections, setDetections] = useState<InferenceResult | null>(null)
 
   // Confidence threshold
   const [threshold, setThreshold] = useState(0.5)
 
-  // Selected model (training run)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-
   // Status
   const [isInferring, setIsInferring] = useState(false)
-
-  // Export
-  const [exportFormat, setExportFormat] = useState('onnx')
 
   // Fetch succeeded training runs
   const { data: runsData } = useTrainingRuns(projectId)
   const completedRuns = (runsData?.runs ?? []).filter((r) => r.status === 'succeeded')
 
+  const isFileTask = descriptor.itemSpec.payload === 'file'
+  const isTextTask = descriptor.itemSpec.payload === 'inline_text'
+  const isRecordTask = descriptor.itemSpec.payload === 'record'
+  const isAudio = descriptor.modality === 'audio'
+
+  const hasInput = isFileTask ? !!inputFile : isTextTask ? textValue.trim().length > 0 : recordJson.trim().length > 0
+
   /* ── Handlers ──────────────────────────────────────────────────── */
   const handleDrop = (files: File[]) => {
     if (files.length === 0) return
     const file = files[0]
-    setImageFile(file)
-    setImageUrl(URL.createObjectURL(file))
+    setInputFile(file)
+    setInputFileUrl(URL.createObjectURL(file))
     setDetections(null)
   }
 
   const handleInfer = async () => {
-    if (!imageFile || !selectedRunId) {
-      notifications.show({ title: 'Not Ready', message: 'Please select a model and upload an image.', color: 'orange' })
+    if (!hasInput || !selectedRunId) {
+      notifications.show({
+        title: 'Not Ready',
+        message: 'Please select a model and provide an input.',
+        color: 'orange',
+      })
       return
     }
     setIsInferring(true)
     setDetections(null)
 
     try {
-      const response = await api.inference({ runId: selectedRunId }).post({
-        image: imageFile,
-        threshold,
-      })
+      const body = isFileTask
+        ? { file: inputFile as File, threshold }
+        : isTextTask
+          ? { text: textValue, threshold }
+          : { record: recordJson, threshold }
+
+      const response = await rest.inference({ runId: selectedRunId }).post(body)
 
       if (response.error) {
         notifications.show({
@@ -116,12 +136,14 @@ export function InferencePage() {
           icon: <XCircleIcon size={18} />,
         })
       } else if (response.data) {
-        const data = response.data as any
+        const data = response.data as
+          | { status: 'success'; results: InferenceResult }
+          | { status: 'failed'; error: string }
         if (data.status === 'success' && data.results) {
           setDetections(data.results)
           notifications.show({
             title: 'Inference Complete',
-            message: `${Object.keys(data.results).length} class(es) predicted`,
+            message: `${Object.keys(data.results).length} result(s)`,
             color: 'teal',
             icon: <CheckCircleIcon size={18} />,
           })
@@ -145,19 +167,11 @@ export function InferencePage() {
     }
   }
 
-  const handleDownload = (format: string) => {
-    if (!selectedRunId) return
-    const a = document.createElement('a')
-    a.href = `/api/runs/${selectedRunId}/download/${format}`
-    a.download = `model.${format}`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
-
   const handleClear = () => {
-    setImageUrl(null)
-    setImageFile(null)
+    setInputFileUrl(null)
+    setInputFile(null)
+    setTextValue('')
+    setRecordJson('')
     setDetections(null)
   }
 
@@ -175,22 +189,22 @@ export function InferencePage() {
       <Stack gap="xl">
         {/* Page header */}
         <div>
-          <Title order={2}>Inference & Export</Title>
+          <Title order={2}>Inference</Title>
           <Text size="sm" c="dimmed" mt={4}>
-            Run predictions with your trained model and export weights
+            Run predictions with your trained model
           </Text>
         </div>
 
         <Grid gap="xl">
-          {/* ── Left: Image & Results ── */}
+          {/* ── Left: Input & Results ── */}
           <Grid.Col span={{ base: 12, md: 8 }}>
             <Stack gap="md">
-              {/* Upload / Preview */}
+              {/* Input */}
               <Card withBorder padding="lg" radius="md">
                 <Group justify="space-between" mb="md">
-                  <Title order={5}>Test Image</Title>
-                  {imageUrl && (
-                    <Tooltip label="Clear image">
+                  <Title order={5}>{isFileTask ? (isAudio ? 'Test Audio' : 'Test Image') : 'Test Input'}</Title>
+                  {hasInput && (
+                    <Tooltip label="Clear">
                       <ActionIcon variant="subtle" color="gray" onClick={handleClear}>
                         <ArrowCounterClockwiseIcon size={18} />
                       </ActionIcon>
@@ -198,49 +212,43 @@ export function InferencePage() {
                   )}
                 </Group>
 
-                {!imageUrl ? (
+                {isFileTask && !inputFileUrl && (
                   <Dropzone
                     onDrop={handleDrop}
-                    accept={IMAGE_MIME_TYPE}
+                    accept={descriptor.itemSpec.accept}
                     radius="md"
                     p="xl"
-                    style={{
-                      borderStyle: 'dashed',
-                      borderWidth: 2,
-                      transition: 'all 150ms ease',
-                    }}
+                    style={{ borderStyle: 'dashed', borderWidth: 2, transition: 'all 150ms ease' }}
                   >
                     <Stack align="center" gap="sm">
-                      <ThemeIcon
-                        size={56}
-                        variant="light"
-                        color="primary"
-                        radius="xl"
-                        style={{ transition: 'transform 200ms ease' }}
-                      >
+                      <ThemeIcon size={56} variant="light" color="primary" radius="xl">
                         <CloudArrowUpIcon size={30} />
                       </ThemeIcon>
                       <Text size="sm" fw={500}>
-                        Drop an image here or click to browse
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        Supports JPEG, PNG, WebP, GIF
+                        Drop {isAudio ? 'an audio file' : 'an image'} here or click to browse
                       </Text>
                     </Stack>
                   </Dropzone>
-                ) : (
+                )}
+
+                {isFileTask && inputFileUrl && (
                   <Box pos="relative">
                     <Paper radius="md" style={{ overflow: 'hidden', position: 'relative' }}>
-                      <img
-                        src={imageUrl}
-                        alt="Test"
-                        style={{
-                          width: '100%',
-                          display: 'block',
-                          transition: 'filter 300ms ease',
-                          filter: isInferring ? 'brightness(0.6)' : 'none',
-                        }}
-                      />
+                      {isAudio ? (
+                        // biome-ignore lint/a11y/useMediaCaption: user-uploaded test clip, no transcript source
+                        <audio controls src={inputFileUrl} style={{ width: '100%' }} />
+                      ) : (
+                        <img
+                          src={inputFileUrl}
+                          alt="Test"
+                          style={{
+                            width: '100%',
+                            display: 'block',
+                            transition: 'filter 300ms ease',
+                            filter: isInferring ? 'brightness(0.6)' : 'none',
+                          }}
+                        />
+                      )}
                       {isInferring && (
                         <Overlay center backgroundOpacity={0.4} blur={2} radius="md">
                           <Stack align="center" gap="xs">
@@ -252,26 +260,57 @@ export function InferencePage() {
                         </Overlay>
                       )}
                     </Paper>
-                    <Group mt="md" gap="sm">
-                      <Button
-                        onClick={handleInfer}
-                        loading={isInferring}
-                        disabled={!selectedRunId}
-                        leftSection={<LightningIcon size={18} weight="fill" />}
-                        variant="gradient"
-                        gradient={{ from: 'primary', to: 'secondary' }}
-                      >
-                        Run Inference
-                      </Button>
-                      <Button variant="subtle" color="gray" onClick={handleClear}>
-                        Clear
-                      </Button>
-                    </Group>
                   </Box>
+                )}
+
+                {isTextTask && (
+                  <Textarea
+                    placeholder="Paste or type text to classify"
+                    autosize
+                    minRows={4}
+                    value={textValue}
+                    onChange={(e) => {
+                      setTextValue(e.currentTarget.value)
+                      setDetections(null)
+                    }}
+                  />
+                )}
+
+                {isRecordTask && (
+                  <JsonInput
+                    placeholder='{"age": 34, "income": 52000}'
+                    description="One JSON object with a value for each feature column"
+                    autosize
+                    minRows={4}
+                    formatOnBlur
+                    value={recordJson}
+                    onChange={(v) => {
+                      setRecordJson(v)
+                      setDetections(null)
+                    }}
+                  />
+                )}
+
+                {hasInput && (
+                  <Group mt="md" gap="sm">
+                    <Button
+                      onClick={handleInfer}
+                      loading={isInferring}
+                      disabled={!selectedRunId}
+                      leftSection={<LightningIcon size={18} weight="fill" />}
+                      variant="gradient"
+                      gradient={{ from: 'primary', to: 'secondary' }}
+                    >
+                      Run Inference
+                    </Button>
+                    <Button variant="subtle" color="gray" onClick={handleClear}>
+                      Clear
+                    </Button>
+                  </Group>
                 )}
               </Card>
 
-              {/* Detection Results */}
+              {/* Results */}
               <Transition mounted={!!filteredDetections} transition="slide-up" duration={300}>
                 {(styles) => (
                   <Card withBorder padding="lg" radius="md" style={styles}>
@@ -280,10 +319,10 @@ export function InferencePage() {
                         <ThemeIcon variant="light" color="teal" size="sm">
                           <CrosshairIcon size={14} />
                         </ThemeIcon>
-                        <Title order={5}>Detection Results</Title>
+                        <Title order={5}>Results</Title>
                       </Group>
                       <Badge variant="light" color="teal" size="lg">
-                        {filteredDetections?.length ?? 0} class(es)
+                        {filteredDetections?.length ?? 0} result(s)
                       </Badge>
                     </Group>
 
@@ -317,7 +356,7 @@ export function InferencePage() {
                       </Stack>
                     ) : (
                       <Text size="sm" c="dimmed" ta="center" py="md">
-                        No detections above the confidence threshold
+                        No results above the confidence threshold
                       </Text>
                     )}
                   </Card>
@@ -341,7 +380,7 @@ export function InferencePage() {
                     value: r.id,
                     label: r.name,
                   }))}
-                  value={selectedRunId}
+                  value={selectedRunId ?? null}
                   onChange={setSelectedRunId}
                   searchable
                 />
@@ -358,7 +397,7 @@ export function InferencePage() {
                   Confidence Threshold
                 </Title>
                 <Text size="sm" c="dimmed" mb="sm">
-                  Filter out detections below this confidence score
+                  Filter out results below this confidence score
                 </Text>
                 <Slider
                   value={threshold}
@@ -379,35 +418,17 @@ export function InferencePage() {
                 </Text>
               </Card>
 
-              {/* Export Model */}
-              <Card withBorder padding="lg" radius="md">
-                <Group gap="sm" mb="md">
-                  <ThemeIcon variant="light" color="secondary" size="sm">
-                    <ExportIcon size={14} />
-                  </ThemeIcon>
-                  <Title order={5}>Export Model</Title>
-                </Group>
-                <Text size="sm" c="dimmed" mb="md">
-                  Download trained weights for deployment
-                </Text>
-                <Select
-                  label="Export Format"
-                  data={EXPORT_FORMATS}
-                  value={exportFormat}
-                  onChange={(v) => setExportFormat(v!)}
-                  mb="md"
-                />
-                <Button
-                  fullWidth
-                  variant="gradient"
-                  gradient={{ from: 'secondary.5', to: 'primary.5' }}
-                  leftSection={<DownloadSimpleIcon size={18} />}
-                  onClick={() => handleDownload(exportFormat)}
-                  disabled={!selectedRunId}
+              <Alert color="gray" variant="light">
+                Exporting a deployable model is handled on the{' '}
+                <Link
+                  to="/project/$projectId/models"
+                  params={{ projectId }}
+                  style={{ color: 'var(--mantine-color-primary-4)', textDecoration: 'underline' }}
                 >
-                  Download {exportFormat.toUpperCase()}
-                </Button>
-              </Card>
+                  Models page
+                </Link>
+                .
+              </Alert>
             </Stack>
           </Grid.Col>
         </Grid>
