@@ -11,22 +11,21 @@
 import { Button, Card, Group, NumberInput, Select, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { BrainIcon } from '@phosphor-icons/react'
-import { useProjectStore } from '@public/store/useProjectStore'
+import type { ProjectDetail } from '@public/store/types'
 import { getTaskDescriptor } from '@server/lib/tasks'
 
 interface CreateRunPanelProps {
-  projectId: string
+  project: ProjectDetail
   onStartTraining: (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) => void
 }
 
 const BATCH_SIZE_LABEL = (v: number | 'auto') => (v === 'auto' ? 'Auto' : String(v))
 
-export function CreateRunPanel({ projectId, onStartTraining }: CreateRunPanelProps) {
-  const activeProject = useProjectStore((s) => s.activeProject)
-  const dataset = activeProject?.dataset
-  const descriptor = activeProject ? getTaskDescriptor(activeProject.task) : undefined
-  const knobs = descriptor?.ludwig?.trainerKnobs
-  const encoders = descriptor?.ludwig?.encoders ?? []
+export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps) {
+  const dataset = project.dataset
+  const descriptor = getTaskDescriptor(project.task)
+  const knobs = descriptor.ludwig?.trainerKnobs
+  const encoders = descriptor.ludwig?.encoders ?? []
 
   // Only snapshots that finished building can actually be trained on — the
   // draft is mutable and has no parquet, and `building`/`failed` versions
@@ -133,8 +132,7 @@ export function CreateRunPanel({ projectId, onStartTraining }: CreateRunPanelPro
           </Group>
 
           <Text size="xs" c="dimmed">
-            These are the knobs {descriptor?.label ?? 'this task'} exposes for Ludwig's{' '}
-            {descriptor?.ludwig?.modelType ?? 'ecd'} trainer.
+            These are the knobs {descriptor.label} exposes for Ludwig's {descriptor.ludwig?.modelType ?? 'ecd'} trainer.
           </Text>
 
           <Group justify="flex-end">

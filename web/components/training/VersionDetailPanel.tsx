@@ -10,23 +10,24 @@ import { LineChart } from '@mantine/charts'
 import { Badge, Button, Card, Code, Group, Loader, ScrollArea, Stack, Table, Text, Title } from '@mantine/core'
 import { StopIcon } from '@phosphor-icons/react'
 import { useRunEvents } from '@public/hooks/useRunEvents'
-import { useTrainingRunDetail } from '@public/queries/training'
+import { trainingRunDetailQueryOptions, trainingRunsQueryOptions, useTrainingRunDetail } from '@public/lib/queries'
 import type { TrainingMetric, TrainingRunSummary } from '@public/store/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { STATUS_COLORS } from './constants'
 
 interface VersionDetailPanelProps {
+  projectId: string
   run: TrainingRunSummary
   onStop?: () => void
 }
 
-export function VersionDetailPanel({ run, onStop }: VersionDetailPanelProps) {
+export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPanelProps) {
   const isActive = run.status === 'running' || run.status === 'queued'
   const queryClient = useQueryClient()
 
   const live = useRunEvents(run.id, isActive, () => {
-    queryClient.invalidateQueries({ queryKey: ['training', 'runs'] })
-    queryClient.invalidateQueries({ queryKey: ['training', 'runDetail', run.id] })
+    queryClient.invalidateQueries({ queryKey: trainingRunsQueryOptions(projectId).queryKey })
+    queryClient.invalidateQueries({ queryKey: trainingRunDetailQueryOptions(run.id).queryKey })
   })
 
   const status = live.status ?? run.status

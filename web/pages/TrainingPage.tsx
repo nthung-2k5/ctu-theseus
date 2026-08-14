@@ -1,42 +1,56 @@
-import { Badge, Box, Button, Card, Grid, Group, Loader, ScrollArea, Stack, Text, ThemeIcon, Title } from '@mantine/core'
+import { Badge, Box, Button, Card, Grid, Group, Loader, ScrollArea, Stack, Text } from '@mantine/core'
 import { BrainIcon, PlusIcon } from '@phosphor-icons/react'
 import { CreateRunPanel } from '@public/components/training/CreateRunPanel'
 import { STATUS_COLORS } from '@public/components/training/constants'
 import { VersionDetailPanel } from '@public/components/training/VersionDetailPanel'
-import { api } from '@public/lib/api'
-import { useEdenMutation } from '@public/lib/eden-query'
-import { training, useTrainingRuns } from '@public/queries/training'
+import { EmptyState, PageHeader } from '@public/components/ui'
+import { rest, useEden } from '@public/lib/api'
+import { projectDetailQueryOptions, useTrainingRuns } from '@public/lib/queries'
 import type { TrainingRunSummary } from '@public/store/types'
-import { useState } from 'react'
-import { useParams } from 'wouter'
+import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
+
+const routeApi = getRouteApi('/_app/project/$projectId/training')
 
 export function TrainingPage() {
-  const params = useParams<{ id: string }>()
-  const projectId = params.id
-
-  const [selectedView, setSelectedView] = useState<'create' | string>('create')
+  const { projectId } = routeApi.useParams()
+  const { runId: selectedView } = routeApi.useSearch()
+  const navigate = routeApi.useNavigate()
+  const {
+    data: { project },
+  } = useSuspenseQuery(projectDetailQueryOptions(projectId))
+  const setSelectedView = (runId: string | undefined) => navigate({ search: (prev) => ({ ...prev, runId }) })
 
   /* ── Fetch runs from API (polls while any run is active) ── */
   const { data: runsData, isLoading } = useTrainingRuns(projectId)
   const runs: TrainingRunSummary[] = runsData?.runs ?? []
 
-  const selectedRun = selectedView !== 'create' ? runs.find((r) => r.id === selectedView) : undefined
+  const selectedRun = selectedView ? runs.find((r) => r.id === selectedView) : undefined
+
+  const eden = useEden()
+  const queryClient = useQueryClient()
+  const runsQueryKey = eden.api.projects({ projectId }).runs.get.queryKey()
 
   /* ── Start training mutation ── */
-  const startTraining = useEdenMutation(
-    (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) =>
-      api.projects({ projectId }).train.post(config),
-    [training.runs(projectId).queryKey],
-    {
-      onSuccess: ({ run }) => setSelectedView(run.id),
+  const startTraining = useMutation({
+    ...eden.api.projects({ projectId }).train.post.mutationOptions(),
+    onSuccess: ({ run }) => {
+      queryClient.invalidateQueries({ queryKey: runsQueryKey })
+      setSelectedView(run.id)
     },
-  )
+  })
 
   /* ── Stop training mutation ── */
-  const stopTraining = useEdenMutation(
-    (runId: string) => api.runs({ runId }).cancel.post(),
-    [training.runs(projectId).queryKey],
-  )
+  const stopTraining = useMutation({
+    mutationFn: async (runId: string) => {
+      const { data, error } = await rest.runs({ runId }).cancel.post()
+      if (error) throw error
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: runsQueryKey })
+    },
+  })
 
   /* ── Handlers ── */
   const handleStartTraining = (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) => {
@@ -51,13 +65,7 @@ export function TrainingPage() {
   return (
     <Box>
       <Stack gap="xl">
-        {/* Page header */}
-        <div>
-          <Title order={2}>Training</Title>
-          <Text size="sm" c="dimmed" mt={4}>
-            Manage training runs and monitor progress
-          </Text>
-        </div>
+        <PageHeader title="Training" description="Manage training runs and monitor progress" />
 
         <Grid gap="lg">
           {/* ── Left sidebar: run list ── */}
@@ -66,8 +74,8 @@ export function TrainingPage() {
               <Button
                 me="sm"
                 leftSection={<PlusIcon size={16} />}
-                variant={selectedView === 'create' ? 'filled' : 'light'}
-                onClick={() => setSelectedView('create')}
+                variant={!selectedView ? 'filled' : 'light'}
+                onClick={() => setSelectedView(undefined)}
               >
                 New Run
               </Button>
@@ -80,7 +88,7 @@ export function TrainingPage() {
                     </Card>
                   )}
 
-                  {runs.map((run, index) => {
+                  {runs.map((run) => {
                     const isActive = run.status === 'running' || run.status === 'queued'
 
                     return (
@@ -118,19 +126,12 @@ export function TrainingPage() {
                   })}
 
                   {!isLoading && runs.length === 0 && (
-                    <Card withBorder p="md" radius="md" ta="center">
-                      <Stack align="center" gap="xs">
-                        <ThemeIcon size="xl" variant="light" color="gray" radius="xl">
-                          <BrainIcon size={24} />
-                        </ThemeIcon>
-                        <Text size="sm" c="dimmed">
-                          No runs yet
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          Create your first training run
-                        </Text>
-                      </Stack>
-                    </Card>
+                    <EmptyState
+                      icon={BrainIcon}
+                      title="No runs yet"
+                      description="Create your first training run"
+                      compact
+                    />
                   )}
                 </Stack>
               </ScrollArea>
@@ -139,27 +140,22 @@ export function TrainingPage() {
 
           {/* ── Right panel ── */}
           <Grid.Col span={{ base: 12, md: 9 }}>
-            {selectedView === 'create' ? (
-              <CreateRunPanel projectId={projectId} onStartTraining={handleStartTraining} />
+            {!selectedView ? (
+              <CreateRunPanel project={project} onStartTraining={handleStartTraining} />
             ) : selectedRun ? (
               <VersionDetailPanel
+                projectId={projectId}
                 run={selectedRun}
                 onStop={
                   selectedRun.status === 'running' || selectedRun.status === 'queued' ? handleStopTraining : undefined
                 }
               />
             ) : (
-              <Card withBorder p="xl" radius="md" ta="center">
-                <Stack align="center" gap="sm">
-                  <ThemeIcon size={48} variant="light" color="primary" radius="xl">
-                    <BrainIcon size={28} />
-                  </ThemeIcon>
-                  <Title order={5}>Select a run</Title>
-                  <Text size="sm" c="dimmed">
-                    Choose a training run from the sidebar or create a new one
-                  </Text>
-                </Stack>
-              </Card>
+              <EmptyState
+                icon={BrainIcon}
+                title="Select a run"
+                description="Choose a training run from the sidebar or create a new one"
+              />
             )}
           </Grid.Col>
         </Grid>
