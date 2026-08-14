@@ -19,6 +19,7 @@
  *
  *   POST   /api/items/:itemId/annotations             – Add annotation to an item
  *   GET    /api/items/:itemId/annotations             – List annotations for an item
+ *   PATCH  /api/annotations/:annotationId             – Update an annotation (re-labeling)
  *   DELETE /api/annotations/:annotationId             – Delete an annotation
  *
  * Snapshotting copies pool-item membership into the new version, then kicks
@@ -43,7 +44,7 @@ import { type SplitType, SplitTypes } from '@server/lib/enums'
 import { readImageDimensions } from '@server/lib/image-size'
 import { buildSnapshot } from '@server/lib/snapshot'
 import { deleteFile, getDownloadUrl, uploadToPool } from '@server/lib/storage'
-import { and, eq } from 'drizzle-orm'
+import { and, countDistinct, eq } from 'drizzle-orm'
 import { Elysia, status, t } from 'elysia'
 import { betterAuth } from './auth'
 
@@ -529,6 +530,46 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
       return { annotations: itemAnnotations }
     },
     { itemBelongToUser: true },
+  )
+
+  /* ── Update an annotation (re-labeling — avoids delete-then-create) ── */
+  .patch(
+    '/annotations/:annotationId',
+    async ({ params, user, body }) => {
+      const annotation = await db.query.annotations.findFirst({
+        where: { id: params.annotationId },
+        with: { item: { with: { dataset: true } } },
+      })
+      if (!annotation) return status(404, 'Annotation not found')
+
+      const project = await db.query.projects.findFirst({
+        where: { id: annotation.item.dataset.projectId },
+        columns: { userId: true },
+      })
+      if (!project || project.userId !== user.id) return status(403, 'Unauthorized')
+
+      const [updated] = await db
+        .update(annotations)
+        .set({
+          classId: body.classId,
+          labelTextSequence: body.labelTextSequence,
+          labelStructured: body.labelStructured,
+          confidenceScore: body.confidenceScore != null ? String(body.confidenceScore) : undefined,
+        })
+        .where(eq(annotations.id, params.annotationId))
+        .returning()
+
+      return { annotation: updated }
+    },
+    {
+      auth: true,
+      body: t.Object({
+        classId: t.Optional(t.String()),
+        labelTextSequence: t.Optional(t.String()),
+        labelStructured: t.Optional(t.Any()),
+        confidenceScore: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
+      }),
+    },
   )
 
   /* ── Delete an annotation ── */
