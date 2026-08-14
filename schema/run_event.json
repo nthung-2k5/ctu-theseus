@@ -129,6 +129,56 @@
           "type": "string"
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "kind",
+        "runId",
+        "ts",
+        "jobId",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "const": "export",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "status": {
+          "default": "success",
+          "type": "string",
+          "enum": [
+            "success",
+            "failed"
+          ]
+        },
+        "format": {
+          "default": "onnx",
+          "type": "string",
+          "enum": [
+            "onnx",
+            "torchscript"
+          ]
+        },
+        "exportKey": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
     }
   ]
 }

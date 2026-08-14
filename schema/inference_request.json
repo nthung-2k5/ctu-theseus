@@ -3,19 +3,12 @@
   "type": "object",
   "required": [
     "runId",
-    "uploadKey",
-    "uploadFilename",
-    "threshold"
+    "threshold",
+    "payload"
   ],
   "properties": {
     "runId": {
       "format": "uuid",
-      "type": "string"
-    },
-    "uploadKey": {
-      "type": "string"
-    },
-    "uploadFilename": {
       "type": "string"
     },
     "threshold": {
@@ -23,6 +16,74 @@
       "maximum": 1,
       "default": 0.5,
       "type": "number"
+    },
+    "payload": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "uploadKey",
+            "uploadFilename"
+          ],
+          "properties": {
+            "kind": {
+              "const": "file",
+              "type": "string"
+            },
+            "uploadKey": {
+              "type": "string"
+            },
+            "uploadFilename": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "text"
+          ],
+          "properties": {
+            "kind": {
+              "const": "text",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "record"
+          ],
+          "properties": {
+            "kind": {
+              "const": "record",
+              "type": "string"
+            },
+            "record": {
+              "type": "object",
+              "patternProperties": {
+                "^(.*)$": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

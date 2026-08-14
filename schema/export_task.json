@@ -22,6 +22,9 @@
         "onnx",
         "torchscript"
       ]
+    },
+    "datasetKey": {
+      "type": "string"
     }
   }
 }
