@@ -12,6 +12,7 @@ import {
   Text,
   Title,
   UnstyledButton,
+  useMantineColorScheme,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
@@ -20,81 +21,90 @@ import {
   CaretDownIcon,
   CrosshairIcon,
   DatabaseIcon,
-  GearIcon,
   HouseIcon,
   ListIcon,
+  MoonIcon,
   PackageIcon,
   SignOutIcon,
   StackIcon,
+  SunIcon,
   TagIcon,
   UploadSimpleIcon,
-  UserIcon,
 } from '@phosphor-icons/react'
-import { authClient } from '@public/lib/auth'
+import { authClient, sessionQueryOptions } from '@public/lib/auth'
+import { projectDetailQueryOptions } from '@public/lib/queries'
 import type { ProjectDetail } from '@public/store/types'
-import { useProjectStore } from '@public/store/useProjectStore'
 import { isClassificationTask } from '@server/lib/tasks'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useLocation, useMatch, useNavigate } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
-import { Link, useLocation } from 'wouter'
 
 interface AppShellProps {
   children: ReactNode
 }
 
-const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, path: '/' }]
+const NAV_ITEMS = [{ label: 'Dashboard', icon: HouseIcon, to: '/' as const }]
 
 const hasReadyVersion = (project: ProjectDetail) =>
   project.dataset?.versions?.some((v) => v.status === 'ready') ?? false
 
 const PROJECT_NAV_ITEMS = [
-  { label: 'Overview', icon: DatabaseIcon, path: '' },
-  {
-    label: 'Data',
-    icon: UploadSimpleIcon,
-    path: '/data',
-  },
-  {
-    label: 'Dataset',
-    icon: StackIcon,
-    path: '/dataset',
-  },
+  { label: 'Overview', icon: DatabaseIcon, to: '/project/$projectId' as const },
+  { label: 'Data', icon: UploadSimpleIcon, to: '/project/$projectId/data' as const },
+  { label: 'Dataset', icon: StackIcon, to: '/project/$projectId/dataset' as const },
   {
     label: 'Classes',
     icon: TagIcon,
-    path: '/classes',
+    to: '/project/$projectId/classes' as const,
     /** Only visible for tasks that use label classes */
     hidden: (project: ProjectDetail) => !isClassificationTask(project.task),
   },
   {
     label: 'Training',
     icon: BrainIcon,
-    path: '/training',
+    to: '/project/$projectId/training' as const,
     disabled: (project: ProjectDetail) => !hasReadyVersion(project),
   },
   {
     label: 'Models',
     icon: PackageIcon,
-    path: '/models',
+    to: '/project/$projectId/models' as const,
     disabled: (project: ProjectDetail) => (project.runCount ?? 0) === 0,
   },
   {
     label: 'Inference',
     icon: CrosshairIcon,
-    path: '/inference',
+    to: '/project/$projectId/inference' as const,
     disabled: (project: ProjectDetail) => (project.runCount ?? 0) === 0,
   },
 ]
 
 export function AppShell({ children }: AppShellProps) {
-  const [location, setLocation] = useLocation()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure()
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
   const { data: session } = authClient.useSession()
-  const activeProject = useProjectStore((s) => s.activeProject)
+  const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const toggleColorScheme = () => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')
+
+  // AppShell sits above the project route, so it can't read that route's
+  // loader — this non-throwing match is undefined on the dashboard and
+  // defined everywhere under /project/$projectId.
+  const projectMatch = useMatch({ from: '/_app/project/$projectId', shouldThrow: false })
+  const projectId = projectMatch?.params.projectId
+  const { data: projectData } = useQuery({
+    ...projectDetailQueryOptions(projectId ?? ''),
+    enabled: !!projectId,
+  })
+  const activeProject = projectData?.project
 
   const handleLogout = async () => {
     await authClient.signOut()
+    queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
+    navigate({ to: '/login' })
   }
 
   return (
@@ -117,11 +127,11 @@ export function AppShell({ children }: AppShellProps) {
             <ActionIcon variant="subtle" color="gray" visibleFrom="sm" onClick={toggleDesktop}>
               <ListIcon size={20} />
             </ActionIcon>
-            <Link href="/">
+            <UnstyledButton onClick={() => navigate({ to: '/' })}>
               <Title order={4} c="primary">
                 CTU Theseus
               </Title>
-            </Link>
+            </UnstyledButton>
             {activeProject && (
               <>
                 <Text size="sm" c="dimmed">
@@ -134,30 +144,32 @@ export function AppShell({ children }: AppShellProps) {
             )}
           </Group>
 
-          <Menu shadow="md" width={200} position="bottom-end">
-            <Menu.Target>
-              <UnstyledButton>
-                <Group gap="xs">
-                  <Avatar size="sm" radius="xl" color="primary">
-                    {session?.user?.name?.[0]?.toUpperCase() ?? 'U'}
-                  </Avatar>
-                  <Text size="sm" fw={500} visibleFrom="sm">
-                    {session?.user?.name ?? 'User'}
-                  </Text>
-                  <CaretDownIcon size={14} />
-                </Group>
-              </UnstyledButton>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Label>Account</Menu.Label>
-              <Menu.Item leftSection={<UserIcon size={16} />}>Profile</Menu.Item>
-              <Menu.Item leftSection={<GearIcon size={16} />}>Settings</Menu.Item>
-              <Menu.Divider />
-              <Menu.Item leftSection={<SignOutIcon size={16} />} color="red" onClick={handleLogout}>
-                Sign out
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
+          <Group gap="sm">
+            <ActionIcon variant="subtle" color="gray" onClick={toggleColorScheme} aria-label="Toggle color scheme">
+              {colorScheme === 'dark' ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+            </ActionIcon>
+
+            <Menu shadow="md" width={200} position="bottom-end">
+              <Menu.Target>
+                <UnstyledButton>
+                  <Group gap="xs">
+                    <Avatar size="sm" radius="xl" color="primary">
+                      {session?.user?.name?.[0]?.toUpperCase() ?? 'U'}
+                    </Avatar>
+                    <Text size="sm" fw={500} visibleFrom="sm">
+                      {session?.user?.name ?? 'User'}
+                    </Text>
+                    <CaretDownIcon size={14} />
+                  </Group>
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item leftSection={<SignOutIcon size={16} />} color="red" onClick={handleLogout}>
+                  Sign out
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
         </Group>
       </MantineAppShell.Header>
 
@@ -168,11 +180,11 @@ export function AppShell({ children }: AppShellProps) {
             {!activeProject ? (
               NAV_ITEMS.map((item) => (
                 <NavLink
-                  key={item.path}
+                  key={item.to}
                   label={item.label}
                   leftSection={<item.icon size={20} />}
-                  active={location === item.path}
-                  onClick={() => setLocation(item.path)}
+                  active={location.pathname === item.to}
+                  onClick={() => navigate({ to: item.to })}
                   variant="light"
                 />
               ))
@@ -181,19 +193,19 @@ export function AppShell({ children }: AppShellProps) {
                 <NavLink
                   label="Back to Dashboard"
                   leftSection={<ArrowLeftIcon size={20} />}
-                  onClick={() => setLocation('/')}
+                  onClick={() => navigate({ to: '/' })}
                   variant="light"
                 />
                 <Divider my="xs" label="Project" labelPosition="left" />
                 {PROJECT_NAV_ITEMS.filter((item) => !item.hidden?.(activeProject)).map((item) => {
-                  const fullPath = `/project/${activeProject.id}${item.path}`
+                  const resolvedPath = item.to.replace('$projectId', activeProject.id)
                   return (
                     <NavLink
-                      key={item.path}
+                      key={item.to}
                       label={item.label}
                       leftSection={<item.icon size={20} />}
-                      active={location === fullPath}
-                      onClick={() => setLocation(fullPath)}
+                      active={location.pathname === resolvedPath}
+                      onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
                       variant="light"
                       disabled={item.disabled?.(activeProject)}
                     />
@@ -208,7 +220,7 @@ export function AppShell({ children }: AppShellProps) {
           <Divider my="xs" />
           <Box px="xs" py={4}>
             <Text size="xs" c="dimmed">
-              CTU Theseus v0.2
+              CTU Theseus v1.5
             </Text>
           </Box>
         </MantineAppShell.Section>
