@@ -1,6 +1,8 @@
+import json
 import logging
 import os
 import shutil
+from typing import Any
 from uuid import UUID
 
 import boto3
@@ -91,6 +93,13 @@ def upload_file(bucket: str, key: str, local_path: str):
     """Upload a single file to S3."""
     s3.upload_file(local_path, bucket, key)
     logger.debug(f"Uploaded {local_path} → s3://{bucket}/{key}")
+
+
+def upload_json(bucket: str, key: str, data: Any):
+    """Serialize `data` and upload it directly as a JSON object (no temp file)."""
+    body = json.dumps(data, indent=2, default=str).encode("utf-8")
+    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+    logger.debug(f"Uploaded JSON → s3://{bucket}/{key}")
 
 
 def delete_prefix(bucket: str, prefix: str):
