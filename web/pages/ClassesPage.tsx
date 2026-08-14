@@ -6,30 +6,28 @@ import {
   Card,
   ColorInput,
   Group,
-  Loader,
   Modal,
   SimpleGrid,
   Stack,
   Text,
-  TextInput,
   Textarea,
-  ThemeIcon,
+  TextInput,
   Title,
   Tooltip,
 } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { useDisclosure } from '@mantine/hooks'
-import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import { PencilSimpleIcon, PlusIcon, TagIcon, TrashIcon } from '@phosphor-icons/react'
-import { api } from '@public/lib/api'
-import { useEdenMutation } from '@public/lib/eden-query'
-import { queries } from '@public/queries'
-import { useLabelClasses } from '@public/queries/classes'
+import { confirmDelete, EmptyState, PageHeader } from '@public/components/ui'
+import { useEden } from '@public/lib/api'
+import { projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
 import type { LabelClass } from '@public/store/types'
-import { useProjectStore } from '@public/store/useProjectStore'
+import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
 import { useState } from 'react'
-import { useParams } from 'wouter'
+
+const routeApi = getRouteApi('/_app/project/$projectId/classes')
 
 /* ── Create / Edit Class Modal ── */
 function ClassFormModal({
@@ -55,38 +53,37 @@ function ClassFormModal({
     },
   })
 
-  const createClass = useEdenMutation(
-    (body: any) => api.projects({ projectId }).classes.post(body),
-    [queries.classes.list(projectId).queryKey, queries.projects.detail(projectId).queryKey],
-    {
-      onSuccess: () => {
-        notifications.show({ title: 'Class created', message: `"${form.values.name}" added`, color: 'green' })
-        form.reset()
-        onClose()
-      },
-      onError: () => {
-        notifications.show({ title: 'Error', message: 'Failed to create class', color: 'red' })
-      },
-    },
-  )
+  const eden = useEden()
+  const queryClient = useQueryClient()
+  const classesQueryKey = eden.api.projects({ projectId }).classes.get.queryKey()
 
-  const updateClass = useEdenMutation(
-    (body: any) =>
-      api
-        .projects({ projectId })
-        .classes({ classId: existing?.classId ?? '' })
-        .patch(body),
-    [queries.classes.list(projectId).queryKey, queries.projects.detail(projectId).queryKey],
-    {
-      onSuccess: () => {
-        notifications.show({ title: 'Class updated', message: `"${form.values.name}" updated`, color: 'green' })
-        onClose()
-      },
-      onError: () => {
-        notifications.show({ title: 'Error', message: 'Failed to update class', color: 'red' })
-      },
+  const createClass = useMutation({
+    ...eden.api.projects({ projectId }).classes.post.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: classesQueryKey })
+      notifications.show({ title: 'Class created', message: `"${form.values.name}" added`, color: 'green' })
+      form.reset()
+      onClose()
     },
-  )
+    onError: () => {
+      notifications.show({ title: 'Error', message: 'Failed to create class', color: 'red' })
+    },
+  })
+
+  const updateClass = useMutation({
+    ...eden.api
+      .projects({ projectId })
+      .classes({ classId: existing?.classId ?? '' })
+      .patch.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: classesQueryKey })
+      notifications.show({ title: 'Class updated', message: `"${form.values.name}" updated`, color: 'green' })
+      onClose()
+    },
+    onError: () => {
+      notifications.show({ title: 'Error', message: 'Failed to update class', color: 'red' })
+    },
+  })
 
   const handleSubmit = (values: typeof form.values) => {
     const body = {
@@ -95,9 +92,9 @@ function ClassFormModal({
       uiColorHex: values.uiColorHex,
     }
     if (isEdit) {
-      updateClass.mutate(body as any)
+      updateClass.mutate(body)
     } else {
-      createClass.mutate(body as any)
+      createClass.mutate(body)
     }
   }
 
@@ -158,35 +155,35 @@ function ClassCard({
   projectId: string
   onEdit: (cls: LabelClass) => void
 }) {
-  const deleteClass = useEdenMutation(
-    () => api.projects({ projectId }).classes({ classId: cls.classId }).delete(),
-    [queries.classes.list(projectId).queryKey, queries.projects.detail(projectId).queryKey],
-    {
-      onSuccess: () => {
-        notifications.show({ title: 'Deleted', message: `"${cls.name}" removed`, color: 'green' })
-      },
-      onError: () => {
-        notifications.show({
-          title: 'Cannot delete',
-          message: 'This class is referenced by existing annotations. Remove them first.',
-          color: 'red',
-        })
-      },
+  const eden = useEden()
+  const queryClient = useQueryClient()
+
+  const deleteClass = useMutation({
+    ...eden.api.projects({ projectId }).classes({ classId: cls.classId }).delete.mutationOptions(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).classes.get.queryKey() })
+      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
+      notifications.show({ title: 'Deleted', message: `"${cls.name}" removed`, color: 'green' })
     },
-  )
+    onError: () => {
+      notifications.show({
+        title: 'Cannot delete',
+        message: 'This class is referenced by existing annotations. Remove them first.',
+        color: 'red',
+      })
+    },
+  })
 
   const handleDelete = () => {
-    modals.openConfirmModal({
+    confirmDelete({
       title: 'Delete class',
-      children: (
-        <Text size="sm">
+      message: (
+        <>
           Are you sure you want to delete <strong>{cls.name}</strong>? This will fail if there are annotations using
           this class.
-        </Text>
+        </>
       ),
-      labels: { confirm: 'Delete', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: () => deleteClass.mutate(undefined as any),
+      onConfirm: () => deleteClass.mutate(),
     })
   }
 
@@ -238,9 +235,10 @@ function ClassCard({
 
 /* ── Main Classes Page ── */
 export function ClassesPage() {
-  const params = useParams<{ id: string }>()
-  const projectId = params.id
-  const activeProject = useProjectStore((s) => s.activeProject)
+  const { projectId } = routeApi.useParams()
+  const {
+    data: { project: activeProject },
+  } = useSuspenseQuery(projectDetailQueryOptions(projectId))
 
   const { data, isLoading } = useLabelClasses(projectId)
   const classes = data?.classes ?? []
@@ -251,45 +249,35 @@ export function ClassesPage() {
   return (
     <Box>
       <Stack gap="xl">
-        {/* Header */}
-        <Group justify="space-between" align="flex-start">
-          <div>
-            <Title order={2}>Label Classes</Title>
-            <Text size="sm" c="dimmed" mt={4}>
-              Define the classification labels for your dataset. Each annotation references one of these classes.
-            </Text>
-          </div>
-          <Button leftSection={<PlusIcon size={16} />} onClick={openCreate}>
-            Add Class
-          </Button>
-        </Group>
+        <PageHeader
+          title="Label Classes"
+          description="Define the classification labels for your dataset. Each annotation references one of these classes."
+          actions={
+            <Button leftSection={<PlusIcon size={16} />} onClick={openCreate}>
+              Add Class
+            </Button>
+          }
+        />
 
         {/* Classes grid */}
         {isLoading ? (
-          <Card withBorder p="xl" radius="md" ta="center">
-            <Loader size="sm" />
-          </Card>
+          <EmptyState loading />
         ) : classes.length === 0 ? (
-          <Card withBorder p="xl" radius="md" ta="center">
-            <Stack align="center" gap="md">
-              <ThemeIcon size={56} variant="light" color="gray" radius="xl">
-                <TagIcon size={30} weight="thin" />
-              </ThemeIcon>
-              <Title order={5}>No label classes yet</Title>
-              <Text size="sm" c="dimmed" maw={400}>
-                Add classification labels that annotators can assign to dataset items.
-                {activeProject?.task && (
-                  <>
-                    {' '}
-                    This project uses the <strong>{activeProject.task.replace(/_/g, ' ')}</strong> task.
-                  </>
-                )}
-              </Text>
+          <EmptyState
+            icon={TagIcon}
+            title="No label classes yet"
+            description={
+              <>
+                Add classification labels that annotators can assign to dataset items. This project uses the{' '}
+                <strong>{activeProject.task.replace(/_/g, ' ')}</strong> task.
+              </>
+            }
+            action={
               <Button leftSection={<PlusIcon size={14} />} onClick={openCreate}>
                 Create First Class
               </Button>
-            </Stack>
-          </Card>
+            }
+          />
         ) : (
           <>
             <Group gap="sm">
