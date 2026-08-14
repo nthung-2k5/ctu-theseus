@@ -3,7 +3,7 @@ import { datasets, datasetVersions, projects, trainingRuns } from '@server/db/sc
 import { cleanupProjectStorage } from '@server/lib/cleanup'
 import { ProjectTasks } from '@server/lib/enums'
 import { getTaskDescriptor, taskToModality } from '@server/lib/tasks'
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { Elysia, status, t } from 'elysia'
 import { betterAuth } from './auth'
 
@@ -73,26 +73,32 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
       // Derive modality from task
       const modality = taskToModality(body.task)
 
-      // Create the project
-      const [project] = await db
-        .insert(projects)
-        .values({
-          ...body,
-          userId: user.id,
+      // All three inserts must succeed together — a project with no dataset
+      // (or a dataset with no draft version) is unusable, so a failure
+      // partway through must not leave any of them behind.
+      const project = await db.transaction(async (tx) => {
+        const [project] = await tx
+          .insert(projects)
+          .values({
+            ...body,
+            userId: user.id,
+          })
+          .returning()
+
+        // Create the 1:1 dataset (PK = project.id)
+        await tx.insert(datasets).values({
+          projectId: project.id,
+          modality,
         })
-        .returning()
 
-      // Create the 1:1 dataset (PK = project.id)
-      await db.insert(datasets).values({
-        projectId: project.id,
-        modality,
-      })
+        // Create the draft version (versionTag = null). Splits are just a
+        // column on each item's version-membership row now, so there's
+        // nothing else to pre-create here.
+        await tx.insert(datasetVersions).values({
+          datasetId: project.id, // datasetId references datasets.projectId
+        })
 
-      // Create the draft version (versionTag = null). Splits are just a
-      // column on each item's version-membership row now, so there's
-      // nothing else to pre-create here.
-      await db.insert(datasetVersions).values({
-        datasetId: project.id, // datasetId references datasets.projectId
+        return project
       })
 
       return { project }

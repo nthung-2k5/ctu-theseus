@@ -172,8 +172,21 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
         : undefined
       const memberWhere = split ? { versionId: version.id, splitType: split } : { versionId: version.id }
 
-      const [total, members] = await Promise.all([
+      const [total, labeledRows, members] = await Promise.all([
         db.$count(datasetVersionItems, and(...whereClauses(memberWhere))),
+        // Distinct item count with a classification-type annotation, scoped
+        // to this version/split — powers the labeling-progress indicator.
+        // Every stable task's ground truth is one classification-type
+        // annotation per item (see server/lib/tasks/registry.ts), whether
+        // that means a class pick or a regression target.
+        db
+          .select({ count: countDistinct(datasetVersionItems.itemId) })
+          .from(datasetVersionItems)
+          .innerJoin(
+            annotations,
+            and(eq(annotations.itemId, datasetVersionItems.itemId), eq(annotations.annotationType, 'classification')),
+          )
+          .where(and(...whereClauses(memberWhere))),
         db.query.datasetVersionItems.findMany({
           where: memberWhere,
           with: {
@@ -202,7 +215,7 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
         })),
       )
 
-      return { items: itemsWithUrls, total, page, perPage }
+      return { items: itemsWithUrls, total, labeledCount: labeledRows[0]?.count ?? 0, page, perPage }
     },
     {
       projectBelongToUser: true,
@@ -225,79 +238,100 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
       if (!draft) return status(404, 'Draft dataset not found')
 
       const results = await Promise.allSettled(
-        body.items.map(async (itemData) => {
-          const [item] = await db
-            .insert(datasetItems)
-            .values({
-              datasetId: project.id,
-              externalId: itemData.externalId,
-              storageUrl: itemData.storageUrl,
-            })
-            .returning()
+        // Each item's item+features+annotations+membership rows are one
+        // unit — a partial failure inside them (e.g. the item row commits
+        // but its features row doesn't) would otherwise leave an orphaned
+        // item with no features. The outer allSettled still lets one bad
+        // item fail without failing the whole batch.
+        body.items.map((itemData) =>
+          db.transaction(async (tx) => {
+            const [item] = await tx
+              .insert(datasetItems)
+              .values({
+                datasetId: project.id,
+                externalId: itemData.externalId,
+                storageUrl: itemData.storageUrl,
+              })
+              .returning()
 
-          if (itemData.textFeatures) {
-            await db.insert(textFeatures).values({
-              itemId: item.id,
-              rawText: itemData.textFeatures.rawText,
-              tokenCount: itemData.textFeatures.tokenCount,
-              languageCode: itemData.textFeatures.languageCode,
-              metaJson: itemData.textFeatures.metaJson,
-            })
-          }
-
-          if (itemData.visionFeatures) {
-            await db.insert(visionFeatures).values({
-              itemId: item.id,
-              width: itemData.visionFeatures.width,
-              height: itemData.visionFeatures.height,
-              channels: itemData.visionFeatures.channels,
-              imageFormat: itemData.visionFeatures.imageFormat,
-              exifData: itemData.visionFeatures.exifData,
-            })
-          }
-
-          if (itemData.audioFeatures) {
-            await db.insert(audioFeatures).values({
-              itemId: item.id,
-              durationSeconds: String(itemData.audioFeatures.durationSeconds),
-              sampleRateHz: itemData.audioFeatures.sampleRateHz,
-              channels: itemData.audioFeatures.channels,
-              audioCodec: itemData.audioFeatures.audioCodec,
-            })
-          }
-
-          if (itemData.tabularFeatures) {
-            await db.insert(tabularFeatures).values({
-              itemId: item.id,
-              featuresJson: itemData.tabularFeatures.featuresJson,
-            })
-          }
-
-          if (itemData.annotations?.length) {
-            await db.insert(annotations).values(
-              itemData.annotations.map((ann) => ({
+            if (itemData.textFeatures) {
+              await tx.insert(textFeatures).values({
                 itemId: item.id,
-                annotatorId: ann.annotatorId,
-                annotationType: ann.annotationType,
-                classId: ann.classId,
-                labelTextSequence: ann.labelTextSequence,
-                labelStructured: ann.labelStructured,
-                confidenceScore: ann.confidenceScore != null ? String(ann.confidenceScore) : undefined,
-              })),
-            )
-          }
+                rawText: itemData.textFeatures.rawText,
+                tokenCount: itemData.textFeatures.tokenCount,
+                languageCode: itemData.textFeatures.languageCode,
+                metaJson: itemData.textFeatures.metaJson,
+              })
+            }
 
-          await db.insert(datasetVersionItems).values({
-            versionId: draft.id,
-            itemId: item.id,
-            splitType: itemData.split,
-          })
+            if (itemData.visionFeatures) {
+              await tx.insert(visionFeatures).values({
+                itemId: item.id,
+                width: itemData.visionFeatures.width,
+                height: itemData.visionFeatures.height,
+                channels: itemData.visionFeatures.channels,
+                imageFormat: itemData.visionFeatures.imageFormat,
+                exifData: itemData.visionFeatures.exifData,
+              })
+            }
 
-          return item
-        }),
+            if (itemData.audioFeatures) {
+              await tx.insert(audioFeatures).values({
+                itemId: item.id,
+                durationSeconds: String(itemData.audioFeatures.durationSeconds),
+                sampleRateHz: itemData.audioFeatures.sampleRateHz,
+                channels: itemData.audioFeatures.channels,
+                audioCodec: itemData.audioFeatures.audioCodec,
+              })
+            }
+
+            if (itemData.tabularFeatures) {
+              await tx.insert(tabularFeatures).values({
+                itemId: item.id,
+                featuresJson: itemData.tabularFeatures.featuresJson,
+              })
+            }
+
+            if (itemData.annotations?.length) {
+              await tx.insert(annotations).values(
+                itemData.annotations.map((ann) => ({
+                  itemId: item.id,
+                  annotatorId: ann.annotatorId,
+                  annotationType: ann.annotationType,
+                  classId: ann.classId,
+                  labelTextSequence: ann.labelTextSequence,
+                  labelStructured: ann.labelStructured,
+                  confidenceScore: ann.confidenceScore != null ? String(ann.confidenceScore) : undefined,
+                })),
+              )
+            }
+
+            await tx.insert(datasetVersionItems).values({
+              versionId: draft.id,
+              itemId: item.id,
+              splitType: itemData.split,
+            })
+
+            return item
+          }),
+        ),
       )
 
-      return { results }
+      // Shaped instead of the raw PromiseSettledResult[] — callers (the
+      // tabular CSV importer in particular) need a reliable created/failed
+      // count without leaking Error objects to the client.
+      const created: (typeof datasetItems.$inferSelect)[] = []
+      const failed: { index: number; message: string }[] = []
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          created.push(result.value)
+        } else {
+          const message = result.reason instanceof Error ? result.reason.message : String(result.reason)
+          failed.push({ index, message })
+        }
+      })
+
+      return { created, failed }
     },
     {
       projectBelongToUser: true,
@@ -382,53 +416,59 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
         body.files.map(async (file) => {
           const fileBytes = await file.bytes()
           const ext = file.name.includes('.') ? `.${file.name.split('.').pop()}` : ''
+          // The S3 upload happens outside the transaction below — it's slow
+          // network I/O that shouldn't hold a DB transaction open, and a
+          // leftover pool object on a later DB failure is a harmless no-op
+          // (content-addressed, so a retry just reuses it).
           const { key, hash, byteSize, isDuplicate } = await uploadToPool(project.id, fileBytes, ext, file.type)
 
-          // The pool is content-addressed and deduplicated: if this exact
-          // content already has an item, reuse it instead of violating the
-          // (datasetId, contentHash) uniqueness constraint.
-          const existingItem = await db.query.datasetItems.findFirst({
-            where: { datasetId: project.id, contentHash: hash },
-          })
-
-          const item =
-            existingItem ??
-            (
-              await db
-                .insert(datasetItems)
-                .values({
-                  datasetId: project.id,
-                  externalId: file.name,
-                  storageUrl: key,
-                  contentHash: hash,
-                  byteSize,
-                })
-                .returning()
-            )[0]
-
-          if (!existingItem && dataset.modality === 'vision' && file.type.startsWith('image/')) {
-            const dimensions = readImageDimensions(fileBytes)
-            if (dimensions) {
-              await db.insert(visionFeatures).values({
-                itemId: item.id,
-                width: dimensions.width,
-                height: dimensions.height,
-                channels: 3,
-                imageFormat: file.type === 'image/png' ? 'png' : 'jpeg',
-              })
-            }
-          }
-
-          await db
-            .insert(datasetVersionItems)
-            .values({
-              versionId: draft.id,
-              itemId: item.id,
-              splitType: body.split,
+          return db.transaction(async (tx) => {
+            // The pool is content-addressed and deduplicated: if this exact
+            // content already has an item, reuse it instead of violating the
+            // (datasetId, contentHash) uniqueness constraint.
+            const existingItem = await tx.query.datasetItems.findFirst({
+              where: { datasetId: project.id, contentHash: hash },
             })
-            .onConflictDoNothing()
 
-          return { ...item, isDuplicate }
+            const item =
+              existingItem ??
+              (
+                await tx
+                  .insert(datasetItems)
+                  .values({
+                    datasetId: project.id,
+                    externalId: file.name,
+                    storageUrl: key,
+                    contentHash: hash,
+                    byteSize,
+                  })
+                  .returning()
+              )[0]
+
+            if (!existingItem && dataset.modality === 'vision' && file.type.startsWith('image/')) {
+              const dimensions = readImageDimensions(fileBytes)
+              if (dimensions) {
+                await tx.insert(visionFeatures).values({
+                  itemId: item.id,
+                  width: dimensions.width,
+                  height: dimensions.height,
+                  channels: 3,
+                  imageFormat: file.type === 'image/png' ? 'png' : 'jpeg',
+                })
+              }
+            }
+
+            await tx
+              .insert(datasetVersionItems)
+              .values({
+                versionId: draft.id,
+                itemId: item.id,
+                splitType: body.split,
+              })
+              .onConflictDoNothing()
+
+            return { ...item, isDuplicate }
+          })
         }),
       )
 
