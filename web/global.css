@@ -7,6 +7,32 @@
 @import "@mantine/charts/styles.css";
 @import "@mantine/spotlight/styles.css";
 
+@theme {
+  --color-primary-50: var(--mantine-color-primary-0);
+  --color-primary-100: var(--mantine-color-primary-1);
+  --color-primary-200: var(--mantine-color-primary-2);
+  --color-primary-300: var(--mantine-color-primary-3);
+  --color-primary-400: var(--mantine-color-primary-4);
+  --color-primary-500: var(--mantine-color-primary-5);
+  --color-primary-600: var(--mantine-color-primary-6);
+  --color-primary-700: var(--mantine-color-primary-7);
+  --color-primary-800: var(--mantine-color-primary-8);
+  --color-primary-900: var(--mantine-color-primary-9);
+  --color-primary: var(--mantine-color-primary-6);
+
+  --color-secondary-50: var(--mantine-color-secondary-0);
+  --color-secondary-100: var(--mantine-color-secondary-1);
+  --color-secondary-200: var(--mantine-color-secondary-2);
+  --color-secondary-300: var(--mantine-color-secondary-3);
+  --color-secondary-400: var(--mantine-color-secondary-4);
+  --color-secondary-500: var(--mantine-color-secondary-5);
+  --color-secondary-600: var(--mantine-color-secondary-6);
+  --color-secondary-700: var(--mantine-color-secondary-7);
+  --color-secondary-800: var(--mantine-color-secondary-8);
+  --color-secondary-900: var(--mantine-color-secondary-9);
+  --color-secondary: var(--mantine-color-secondary-6);
+}
+
 /* ---------- Base resets ---------- */
 *,
 *::before,
