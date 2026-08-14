@@ -179,13 +179,18 @@ export async function publishAbortCommand(runId: string): Promise<void> {
 
 /**
  * Publish an inference request/response over core NATS (synchronous,
- * request/reply — not JetStream).
+ * request/reply — not JetStream). Mirrors InferenceRequestSchema in
+ * lib/schema.ts — keep both in sync.
  */
+export type InferenceInputPayload =
+  | { kind: 'file'; uploadKey: string; uploadFilename: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'record'; record: Record<string, string | number> }
+
 export interface InferencePayload {
   runId: string
-  uploadKey: string
-  uploadFilename: string
   threshold: number
+  payload: InferenceInputPayload
 }
 
 export type InferenceResponse =
