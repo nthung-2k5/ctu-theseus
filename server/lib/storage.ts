@@ -8,6 +8,7 @@ import {
   CopyObjectCommand,
   CreateBucketCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -208,6 +209,18 @@ export async function deleteFile(bucket: string, key: string): Promise<void> {
 }
 
 /**
+ * Delete every object under a prefix (batched, 1000 keys per request —
+ * S3's DeleteObjects limit).
+ */
+export async function deletePrefix(bucket: string, prefix: string): Promise<void> {
+  const keys = await listKeys(bucket, prefix)
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000)
+    await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: batch.map((Key) => ({ Key })) } }))
+  }
+}
+
+/**
  * List all object keys under a prefix.
  */
 export async function listKeys(bucket: string, prefix: string): Promise<string[]> {
@@ -277,6 +290,10 @@ export function exportKey(runId: string, format: string): string {
   return `${runId}/model.${format}`
 }
 
+export function bundleKey(runId: string, exportId: string): string {
+  return `${runId}/bundles/${exportId}.zip`
+}
+
 /**
  * Upload bytes to the project's content-addressed pool. Hashes the content
  * first and skips the upload entirely if that hash already exists for this
@@ -300,8 +317,8 @@ export async function uploadToPool(
 }
 
 /**
- * Generate a presigned download URL for a model export.
+ * Generate a presigned download URL for an assembled export bundle (.zip).
  */
-export async function getExportDownloadUrl(runId: string, format: string, expiresIn = 3600): Promise<string> {
-  return getDownloadUrl(CONSTANTS.BUCKET_MODELS, exportKey(runId, format), expiresIn)
+export async function getBundleDownloadUrl(runId: string, exportId: string, expiresIn = 3600): Promise<string> {
+  return getDownloadUrl(CONSTANTS.BUCKET_MODELS, bundleKey(runId, exportId), expiresIn)
 }

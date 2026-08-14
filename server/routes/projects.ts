@@ -1,5 +1,6 @@
 import { db } from '@server/db'
 import { datasets, datasetVersions, projects, trainingRuns } from '@server/db/schema'
+import { cleanupProjectStorage } from '@server/lib/cleanup'
 import { ProjectTasks } from '@server/lib/enums'
 import { getTaskDescriptor, taskToModality } from '@server/lib/tasks'
 import { and, eq } from 'drizzle-orm'
@@ -120,16 +121,15 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
       }),
     },
   )
-  /* ── Delete project (cascades to dataset, versions, items, runs, etc.) ── */
+  /* ── Delete project (cascades to dataset, versions, items, runs, etc.; S3 objects cleaned up best-effort) ── */
   .delete(
     '/:projectId',
-    async ({ params, user }) => {
-      const deleted = await db
-        .delete(projects)
-        .where(and(eq(projects.id, params.projectId), eq(projects.userId, user.id)))
-        .returning()
-      if (deleted.length === 0) return status(404, 'Project not found')
+    async ({ project }) => {
+      // Gather + delete S3 objects before the DB cascade removes the rows
+      // that reference their keys — cleanupProjectStorage queries them.
+      await cleanupProjectStorage(project.id)
+      await db.delete(projects).where(eq(projects.id, project.id))
       return status(204)
     },
-    { auth: true },
+    { projectBelongToUser: true },
   )

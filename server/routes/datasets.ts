@@ -38,6 +38,7 @@ import {
   textFeatures,
   visionFeatures,
 } from '@server/db/schema'
+import { cleanupVersionStorage } from '@server/lib/cleanup'
 import { type SplitType, SplitTypes } from '@server/lib/enums'
 import { readImageDimensions } from '@server/lib/image-size'
 import { buildSnapshot } from '@server/lib/snapshot'
@@ -138,6 +139,7 @@ export const datasetRoutes = new Elysia({ prefix: '/api' })
     async ({ version }) => {
       if (version.versionTag === null) return status(400, 'Cannot delete draft version')
 
+      await cleanupVersionStorage(version.id, version.versionTag)
       await db.delete(datasetVersions).where(eq(datasetVersions.id, version.id))
       return status(204)
     },
