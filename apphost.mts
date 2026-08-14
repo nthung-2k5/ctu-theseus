@@ -6,7 +6,6 @@ import CONSTANTS from './schema/constants.json' with { type: 'json' }
 
 const builder = await createBuilder()
 
-const jwtSecret = process.env.JWT_SECRET ?? '+hSRqW0ZVKDuzB7/K11Rh+frp5GMZrIE73K2hKFmjj4='
 const authSecret = process.env.BETTER_AUTH_SECRET ?? 'fJp314Y1mVsTWzz2VJkLj2QcZ8wrAwgB'
 
 const db = await builder
@@ -69,7 +68,6 @@ const gateway = await builder
   .withEnvironment('S3_ENDPOINT', s3Endpoint)
   .withEnvironment('S3_ACCESS_KEY', s3AccessKey)
   .withEnvironment('S3_SECRET_KEY', s3SecretKey)
-  .withEnvironment('JWT_SECRET', jwtSecret)
   .withEnvironment('BETTER_AUTH_SECRET', authSecret)
   .waitFor(db)
   .waitFor(nats)
