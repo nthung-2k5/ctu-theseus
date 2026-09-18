@@ -8,12 +8,19 @@
     "aspire:start": "aspire run",
     "aspire:build": "tsc -p tsconfig.apphost.json",
     "aspire:dev": "tsc --watch -p tsconfig.apphost.json",
-    "lint": "bun run aspire:lint",
+    "lint": "bunx --bun @biomejs/biome check .",
     "predev": "bun run aspire:lint",
     "dev": "bun run aspire:start",
     "prebuild": "bun run aspire:lint",
     "build": "bun run aspire:build",
-    "watch": "bun run aspire:dev"
+    "watch": "bun run aspire:dev",
+    "lint:fix": "bunx --bun @biomejs/biome check --write .",
+    "typecheck": "cd server && bun run typecheck",
+    "test:server": "cd server && bun test",
+    "test:web": "cd web && bun run build",
+    "test:ai": "cd ai_service && uv run pytest",
+    "test:integration": "cd server && bun run test:integration",
+    "ci": "bun run lint && bun run typecheck && bun run test:server && bun run test:web && bun run test:ai"
   },
   "dependencies": {
     "vscode-jsonrpc": "8.2.1"
