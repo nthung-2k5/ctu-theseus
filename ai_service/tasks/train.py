@@ -5,7 +5,9 @@ from typing import ClassVar, Literal
 from uuid import UUID
 
 import ludwig.constants as ludwig_consts
+import pandas as pd
 from config import TEMP_DIR
+from constants import ITEM_ID_COLUMN_NAME, SPLIT_COLUMN_NAME
 from ludwig.api import LudwigModel
 from ludwig.callbacks import Callback
 from ludwig.utils.metric_utils import TrainerMetric
@@ -13,14 +15,19 @@ from ludwig.utils.trainer_utils import ProgressTracker
 from opentelemetry import trace
 from schema.command import Command
 from schema.train_task import TrainTask
+from services.evaluate import build_evaluation_report
 from services.nats import nats_service
 from services.storage import (
     BUCKET_DATASETS,
     BUCKET_TRAINING,
+    delete_prefix,
+    evaluation_predictions_key,
+    evaluation_report_key,
     file_exists,
     s3fs_readable_path,
     training_logs_key,
     upload_file,
+    upload_json,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,16 +35,22 @@ tracer = trace.get_tracer("theseus-worker")
 
 # ──────────────────────────────────────────────────────────────────
 # Abort tracking
+#
+# Abort intent lives in NATS (THESEUS_ABORT_FLAGS, via
+# `nats_service.is_aborted`/`set_abort_flag`), not in a process-local set —
+# the gateway durably records the flag when it publishes the abort command
+# (see server/lib/nats.ts `publishAbortCommand`), so a worker that's mid-
+# restart when a cancel is requested still sees it once it comes back up,
+# and a redelivered `TrainTask` for an already-aborted run can be recognized
+# before training even starts (see `handle_train` below).
 # ──────────────────────────────────────────────────────────────────
-
-# Set of run IDs that have been requested to abort
-_abort_requests: set[str] = set()
 
 
 async def handle_command(data: Command) -> None:
-    """Handle a command message (stop/abort)."""
+    """Handle a command message (stop/abort). The gateway already wrote the
+    durable abort flag before publishing this — this is just the immediate
+    wake-up nudge, logged for visibility."""
     logger.info(f"Received abort command for run {data.run_id}")
-    _abort_requests.add(str(data.run_id))
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -161,10 +174,19 @@ class TrainingProgressCallback(Callback):
         self, trainer, progress_tracker: ProgressTracker, save_path, **kwargs
     ):
         """Called by Ludwig at the end of each training epoch."""
-        # Check for abort
-        if str(self.run_id) in _abort_requests:
-            _abort_requests.discard(str(self.run_id))
-            raise KeyboardInterrupt("Training aborted by user")
+        # Check for abort. This is only checked at epoch boundaries — Ludwig
+        # doesn't expose a batch-level callback hook here to check more
+        # often, so a single very long epoch can't be interrupted mid-epoch.
+        abort_future = asyncio.run_coroutine_threadsafe(
+            nats_service.is_aborted(str(self.run_id)), self.loop
+        )
+        try:
+            if abort_future.result(timeout=5):
+                raise KeyboardInterrupt("Training aborted by user")
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            logger.warning(f"Failed to check abort flag for {self.run_id}: {e}")
 
         epoch = progress_tracker.epoch
         trace.get_current_span().add_event(f"epoch {epoch} end", {"epoch": epoch})
@@ -203,6 +225,14 @@ async def handle_train(data: TrainTask) -> None:
 
     logger.info(f"Starting training for run {run_id}")
 
+    # A redelivered TrainTask (worker crash/restart) for a run that was
+    # already aborted while the worker was down shouldn't start training at
+    # all — the durable flag (unlike the old in-memory set) is still there.
+    if await nats_service.is_aborted(str(run_id)):
+        logger.info(f"Run {run_id} was aborted before training started — skipping")
+        await nats_service.publish_status(str(run_id), "canceled")
+        return
+
     local_log_path = TEMP_DIR / "logs" / f"{run_id}.log"
     local_log_path.parent.mkdir(parents=True, exist_ok=True)
     log_handler = RunLogHandler(run_id, loop, local_log_path)
@@ -213,10 +243,17 @@ async def handle_train(data: TrainTask) -> None:
     await nats_service.publish_status(str(run_id), "running")
 
     try:
-        if not file_exists(BUCKET_TRAINING, data.config_key):
+        if not await asyncio.to_thread(file_exists, BUCKET_TRAINING, data.config_key):
             raise ValueError(
                 f"No training config found at {data.config_key} for run {run_id}"
             )
+
+        # Ludwig auto-increments `results_run_N` instead of overwriting, so a
+        # re-dispatched or redelivered run would leave earlier attempts sitting
+        # next to the new one — and whichever `find_model_dir` picked would be
+        # the model that export and inference then serve. Start from a clean
+        # output prefix so there is exactly one candidate.
+        await asyncio.to_thread(delete_prefix, BUCKET_TRAINING, data.output_prefix)
 
         config_path = s3fs_readable_path(BUCKET_TRAINING, data.config_key)
         dataset_path = s3fs_readable_path(BUCKET_DATASETS, data.dataset_key)
@@ -243,11 +280,43 @@ async def handle_train(data: TrainTask) -> None:
             )
 
         # Check if aborted
-        if str(run_id) in _abort_requests:
-            _abort_requests.discard(str(run_id))
+        if await nats_service.is_aborted(str(run_id)):
             logger.info(f"Training aborted for run {run_id}")
             await nats_service.publish_status(str(run_id), "canceled")
             return
+
+        # Best-effort evaluation report (confusion matrix / per-class stats /
+        # misclassified rows — see services/evaluate.py). Unlike export.py's
+        # golden sample, a bug here must never fail a run that trained fine,
+        # so every exception is caught, not just the environmental ones.
+        try:
+            eval_df = await asyncio.to_thread(pd.read_parquet, dataset_path)
+            result = await asyncio.to_thread(
+                build_evaluation_report, model, eval_df, SPLIT_COLUMN_NAME, ITEM_ID_COLUMN_NAME
+            )
+            if result is None:
+                logger.info(f"No data to evaluate for run {run_id} — skipping evaluation report")
+            else:
+                report, predictions_df = result
+                report_key = evaluation_report_key(run_id)
+                predictions_key = evaluation_predictions_key(run_id)
+                await asyncio.to_thread(upload_json, BUCKET_TRAINING, report_key, report)
+                await asyncio.to_thread(
+                    predictions_df.to_parquet, s3fs_readable_path(BUCKET_TRAINING, predictions_key)
+                )
+                overall = report.get("overall", {})
+                headline = overall.get("accuracy") if report["outputType"] == "category" else overall.get("r2")
+                await nats_service.publish_evaluation_event(
+                    str(run_id),
+                    "success",
+                    split=report["split"],
+                    report_key=report_key,
+                    predictions_key=predictions_key,
+                    headline_metric=headline,
+                )
+        except Exception as e:
+            logger.exception(f"Evaluation report failed for run {run_id} — training result is unaffected")
+            await nats_service.publish_evaluation_event(str(run_id), "failed", error=str(e))
 
         await nats_service.publish_status(str(run_id), "succeeded")
 
@@ -255,12 +324,14 @@ async def handle_train(data: TrainTask) -> None:
 
     except KeyboardInterrupt:
         logger.info(f"Training aborted for run {run_id}")
-        _abort_requests.discard(str(run_id))
         await nats_service.publish_status(str(run_id), "canceled")
 
-    except Exception as e:
+    except Exception:
+        # No terminal "failed" event here — that used to fire on every retry
+        # attempt (redundant). Now it's published exactly once, by
+        # `on_train_permanent_failure` below, once the NATS consume loop has
+        # exhausted all delivery attempts (see services/nats.py `_consume_loop`).
         logger.exception(f"Training failed for run {run_id}")
-        await nats_service.publish_status(str(run_id), "failed", message=str(e))
         raise  # Let NATS nak the message for retry
 
     finally:
@@ -268,11 +339,24 @@ async def handle_train(data: TrainTask) -> None:
         await log_handler.aclose()
         if local_log_path.exists():
             try:
-                upload_file(
-                    BUCKET_TRAINING, training_logs_key(run_id), str(local_log_path)
+                await asyncio.to_thread(
+                    upload_file,
+                    BUCKET_TRAINING,
+                    training_logs_key(run_id),
+                    str(local_log_path),
                 )
             except Exception:
                 logger.warning(
                     f"Failed to upload training log for run {run_id}", exc_info=True
                 )
             local_log_path.unlink(missing_ok=True)
+
+
+async def on_train_permanent_failure(data: TrainTask, error: str) -> None:
+    """Called by the NATS consume loop once a `TrainTask` has exhausted all
+    delivery attempts (see `services/nats.py` `_consume_loop`'s
+    `on_permanent_failure`). Publishes the terminal 'failed' status event
+    exactly once — `handle_train`'s own exception handler no longer does
+    this itself, since it used to fire on every retry attempt."""
+    logger.error(f"Training permanently failed for run {data.run_id} after retries: {error}")
+    await nats_service.publish_status(str(data.run_id), "failed", message=error)
