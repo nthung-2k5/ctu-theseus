@@ -3,9 +3,18 @@ import {
   AudioCodecs,
   DatasetModalities,
   DatasetVersionStatuses,
+  EvaluationSplits,
+  EvaluationStatuses,
+  ExportFormats,
+  ExportLangs,
+  ExportStatuses,
+  ExportTiers,
   ImageFormats,
+  InferenceJobStatuses,
   ProjectTasks,
   SplitTypes,
+  SweepStatuses,
+  SweepStrategies,
   TrainingStatuses,
 } from '@server/lib/enums'
 import { sql } from 'drizzle-orm'
@@ -24,6 +33,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core'
@@ -107,6 +117,39 @@ export const verifications = pgTable(
       .notNull(),
   },
   (table) => [index('verifications_identifier_idx').on(table.identifier)],
+)
+
+/* ------------------------------------------------------------------ */
+/*  API Keys                                                          */
+/*                                                                     */
+/*  Bearer credentials for the hosted prediction API (POST             */
+/*  /api/v1/predict/:runId — see routes/api-v1.ts and the `apiKey`     */
+/*  macro in routes/auth.ts). Only a sha256 hash of the key is ever    */
+/*  stored — the plaintext is shown to the user exactly once, at       */
+/*  creation, and is unrecoverable after that. `keyPrefix` is stored   */
+/*  purely so a user can tell which key is which in a list without     */
+/*  ever seeing the secret again.                                      */
+/* ------------------------------------------------------------------ */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().default(sql`uuidv7()`),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 100 }).notNull(),
+    // sha256 hex digest of the raw key — never the raw key itself.
+    keyHash: char('key_hash', { length: 64 }).notNull().unique(),
+    // First few characters of the raw key, e.g. "thsk_ab12" — display only,
+    // not a security boundary (the hash is what's actually checked).
+    keyPrefix: varchar('key_prefix', { length: 16 }).notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // Soft-revoked rather than deleted — keeps the audit trail of what a
+    // (possibly leaked) key was and when it stopped being valid.
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (table) => [index('apiKeys_userId_idx').on(table.userId)],
 )
 
 /* ------------------------------------------------------------------ */
@@ -200,6 +243,10 @@ export const datasetItems = pgTable(
     byteSize: integer('byte_size'),
     // embedding: vector('embedding', { dimensions: 1536 }), // Vector representation of the data item for semantic filtering/filtering out duplicates
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    // Set instead of hard-deleting when a snapshot's RESTRICT FK blocks the
+    // delete (see dataset_version_items below) — the row (and its feature
+    // rows) must stay intact for that snapshot, but it's gone from the pool.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (table) => [
     index('dataset_items_datasetId_idx').on(table.datasetId),
@@ -336,9 +383,63 @@ export const annotations = pgTable(
   (table) => [
     index('idx_annotations_item').on(table.itemId),
     index('idx_annotations_type').on(table.annotationType),
+    // The item-list class filter (routes/datasets.ts) selects annotations by
+    // classId + annotationType on every filtered page load; without this it
+    // scanned the whole table.
+    index('idx_annotations_class').on(table.classId, table.annotationType),
+    // At most one classification label per item. Without it, two concurrent
+    // classify calls both read `existing == null` and both insert, and the
+    // snapshot builder then picks one arbitrarily — baking a nondeterministic
+    // ground-truth label into the parquet.
+    uniqueIndex('annotations_item_classification_key')
+      .on(table.itemId)
+      .where(sql`${table.annotationType} = 'classification'`),
     // Drizzle table-level check constraint for confidence limits
     check('confidence_bounds', sql`${table.confidenceScore} BETWEEN 0.0 AND 1.0`),
   ],
+)
+
+/* ------------------------------------------------------------------ */
+/*  Sweeps                                                            */
+/*                                                                     */
+/*  A hyperparameter sweep is orchestrated entirely on top of the      */
+/*  existing training pipeline — no separate execution engine. Each   */
+/*  trial is an ordinary trainingRuns row (sweepId + trialIndex below) */
+/*  dispatched through the same queueTraining() every manually-started */
+/*  run goes through, so it inherits the run/metric/cancel/DLQ         */
+/*  machinery for free. See server/lib/sweep.ts for search-space       */
+/*  expansion and server/routes/sweeps.ts for dispatch.                */
+/* ------------------------------------------------------------------ */
+export const sweepStrategyEnum = pgEnum('sweep_strategy', SweepStrategies)
+export const sweepStatusEnum = pgEnum('sweep_status', SweepStatuses)
+
+export const sweeps = pgTable(
+  'sweeps',
+  {
+    id: uuid('id').primaryKey().default(sql`uuidv7()`),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    datasetVersionId: uuid('dataset_version_id')
+      .notNull()
+      .references(() => datasetVersions.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 255 }).notNull(),
+    // { [trainerKnob]: candidateValue[] } — see server/lib/sweep.ts's SweepSearchSpace.
+    searchSpace: jsonb('search_space').notNull(),
+    strategy: sweepStrategyEnum('strategy').notNull(),
+    maxTrials: integer('max_trials').notNull(),
+    // 'running' is the only status ever written at creation; 'completed' is
+    // set lazily (GET /sweeps/:sweepId reconciles it once every trial run
+    // has reached a terminal status — same pattern as the export route's
+    // reconcileConverting), and 'canceled' is written explicitly by the
+    // cancel route. See enums.ts's SweepStatuses for why these are distinct.
+    status: sweepStatusEnum('status').default('running').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [index('sweeps_projectId_idx').on(table.projectId)],
 )
 
 /* ------------------------------------------------------------------ */
@@ -361,6 +462,11 @@ export const trainingRuns = pgTable(
       .notNull()
       .references(() => datasetVersions.id, { onDelete: 'cascade' }),
 
+    // Set only for a run dispatched as one trial of a sweep (see `sweeps`
+    // above) — NULL for an ordinary manually-started run.
+    sweepId: uuid('sweep_id').references(() => sweeps.id, { onDelete: 'cascade' }),
+    trialIndex: integer('trial_index'),
+
     // User-facing hyperparameter selections (trainer knobs, encoder choice, ...)
     hyperparameters: jsonb('hyperparameters').notNull(),
     // The exact compiled Ludwig config sent to the worker, for reproducibility
@@ -381,7 +487,10 @@ export const trainingRuns = pgTable(
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (table) => [index('trainingRuns_projectId_idx').on(table.projectId)],
+  (table) => [
+    index('trainingRuns_projectId_idx').on(table.projectId),
+    index('trainingRuns_sweepId_idx').on(table.sweepId),
+  ],
 )
 
 /* ------------------------------------------------------------------ */
@@ -400,4 +509,135 @@ export const trainingMetrics = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [primaryKey({ columns: [table.trainingRunId, table.epoch, table.split, table.metricName] })],
+)
+
+/* ------------------------------------------------------------------ */
+/*  Run Evaluations                                                   */
+/*                                                                     */
+/*  One row per run's post-training evaluation report (confusion       */
+/*  matrix / per-class stats / misclassified rows for classification, */
+/*  MAE/RMSE/R² for regression) — see ai_service/services/evaluate.py */
+/*  and the 'evaluation' RunEvent case in lib/microservice.ts. `report`*/
+/*  is the whole bounded document (ai_service caps topErrors and skips*/
+/*  the confusion matrix past ~200 classes) — always read whole, so   */
+/*  normalizing it into columns would only add joins for no benefit.  */
+/*  `accuracy`/`macroF1` are denormalized out of it purely so a       */
+/*  run-comparison query can ORDER BY / filter without parsing jsonb. */
+/* ------------------------------------------------------------------ */
+export const evaluationSplitEnum = pgEnum('evaluation_split', EvaluationSplits)
+export const evaluationStatusEnum = pgEnum('evaluation_status', EvaluationStatuses)
+
+export const runEvaluations = pgTable('run_evaluations', {
+  // A run is evaluated at most once (the worker picks exactly one split via
+  // its test -> validation -> full fallback ladder — see
+  // ai_service/services/evaluate.py), so `runId` alone is both the natural
+  // key and the primary key: a redelivered 'evaluation' event upserts this
+  // row in place instead of accumulating duplicates.
+  runId: uuid('run_id')
+    .primaryKey()
+    .references(() => trainingRuns.id, { onDelete: 'cascade' }),
+  status: evaluationStatusEnum('status').notNull(),
+  split: evaluationSplitEnum('split'),
+  // S3 keys (BUCKET_TRAINING) — report is ingested into `report` below;
+  // predictions is full-per-row and download-only, never read by the gateway.
+  reportKey: text('report_key'),
+  predictionsKey: text('predictions_key'),
+  report: jsonb('report'),
+  // Denormalized from `report` for cheap sorting/filtering (run comparison,
+  // leaderboards) without parsing jsonb on every query.
+  accuracy: real('accuracy'),
+  macroF1: real('macro_f1'),
+  failedMessage: text('failed_message'),
+  evaluatedAt: timestamp('evaluated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+/* ------------------------------------------------------------------ */
+/*  Exports                                                           */
+/*                                                                     */
+/*  One row per requested export bundle. `model` tier just needs the  */
+/*  converted artifact (from `theseus-models/{runId}/model.{format}`, */
+/*  produced by the existing NATS export task); `devkit`/`app` also   */
+/*  need the gateway to assemble a zip (see lib/export/*). `status`   */
+/*  tracks that two-phase flow: pending -> converting (waiting on the */
+/*  worker) -> assembling (gateway building the zip) -> ready|failed. */
+/* ------------------------------------------------------------------ */
+export const exportTierEnum = pgEnum('export_tier', ExportTiers)
+export const exportFormatEnum = pgEnum('export_format', ExportFormats)
+export const exportLangEnum = pgEnum('export_lang', ExportLangs)
+export const exportStatusEnum = pgEnum('export_status', ExportStatuses)
+
+// Named `modelExports` (not `exports`, a reserved-sounding identifier) —
+// the pgTable's actual table name is still 'exports'.
+export const modelExports = pgTable(
+  'exports',
+  {
+    id: uuid('id').primaryKey().default(sql`uuidv7()`),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => trainingRuns.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tier: exportTierEnum('tier').notNull(),
+    format: exportFormatEnum('format').notNull(),
+    // NULL for tier: 'model' — only devkit/app generate a client library.
+    lang: exportLangEnum('lang'),
+    status: exportStatusEnum('status').default('pending').notNull(),
+    // The dispatched NATS export-task job id; lets the run-event consumer
+    // find this row via `WHERE conversion_job_id = $jobId` when the worker
+    // finishes converting the model artifact.
+    conversionJobId: uuid('conversion_job_id'),
+    // S3 key of the assembled zip, once ready.
+    bundleKey: text('bundle_key'),
+    byteSize: integer('byte_size'),
+    checksum: char('checksum', { length: 64 }),
+    failedMessage: text('failed_message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    readyAt: timestamp('ready_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('exports_runId_idx').on(table.runId),
+    index('exports_conversionJobId_idx').on(table.conversionJobId),
+    index('exports_status_idx').on(table.status),
+  ],
+)
+
+/* ------------------------------------------------------------------ */
+/*  Inference Jobs                                                    */
+/*                                                                     */
+/*  One row per dispatched inference job, written 'pending' at         */
+/*  POST /inference/:runId and updated to success/failed by a durable  */
+/*  gateway consumer on THESEUS_INFERENCE_RESULTS (see                */
+/*  lib/microservice.ts's startInferenceResultsConsumer) the moment    */
+/*  the worker publishes a terminal result — not lazily on poll, so a  */
+/*  result is never lost even if nobody polls before that stream's     */
+/*  1-hour retention window expires (see README's NATS subject table).*/
+/*  `id` is the inferenceId chosen at dispatch time, not a fresh       */
+/*  uuidv7 — the consumer has nothing else to key its update on, since */
+/*  InferenceResponseSchema's payload never carries the inferenceId    */
+/*  (only the subject's trailing token does).                         */
+/* ------------------------------------------------------------------ */
+export const inferenceJobStatusEnum = pgEnum('inference_job_status', InferenceJobStatuses)
+
+export const inferenceJobs = pgTable(
+  'inference_jobs',
+  {
+    id: uuid('id').primaryKey(),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => trainingRuns.id, { onDelete: 'cascade' }),
+    status: inferenceJobStatusEnum('status').default('pending').notNull(),
+    // InferenceOutput on success — see server/lib/nats.ts's InferenceOutput union.
+    output: jsonb('output'),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('inferenceJobs_runId_idx').on(table.runId),
+    index('inferenceJobs_status_idx').on(table.status),
+  ],
 )

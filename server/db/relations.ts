@@ -1,7 +1,6 @@
 import { defineRelationsPart } from 'drizzle-orm'
 import * as schema from './schema'
 
-
 const authRelations = defineRelationsPart(schema, (r) => ({
   accounts: {
     users: r.one.users({
@@ -21,6 +20,17 @@ const authRelations = defineRelationsPart(schema, (r) => ({
     sessions: r.many.sessions({
       from: r.users.id,
       to: r.sessions.userId,
+    }),
+    apiKeys: r.many.apiKeys({
+      from: r.users.id,
+      to: r.apiKeys.userId,
+    }),
+  },
+  apiKeys: {
+    user: r.one.users({
+      from: r.apiKeys.userId,
+      to: r.users.id,
+      optional: false,
     }),
   },
   sessions: {
@@ -193,6 +203,22 @@ const datasetItemsRelations = defineRelationsPart(schema, (r) => ({
 }))
 
 const trainingRelations = defineRelationsPart(schema, (r) => ({
+  sweeps: {
+    project: r.one.projects({
+      from: r.sweeps.projectId,
+      to: r.projects.id,
+      optional: false,
+    }),
+    datasetVersion: r.one.datasetVersions({
+      from: r.sweeps.datasetVersionId,
+      to: r.datasetVersions.id,
+      optional: false,
+    }),
+    trials: r.many.trainingRuns({
+      from: r.sweeps.id,
+      to: r.trainingRuns.sweepId,
+    }),
+  },
   trainingRuns: {
     project: r.one.projects({
       from: r.trainingRuns.projectId,
@@ -202,15 +228,57 @@ const trainingRelations = defineRelationsPart(schema, (r) => ({
       from: r.trainingRuns.datasetVersionId,
       to: r.datasetVersions.id,
     }),
+    sweep: r.one.sweeps({
+      from: r.trainingRuns.sweepId,
+      to: r.sweeps.id,
+    }),
     metrics: r.many.trainingMetrics({
       from: r.trainingRuns.id,
       to: r.trainingMetrics.trainingRunId,
+    }),
+    exports: r.many.modelExports({
+      from: r.trainingRuns.id,
+      to: r.modelExports.runId,
+    }),
+    inferenceJobs: r.many.inferenceJobs({
+      from: r.trainingRuns.id,
+      to: r.inferenceJobs.runId,
+    }),
+    evaluation: r.one.runEvaluations({
+      from: r.trainingRuns.id,
+      to: r.runEvaluations.runId,
     }),
   },
   trainingMetrics: {
     run: r.one.trainingRuns({
       from: r.trainingMetrics.trainingRunId,
       to: r.trainingRuns.id,
+    }),
+  },
+  runEvaluations: {
+    run: r.one.trainingRuns({
+      from: r.runEvaluations.runId,
+      to: r.trainingRuns.id,
+      optional: false,
+    }),
+  },
+  modelExports: {
+    run: r.one.trainingRuns({
+      from: r.modelExports.runId,
+      to: r.trainingRuns.id,
+      optional: false,
+    }),
+    user: r.one.users({
+      from: r.modelExports.userId,
+      to: r.users.id,
+      optional: false,
+    }),
+  },
+  inferenceJobs: {
+    run: r.one.trainingRuns({
+      from: r.inferenceJobs.runId,
+      to: r.trainingRuns.id,
+      optional: false,
     }),
   },
 }))
