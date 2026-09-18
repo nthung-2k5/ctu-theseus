@@ -74,12 +74,20 @@ export function useRunEvents(runId: string | undefined, active: boolean, onTermi
     source.onerror = () => setState((s) => ({ ...s, isConnected: false }))
 
     const handleEvent = (raw: MessageEvent<string>) => {
-      const event = JSON.parse(raw.data) as RunEvent
+      // A truncated or non-JSON frame would otherwise throw inside the
+      // EventSource listener, taking the event (and any state it carried)
+      // with it as an uncaught error.
+      let event: RunEvent
+      try {
+        event = JSON.parse(raw.data) as RunEvent
+      } catch {
+        console.warn('[useRunEvents] Dropping malformed SSE frame')
+        return
+      }
 
       setState((s) => {
         switch (event.kind) {
           case 'status': {
-            if (TERMINAL_STATUSES.has(event.status)) onTerminalRef.current?.()
             return { ...s, status: event.status, failedMessage: event.message ?? s.failedMessage }
           }
           case 'metric': {
@@ -112,6 +120,13 @@ export function useRunEvents(runId: string | undefined, active: boolean, onTermi
       source.close()
     }
   }, [runId, active])
+
+  // Side effects belong outside the state updater: React runs updaters twice
+  // in StrictMode, so calling onTerminal from inside one fired the caller's
+  // invalidations twice per terminal event.
+  useEffect(() => {
+    if (state.status && TERMINAL_STATUSES.has(state.status)) onTerminalRef.current?.()
+  }, [state.status])
 
   return state
 }

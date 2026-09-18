@@ -5,7 +5,6 @@
 @import "@mantine/notifications/styles.css";
 @import "@mantine/dropzone/styles.css";
 @import "@mantine/charts/styles.css";
-@import "@mantine/spotlight/styles.css";
 
 @theme {
   --color-primary-50: var(--mantine-color-primary-0);

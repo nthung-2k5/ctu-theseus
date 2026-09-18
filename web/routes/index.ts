@@ -1,29 +1,27 @@
 import { rootRoute } from './__root'
-import { appRoute, dashboardRoute } from './app.route'
+import { apiKeysRoute, appRoute, dashboardRoute } from './app.route'
 import { guestRoute, loginRoute, registerRoute } from './guest.route'
 import {
   classesRoute,
-  dataRoute,
   datasetRoute,
-  inferenceRoute,
-  modelsRoute,
   projectIndexRoute,
   projectRoute,
+  snapshotsRoute,
   trainingRoute,
+  uploadRoute,
 } from './project.route'
 
 const guestTree = guestRoute.addChildren([loginRoute, registerRoute])
 
 const projectTree = projectRoute.addChildren([
   projectIndexRoute,
-  dataRoute,
-  datasetRoute,
+  uploadRoute,
   classesRoute,
+  datasetRoute,
+  snapshotsRoute,
   trainingRoute,
-  modelsRoute,
-  inferenceRoute,
 ])
 
-const appTree = appRoute.addChildren([dashboardRoute, projectTree])
+const appTree = appRoute.addChildren([dashboardRoute, apiKeysRoute, projectTree])
 
 export const routeTree = rootRoute.addChildren([guestTree, appTree])

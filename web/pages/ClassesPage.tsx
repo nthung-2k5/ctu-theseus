@@ -1,28 +1,28 @@
-import {
-  ActionIcon,
-  Badge,
-  Box,
-  Button,
-  Card,
-  ColorInput,
-  Group,
-  Modal,
-  SimpleGrid,
-  Stack,
-  Text,
-  Textarea,
-  TextInput,
-  Title,
-  Tooltip,
-} from '@mantine/core'
+/**
+ * Classes page – the label-class registry for classification tasks: create,
+ * edit, and delete the classes annotators/bulk actions assign to items.
+ * Assigning classes to items themselves happens elsewhere (per-item on the
+ * Data upload flow's quick-assign, and in bulk on the Dataset page) — this
+ * page only manages the class definitions.
+ */
+
+import { Box, Button, ColorInput, Group, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { PencilSimpleIcon, PlusIcon, TagIcon, TrashIcon } from '@phosphor-icons/react'
-import { confirmDelete, EmptyState, PageHeader } from '@public/components/ui'
+import {
+  confirmDelete,
+  DataTable,
+  type DataTableColumn,
+  EmptyState,
+  PageHeader,
+  QueryBoundary,
+} from '@public/components/ui'
 import { useEden } from '@public/lib/api'
-import { projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
+import { invalidateProjectScope, projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
 import type { LabelClass } from '@public/store/types'
+import { getTaskDescriptor } from '@server/lib/tasks'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -55,12 +55,14 @@ function ClassFormModal({
 
   const eden = useEden()
   const queryClient = useQueryClient()
-  const classesQueryKey = eden.api.projects({ projectId }).classes.get.queryKey()
+  // Project scope: class names also render in the item list, and the sidebar
+  // badge counts them off project detail.
+  const invalidate = () => invalidateProjectScope(queryClient, projectId)
 
   const createClass = useMutation({
     ...eden.api.projects({ projectId }).classes.post.mutationOptions(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: classesQueryKey })
+      invalidate()
       notifications.show({ title: 'Class created', message: `"${form.values.name}" added`, color: 'green' })
       form.reset()
       onClose()
@@ -76,7 +78,7 @@ function ClassFormModal({
       .classes({ classId: existing?.classId ?? '' })
       .patch.mutationOptions(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: classesQueryKey })
+      invalidate()
       notifications.show({ title: 'Class updated', message: `"${form.values.name}" updated`, color: 'green' })
       onClose()
     },
@@ -145,8 +147,8 @@ function ClassFormModal({
   )
 }
 
-/* ── Class Card ── */
-function ClassCard({
+/* ── Class Row Actions (edit + delete) ── */
+function ClassActions({
   cls,
   projectId,
   onEdit,
@@ -161,8 +163,7 @@ function ClassCard({
   const deleteClass = useMutation({
     ...eden.api.projects({ projectId }).classes({ classId: cls.classId }).delete.mutationOptions(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).classes.get.queryKey() })
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
+      invalidateProjectScope(queryClient, projectId)
       notifications.show({ title: 'Deleted', message: `"${cls.name}" removed`, color: 'green' })
     },
     onError: () => {
@@ -188,123 +189,148 @@ function ClassCard({
   }
 
   return (
-    <Card withBorder p="lg" radius="md" className="card-elevated">
-      <Group justify="space-between" mb="sm">
-        <Group gap="sm">
-          <Box
-            w={20}
-            h={20}
-            style={{
-              borderRadius: 4,
-              backgroundColor: cls.uiColorHex ?? 'var(--mantine-color-gray-6)',
-              border: '1px solid var(--mantine-color-dark-4)',
-            }}
-          />
-          <Title order={5}>{cls.name}</Title>
-        </Group>
-        <Group gap={4}>
-          <Tooltip label="Edit">
-            <ActionIcon variant="subtle" color="gray" onClick={() => onEdit(cls)}>
-              <PencilSimpleIcon size={16} />
-            </ActionIcon>
-          </Tooltip>
-          <Tooltip label="Delete">
-            <ActionIcon variant="subtle" color="red" onClick={handleDelete} loading={deleteClass.isPending}>
-              <TrashIcon size={16} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      </Group>
-
-      {cls.description ? (
-        <Text size="sm" c="dimmed" lineClamp={2}>
-          {cls.description}
-        </Text>
-      ) : (
-        <Text size="sm" c="dimmed" fs="italic">
-          No description
-        </Text>
-      )}
-
-      <Text size="xs" c="dimmed" mt="sm">
-        Created {cls.createdAt ? new Date(cls.createdAt).toLocaleDateString() : '—'}
-      </Text>
-    </Card>
+    <Group gap="xs" wrap="nowrap">
+      <Button
+        size="xs"
+        variant="subtle"
+        color="gray"
+        leftSection={<PencilSimpleIcon size={14} />}
+        onClick={() => onEdit(cls)}
+      >
+        Edit
+      </Button>
+      <Button
+        size="xs"
+        variant="subtle"
+        color="red"
+        leftSection={<TrashIcon size={14} />}
+        loading={deleteClass.isPending}
+        onClick={handleDelete}
+      >
+        Delete
+      </Button>
+    </Group>
   )
 }
 
-/* ── Main Classes Page ── */
+/* ── Main Classes page ── */
 export function ClassesPage() {
   const { projectId } = routeApi.useParams()
   const {
     data: { project: activeProject },
   } = useSuspenseQuery(projectDetailQueryOptions(projectId))
 
-  const { data, isLoading } = useLabelClasses(projectId)
+  const descriptor = getTaskDescriptor(activeProject.task)
+  const { data, isLoading, isError, refetch } = useLabelClasses(projectId)
   const classes = data?.classes ?? []
 
   const [createOpened, { open: openCreate, close: closeCreate }] = useDisclosure(false)
   const [editingClass, setEditingClass] = useState<LabelClass | null>(null)
 
+  if (!descriptor.annotation.requiresLabelClasses) {
+    return (
+      <Box>
+        <Stack gap="xl">
+          <PageHeader title="Classes" description="The label-class registry for this project's task." />
+          <EmptyState
+            icon={TagIcon}
+            title="Not used by this task"
+            description={`The "${descriptor.label}" task doesn't use label classes.`}
+          />
+        </Stack>
+      </Box>
+    )
+  }
+
+  const classColumns: DataTableColumn<LabelClass>[] = [
+    {
+      key: 'name',
+      header: 'Class',
+      render: (cls) => (
+        <Group gap="sm" wrap="nowrap">
+          <Box
+            w={16}
+            h={16}
+            style={{
+              borderRadius: 4,
+              backgroundColor: cls.uiColorHex ?? 'var(--mantine-color-gray-6)',
+              border: '1px solid var(--mantine-color-dark-4)',
+              flexShrink: 0,
+            }}
+          />
+          <Text size="sm" fw={600}>
+            {cls.name}
+          </Text>
+        </Group>
+      ),
+    },
+    {
+      key: 'description',
+      header: 'Description',
+      render: (cls) =>
+        cls.description ? (
+          <Text size="sm" c="dimmed" lineClamp={2}>
+            {cls.description}
+          </Text>
+        ) : (
+          <Text size="sm" c="dimmed" fs="italic">
+            No description
+          </Text>
+        ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      fit: true,
+      render: (cls) => <ClassActions cls={cls} projectId={projectId} onEdit={setEditingClass} />,
+    },
+  ]
+
   return (
     <Box>
       <Stack gap="xl">
         <PageHeader
-          title="Label Classes"
-          description="Define the classification labels for your dataset. Each annotation references one of these classes."
+          title="Classes"
+          description="Define the classification labels used to annotate this project's dataset."
           actions={
-            <Button leftSection={<PlusIcon size={16} />} onClick={openCreate}>
+            <Button leftSection={<PlusIcon size={14} />} onClick={openCreate}>
               Add Class
             </Button>
           }
         />
 
-        {/* Classes grid */}
-        {isLoading ? (
-          <EmptyState loading />
-        ) : classes.length === 0 ? (
-          <EmptyState
-            icon={TagIcon}
-            title="No label classes yet"
-            description={
-              <>
-                Add classification labels that annotators can assign to dataset items. This project uses the{' '}
-                <strong>{activeProject.task.replace(/_/g, ' ')}</strong> task.
-              </>
-            }
-            action={
-              <Button leftSection={<PlusIcon size={14} />} onClick={openCreate}>
-                Create First Class
-              </Button>
-            }
-          />
-        ) : (
-          <>
-            <Group gap="sm">
-              <Badge variant="light" size="lg">
-                {classes.length} class(es)
-              </Badge>
-            </Group>
-            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="md">
-              {classes.map((cls) => (
-                <ClassCard key={cls.classId} cls={cls} projectId={projectId} onEdit={setEditingClass} />
-              ))}
-            </SimpleGrid>
-          </>
-        )}
+        <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
+          {classes.length === 0 ? (
+            <EmptyState
+              icon={TagIcon}
+              title="No label classes yet"
+              description={
+                <>
+                  Add classification labels that items can be assigned to. This project uses the{' '}
+                  <strong>{descriptor.label}</strong> task.
+                </>
+              }
+              action={
+                <Button leftSection={<PlusIcon size={14} />} onClick={openCreate}>
+                  Create First Class
+                </Button>
+              }
+            />
+          ) : (
+            <DataTable columns={classColumns} data={classes} getRowKey={(cls) => cls.classId} />
+          )}
+        </QueryBoundary>
+
+        <Modal opened={createOpened} onClose={closeCreate} title="Create Label Class" centered>
+          <ClassFormModal projectId={projectId} onClose={closeCreate} />
+        </Modal>
+
+        <Modal opened={!!editingClass} onClose={() => setEditingClass(null)} title="Edit Label Class" centered>
+          {editingClass && (
+            <ClassFormModal projectId={projectId} existing={editingClass} onClose={() => setEditingClass(null)} />
+          )}
+        </Modal>
       </Stack>
-
-      {/* Create Modal */}
-      <Modal opened={createOpened} onClose={closeCreate} title="Create Label Class" centered>
-        <ClassFormModal projectId={projectId} onClose={closeCreate} />
-      </Modal>
-
-      {/* Edit Modal */}
-      <Modal opened={!!editingClass} onClose={() => setEditingClass(null)} title="Edit Label Class" centered>
-        {editingClass && (
-          <ClassFormModal projectId={projectId} existing={editingClass} onClose={() => setEditingClass(null)} />
-        )}
-      </Modal>
     </Box>
   )
 }

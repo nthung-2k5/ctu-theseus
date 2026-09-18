@@ -8,7 +8,7 @@
  * free-form JSON blob the user has to know the shape of.
  */
 
-import { Button, Card, Group, NumberInput, Select, Stack, Text, TextInput, Title } from '@mantine/core'
+import { Button, Card, Checkbox, Group, MultiSelect, NumberInput, Select, Stack, TextInput, Title } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { BrainIcon } from '@phosphor-icons/react'
 import type { ProjectDetail } from '@public/store/types'
@@ -20,6 +20,41 @@ interface CreateRunPanelProps {
 }
 
 const BATCH_SIZE_LABEL = (v: number | 'auto') => (v === 'auto' ? 'Auto' : String(v))
+
+const AUGMENTATION_OPTIONS = [
+  { value: 'random_horizontal_flip', label: 'Random Horizontal Flip' },
+  { value: 'random_vertical_flip', label: 'Random Vertical Flip' },
+  { value: 'random_rotate', label: 'Random Rotate' },
+  { value: 'random_blur', label: 'Random Blur' },
+  { value: 'random_brightness', label: 'Random Brightness' },
+  { value: 'random_contrast', label: 'Random Contrast' },
+]
+
+const IMAGE_SIZE_OPTIONS = [
+  { value: '128', label: '128 × 128' },
+  { value: '224', label: '224 × 224' },
+  { value: '256', label: '256 × 256' },
+]
+
+const OPTIMIZER_OPTIONS = [
+  { value: 'adam', label: 'Adam' },
+  { value: 'adamw', label: 'AdamW' },
+  { value: 'sgd', label: 'SGD' },
+  { value: 'rmsprop', label: 'RMSprop' },
+  { value: 'adagrad', label: 'Adagrad' },
+]
+
+const CLASSIFICATION_METRIC_OPTIONS = [
+  { value: 'loss', label: 'Loss' },
+  { value: 'accuracy', label: 'Accuracy' },
+]
+
+const REGRESSION_METRIC_OPTIONS = [
+  { value: 'loss', label: 'Loss' },
+  { value: 'mean_squared_error', label: 'Mean Squared Error' },
+  { value: 'mean_absolute_error', label: 'Mean Absolute Error' },
+  { value: 'r2', label: 'R²' },
+]
 
 export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps) {
   const dataset = project.dataset
@@ -35,6 +70,14 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
       ?.filter((v) => v.status === 'ready')
       .map((v) => ({ value: v.id, label: `${v.versionTag} (${v.itemCount ?? 0} items)` })) ?? []
 
+  const isClassification = descriptor.annotation.requiresLabelClasses
+  const isVision = descriptor.modality === 'vision'
+  // Validation-metric choices assume a category or number output — the only
+  // two output types the 'stable' (non-LLM) tasks produce; experimental
+  // tasks' text/sequence outputs don't have a comparable metric menu.
+  const showValidationMetric = descriptor.status === 'stable'
+  const validationMetricOptions = isClassification ? CLASSIFICATION_METRIC_OPTIONS : REGRESSION_METRIC_OPTIONS
+
   const form = useForm({
     initialValues: {
       name: '',
@@ -44,6 +87,11 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
       learningRate: knobs?.learningRate.default ?? 0.001,
       earlyStopPatience: knobs?.earlyStopPatience.default ?? 5,
       encoderId: encoders[0]?.id ?? '',
+      useClassWeights: false,
+      augmentations: [] as string[],
+      imageSize: '',
+      optimizer: '',
+      validationMetric: '',
     },
     validate: {
       name: (v) => (v.trim().length > 0 ? null : 'Run name is required'),
@@ -61,6 +109,11 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
         learningRate: values.learningRate,
         earlyStopPatience: values.earlyStopPatience,
         ...(values.encoderId && { encoderId: values.encoderId }),
+        ...(isClassification && values.useClassWeights && { useClassWeights: true }),
+        ...(isVision && values.augmentations.length > 0 && { augmentations: values.augmentations }),
+        ...(isVision && values.imageSize && { imageSize: Number(values.imageSize) }),
+        ...(values.optimizer && { optimizer: values.optimizer }),
+        ...(values.validationMetric && { validationMetric: values.validationMetric }),
       },
     })
   }
@@ -83,7 +136,6 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
                 ? 'No ready snapshots — create one on the Dataset page'
                 : 'Select a snapshot to train on'
             }
-            description={dataset ? `Modality: ${dataset.modality}` : undefined}
             data={versionOptions}
             disabled={versionOptions.length === 0}
             {...form.getInputProps('datasetVersionId')}
@@ -131,9 +183,53 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
             />
           </Group>
 
-          <Text size="xs" c="dimmed">
-            These are the knobs {descriptor.label} exposes for Ludwig's {descriptor.ludwig?.modelType ?? 'ecd'} trainer.
-          </Text>
+          <Group grow>
+            <Select
+              label="Optimizer"
+              placeholder="Ludwig default (Adam)"
+              data={OPTIMIZER_OPTIONS}
+              clearable
+              {...form.getInputProps('optimizer')}
+            />
+            {showValidationMetric && (
+              <Select
+                label="Early Stop / Best-Epoch Metric"
+                placeholder="Ludwig default"
+                data={validationMetricOptions}
+                clearable
+                {...form.getInputProps('validationMetric')}
+              />
+            )}
+          </Group>
+
+          {isVision && (
+            <Select
+              label="Image Size"
+              description="Resizes every training image to a square of this size"
+              placeholder="Encoder default"
+              data={IMAGE_SIZE_OPTIONS}
+              clearable
+              {...form.getInputProps('imageSize')}
+            />
+          )}
+
+          {isClassification && (
+            <Checkbox
+              label="Weight classes by inverse frequency"
+              description="Balances the loss so a minority class isn't drowned out by a majority one — recommended for imbalanced datasets"
+              {...form.getInputProps('useClassWeights', { type: 'checkbox' })}
+            />
+          )}
+
+          {isVision && (
+            <MultiSelect
+              label="Augmentation"
+              description="Randomly perturb training images each epoch to reduce overfitting on a small dataset"
+              placeholder="No augmentation"
+              data={AUGMENTATION_OPTIONS}
+              {...form.getInputProps('augmentations')}
+            />
+          )}
 
           <Group justify="flex-end">
             <Button type="submit" leftSection={<BrainIcon size={16} />} disabled={versionOptions.length === 0}>

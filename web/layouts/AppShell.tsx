@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Avatar,
+  Badge,
   Box,
   Divider,
   Group,
@@ -16,15 +17,15 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import {
+  ArchiveIcon,
   ArrowLeftIcon,
   BrainIcon,
   CaretDownIcon,
-  CrosshairIcon,
   DatabaseIcon,
   HouseIcon,
+  KeyIcon,
   ListIcon,
   MoonIcon,
-  PackageIcon,
   SignOutIcon,
   StackIcon,
   SunIcon,
@@ -50,32 +51,42 @@ const hasReadyVersion = (project: ProjectDetail) =>
 
 const PROJECT_NAV_ITEMS = [
   { label: 'Overview', icon: DatabaseIcon, to: '/project/$projectId' as const },
-  { label: 'Data', icon: UploadSimpleIcon, to: '/project/$projectId/data' as const },
-  { label: 'Dataset', icon: StackIcon, to: '/project/$projectId/dataset' as const },
+  {
+    label: 'Upload',
+    icon: UploadSimpleIcon,
+    to: '/project/$projectId/upload' as const,
+    color: 'primary',
+  },
   {
     label: 'Classes',
     icon: TagIcon,
     to: '/project/$projectId/classes' as const,
     /** Only visible for tasks that use label classes */
     hidden: (project: ProjectDetail) => !isClassificationTask(project.task),
+    count: (project: ProjectDetail) => project.dataset?.classes?.length ?? 0,
+    color: 'violet',
+  },
+  {
+    label: 'Dataset',
+    icon: StackIcon,
+    to: '/project/$projectId/dataset' as const,
+    count: (project: ProjectDetail) => project.dataset?.draft?.itemCount ?? 0,
+    color: 'blue',
+  },
+  {
+    label: 'Snapshots',
+    icon: ArchiveIcon,
+    to: '/project/$projectId/snapshots' as const,
+    count: (project: ProjectDetail) => project.dataset?.versions?.length ?? project.versionCount ?? 0,
+    color: 'grape',
   },
   {
     label: 'Training',
     icon: BrainIcon,
     to: '/project/$projectId/training' as const,
     disabled: (project: ProjectDetail) => !hasReadyVersion(project),
-  },
-  {
-    label: 'Models',
-    icon: PackageIcon,
-    to: '/project/$projectId/models' as const,
-    disabled: (project: ProjectDetail) => (project.runCount ?? 0) === 0,
-  },
-  {
-    label: 'Inference',
-    icon: CrosshairIcon,
-    to: '/project/$projectId/inference' as const,
-    disabled: (project: ProjectDetail) => (project.runCount ?? 0) === 0,
+    count: (project: ProjectDetail) => project.runCount ?? 0,
+    color: 'teal',
   },
 ]
 
@@ -111,7 +122,7 @@ export function AppShell({ children }: AppShellProps) {
     <MantineAppShell
       header={{ height: 56 }}
       navbar={{
-        width: 260,
+        width: '14rem',
         breakpoint: 'sm',
         collapsed: { mobile: !mobileOpened, desktop: !desktopOpened },
       }}
@@ -164,6 +175,10 @@ export function AppShell({ children }: AppShellProps) {
                 </UnstyledButton>
               </Menu.Target>
               <Menu.Dropdown>
+                <Menu.Item leftSection={<KeyIcon size={16} />} onClick={() => navigate({ to: '/settings/api-keys' })}>
+                  API Keys
+                </Menu.Item>
+                <Menu.Divider />
                 <Menu.Item leftSection={<SignOutIcon size={16} />} color="red" onClick={handleLogout}>
                   Sign out
                 </Menu.Item>
@@ -199,12 +214,27 @@ export function AppShell({ children }: AppShellProps) {
                 <Divider my="xs" label="Project" labelPosition="left" />
                 {PROJECT_NAV_ITEMS.filter((item) => !item.hidden?.(activeProject)).map((item) => {
                   const resolvedPath = item.to.replace('$projectId', activeProject.id)
+                  const count = item.count ? item.count(activeProject) : undefined
+                  const isActive = location.pathname === resolvedPath
+
                   return (
                     <NavLink
                       key={item.to}
                       label={item.label}
                       leftSection={<item.icon size={20} />}
-                      active={location.pathname === resolvedPath}
+                      rightSection={
+                        count !== undefined ? (
+                          <Badge
+                            size="xs"
+                            variant={isActive ? 'filled' : 'light'}
+                            color={item.color ?? 'gray'}
+                            radius="sm"
+                          >
+                            {count}
+                          </Badge>
+                        ) : null
+                      }
+                      active={isActive}
                       onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
                       variant="light"
                       disabled={item.disabled?.(activeProject)}
