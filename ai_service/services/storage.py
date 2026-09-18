@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 from typing import Any
 from uuid import UUID
@@ -141,17 +142,59 @@ def training_logs_key(run_id: UUID) -> str:
     return f"{run_id}/logs/train.log"
 
 
+def evaluation_report_key(run_id: UUID | str) -> str:
+    return f"{run_id}/evaluation/report.json"
+
+
+def evaluation_predictions_key(run_id: UUID | str) -> str:
+    return f"{run_id}/evaluation/predictions.parquet"
+
+
+def batch_inference_result_key(run_id: UUID | str, inference_id: UUID | str) -> str:
+    return f"{run_id}/predictions/{inference_id}.csv"
+
+
+_DOWNLOAD_COMPLETE_MARKER = ".download_complete"
+
+
 def download_model(run_id: str) -> str:
     """
     Download a training run's Ludwig output directory (checkpoint,
     metadata, hyperparameters — everything LudwigModel.load() needs) to a
-    local cache and return its path. Skips re-downloading if already
-    cached locally.
+    local cache and return its path. Skips re-downloading if already cached
+    locally.
+
+    Cache validity is a marker file written only after `download_prefix`
+    returns successfully — not just "the directory is non-empty" (the
+    previous check), which would treat a directory left behind by a
+    download that failed partway through as a valid, permanent cache hit.
+    On a miss, any partial contents from a prior failed attempt are cleared
+    before retrying.
     """
     local_dir = str(TEMP_DIR / "models" / run_id)
-    if not os.path.isdir(local_dir) or not os.listdir(local_dir):
+    marker = os.path.join(local_dir, _DOWNLOAD_COMPLETE_MARKER)
+    if not os.path.isfile(marker):
+        shutil.rmtree(local_dir, ignore_errors=True)
         download_prefix(BUCKET_TRAINING, f"{run_id}/results/", local_dir)
+        with open(marker, "w") as f:
+            f.write("")
     return local_dir
+
+
+_RUN_SUFFIX_RE = re.compile(r"_run_(\d+)$")
+
+
+def _run_ordinal(dirpath: str) -> int:
+    """Ludwig's `results_run_N` ordinal for any ancestor of `dirpath`, else 0.
+
+    `results` (no suffix) is Ludwig's first run and sorts below `results_run_1`.
+    """
+    best = 0
+    for part in os.path.normpath(dirpath).split(os.sep):
+        match = _RUN_SUFFIX_RE.search(part)
+        if match:
+            best = max(best, int(match.group(1)))
+    return best
 
 
 def find_model_dir(root: str) -> str:
@@ -160,11 +203,21 @@ def find_model_dir(root: str) -> str:
     subdirectory it names itself (`results_run_N/model/`), so the layout
     under `download_model()`'s local cache isn't fixed. Walk for the
     marker file Ludwig always writes next to a loadable model.
+
+    When several are present, take the highest-numbered run. Ludwig
+    auto-increments `results_run_N` rather than overwriting, so a redelivered
+    or re-dispatched training run leaves earlier attempts in place — and
+    `os.walk` order would otherwise decide which checkpoint export and
+    inference load, silently serving an abandoned partial model.
     """
-    for dirpath, _, filenames in os.walk(root):
-        if "model_hyperparameters.json" in filenames:
-            return dirpath
-    return root
+    candidates = [
+        dirpath
+        for dirpath, _, filenames in os.walk(root)
+        if "model_hyperparameters.json" in filenames
+    ]
+    if not candidates:
+        return root
+    return max(candidates, key=_run_ordinal)
 
 
 def cleanup_temp(subdir: str, job_id: str) -> None:
