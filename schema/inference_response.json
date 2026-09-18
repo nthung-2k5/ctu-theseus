@@ -1,0 +1,194 @@
+{
+  "title": "InferenceResponse",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "status",
+        "runId",
+        "output"
+      ],
+      "properties": {
+        "status": {
+          "const": "success",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "feature",
+                "classes"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "classification",
+                  "type": "string"
+                },
+                "feature": {
+                  "type": "string"
+                },
+                "classes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "label",
+                      "confidence"
+                    ],
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "confidence": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "feature",
+                "value"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "regression",
+                  "type": "string"
+                },
+                "feature": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "feature",
+                "text"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "text",
+                  "type": "string"
+                },
+                "feature": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "feature",
+                "tokens"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "tokens",
+                  "type": "string"
+                },
+                "feature": {
+                  "type": "string"
+                },
+                "tokens": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "token",
+                      "tag"
+                    ],
+                    "properties": {
+                      "token": {
+                        "type": "string"
+                      },
+                      "tag": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "status",
+        "runId",
+        "resultKey",
+        "rowCount"
+      ],
+      "properties": {
+        "status": {
+          "const": "batch",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "resultKey": {
+          "type": "string"
+        },
+        "rowCount": {
+          "minimum": 0,
+          "anyOf": [
+            {
+              "format": "integer",
+              "default": 0,
+              "type": "string"
+            },
+            {
+              "minimum": 0,
+              "type": "integer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "status",
+        "runId",
+        "error"
+      ],
+      "properties": {
+        "status": {
+          "const": "failed",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    }
+  ]
+}

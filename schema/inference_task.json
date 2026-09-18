@@ -1,21 +1,37 @@
 {
-  "title": "InferenceRequest",
+  "title": "InferenceTask",
   "type": "object",
   "required": [
+    "inferenceId",
     "runId",
-    "threshold",
     "payload"
   ],
   "properties": {
+    "inferenceId": {
+      "format": "uuid",
+      "type": "string"
+    },
     "runId": {
       "format": "uuid",
       "type": "string"
     },
-    "threshold": {
-      "minimum": 0,
-      "maximum": 1,
-      "default": 0.5,
-      "type": "number"
+    "topK": {
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 100,
+      "anyOf": [
+        {
+          "format": "integer",
+          "default": 0,
+          "type": "string"
+        },
+        {
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100,
+          "type": "integer"
+        }
+      ]
     },
     "payload": {
       "anyOf": [
@@ -43,15 +59,20 @@
           "type": "object",
           "required": [
             "kind",
-            "text"
+            "fields"
           ],
           "properties": {
             "kind": {
               "const": "text",
               "type": "string"
             },
-            "text": {
-              "type": "string"
+            "fields": {
+              "type": "object",
+              "patternProperties": {
+                "^(.*)$": {
+                  "type": "string"
+                }
+              }
             }
           }
         },
@@ -80,6 +101,26 @@
                   ]
                 }
               }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "uploadKey",
+            "uploadFilename"
+          ],
+          "properties": {
+            "kind": {
+              "const": "batch",
+              "type": "string"
+            },
+            "uploadKey": {
+              "type": "string"
+            },
+            "uploadFilename": {
+              "type": "string"
             }
           }
         }

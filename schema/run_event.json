@@ -179,6 +179,59 @@
           "type": "string"
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "kind",
+        "runId",
+        "ts",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "const": "evaluation",
+          "type": "string"
+        },
+        "runId": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "ts": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "status": {
+          "default": "success",
+          "type": "string",
+          "enum": [
+            "success",
+            "failed"
+          ]
+        },
+        "split": {
+          "default": "train",
+          "type": "string",
+          "enum": [
+            "train",
+            "validation",
+            "test",
+            "full"
+          ]
+        },
+        "reportKey": {
+          "type": "string"
+        },
+        "predictionsKey": {
+          "type": "string"
+        },
+        "headlineMetric": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
     }
   ]
 }

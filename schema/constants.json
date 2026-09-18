@@ -4,6 +4,8 @@
     "CLASS_COLUMN_NAME": "class"
   },
   "SPLIT_COLUMN_NAME": "split",
+  "SPLIT_INDEX_COLUMN_NAME": "_ludwig_split_idx",
+  "ITEM_ID_COLUMN_NAME": "_theseus_item_id",
   "BUCKET_DATASETS": "theseus-datasets",
   "BUCKET_TRAINING": "theseus-training",
   "BUCKET_MODELS": "theseus-models",
