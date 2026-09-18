@@ -1,12 +1,9 @@
-/**
- * Best-effort S3 cleanup for cascade-deleted rows.
- */
-
 import CONSTANTS from '@schema/constants.json'
 import { db } from '@server/db'
 import {
   deleteFile,
   deletePrefix,
+  evaluationPrefix,
   snapshotManifestKey,
   snapshotParquetKey,
   trainingConfigKey,
@@ -57,7 +54,13 @@ function cleanupRunStorageTasks(runId: string): Promise<unknown>[] {
     deleteFile(CONSTANTS.BUCKET_TRAINING, trainingConfigKey(runId)).catch(() => {}),
     deletePrefix(CONSTANTS.BUCKET_TRAINING, trainingResultsPrefix(runId)).catch(() => {}),
     deleteFile(CONSTANTS.BUCKET_TRAINING, trainingLogsKey(runId)).catch(() => {}),
+    deletePrefix(CONSTANTS.BUCKET_TRAINING, evaluationPrefix(runId)).catch(() => {}),
     // Covers model.{format}, expected.json, and bundles/*.zip in one sweep.
     deletePrefix(CONSTANTS.BUCKET_MODELS, `${runId}/`).catch(() => {}),
   ]
+}
+
+/** Deletes a single training run's S3 objects (config, results, logs, exported models/bundles). */
+export async function cleanupRunStorage(runId: string): Promise<void> {
+  await Promise.allSettled(cleanupRunStorageTasks(runId))
 }

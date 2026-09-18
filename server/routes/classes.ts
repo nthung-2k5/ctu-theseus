@@ -117,7 +117,7 @@ export const classRoutes = new Elysia({ prefix: '/api/projects/:projectId/classe
       // without redeclaring the full set here, Elysia validates against that
       // narrower shape and rejects `classId` as an unexpected property
       // before the handler (or the macro's ownership check) ever runs.
-      params: t.Object({ projectId: t.String(), classId: t.String() }),
+      params: t.Object({ projectId: t.String({ format: 'uuid' }), classId: t.String({ format: 'uuid' }) }),
       body: t.Object({
         name: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
         description: t.Optional(t.String()),
@@ -146,5 +146,5 @@ export const classRoutes = new Elysia({ prefix: '/api/projects/:projectId/classe
         return status(409, 'Cannot delete class: it is referenced by existing annotations')
       }
     },
-    { projectBelongToUser: true, params: t.Object({ projectId: t.String(), classId: t.String() }) },
+    { projectBelongToUser: true, params: t.Object({ projectId: t.String({ format: 'uuid' }), classId: t.String({ format: 'uuid' }) }) },
   )

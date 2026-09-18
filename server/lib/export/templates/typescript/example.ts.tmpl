@@ -1,0 +1,36 @@
+/**
+ * Minimal usage example.
+ *
+ * Run with an image path for an image-input model, or a JSON object (one
+ * value per input column) for a tabular model — e.g.:
+ *
+ *     bun example.ts cat.jpg
+ *     bun example.ts '{"age": 34, "income": 52000}'
+ */
+
+import { TheseusClient } from './client'
+
+const arg = process.argv[2]
+if (!arg) {
+  console.error(`Usage: bun example.ts <path-to-image | JSON object of column values>`)
+  process.exit(1)
+}
+
+const client = new TheseusClient()
+
+let input: string | Record<string, number>
+if (client.isTabular) {
+  try {
+    input = JSON.parse(arg)
+  } catch {
+    console.error('This model takes tabular input — pass a JSON object, e.g. \'{"age": 34}\'')
+    process.exit(1)
+  }
+} else {
+  input = arg
+}
+
+const predictions = await client.predict(input)
+for (const [className, probability] of Object.entries(predictions)) {
+  console.log(`${className}: ${probability.toFixed(4)}`)
+}

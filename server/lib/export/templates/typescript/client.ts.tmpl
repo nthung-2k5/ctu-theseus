@@ -1,0 +1,236 @@
+/**
+ * Theseus-generated inference client.
+ *
+ * Wraps the exported ONNX model with the preprocessing/postprocessing
+ * Ludwig applied at training time, read from preprocessing.json — Ludwig's
+ * exported ONNX graph is the bare model only (no resize/normalize, no
+ * tokenization, no class-index decoding), so this client reconstructs that
+ * step from the manifest rather than assuming a fixed tensor layout:
+ * input/output tensor names are matched against the graph's actual names
+ * at runtime, not hardcoded, since ONNX export doesn't guarantee a stable
+ * naming convention across Ludwig versions.
+ *
+ * Implements preprocessing for:
+ *   - a single `image` input with a `category`/`number` output (image
+ *     classification/regression) — pass a file path to `predict()`.
+ *   - one or more `number` inputs (tabular classification/regression) —
+ *     pass a `{column: value}` record to `predict()`, one entry per input
+ *     feature.
+ *
+ * Every other input type (text, audio) throws with a pointer to
+ * preprocessing.json so you can adapt preprocessing yourself — text
+ * tokenization in particular depends on the chosen encoder's own
+ * vocabulary (Ludwig's built-in tokenizer, or a HuggingFace subword
+ * tokenizer for bert/distilbert/roberta), which can't be generically
+ * reconstructed from preprocessing.json alone. See README.md.
+ */
+
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import * as ort from 'onnxruntime-node'
+import sharp from 'sharp'
+
+interface PreprocessingInput {
+  name: string
+  type: string
+  column: string
+  ludwigPreprocessing?: Record<string, unknown>
+  imageNormalization?: { mean: [number, number, number]; std: [number, number, number] }
+  numberNormalization?: {
+    type: 'zscore' | 'minmax' | 'log1p' | 'iq'
+    mean?: number
+    std?: number
+    min?: number
+    max?: number
+    q1?: number
+    q2?: number
+    q3?: number
+  }
+}
+
+interface PreprocessingOutput {
+  name: string
+  type: string
+  column: string
+  classes?: string[]
+}
+
+interface PreprocessingManifest {
+  schemaVersion: 1
+  inputs: PreprocessingInput[]
+  outputs: PreprocessingOutput[]
+}
+
+function matchTensorName(candidates: string[], preferred: string): string {
+  if (candidates.length === 1) return candidates[0]
+  const match = candidates.find((n) => n === preferred || n.startsWith(`${preferred}::`) || n.startsWith(`${preferred}_`))
+  if (!match) {
+    throw new Error(
+      `Could not match an ONNX tensor to feature '${preferred}' among [${candidates.join(', ')}]. ` +
+        'Inspect preprocessing.json and pass the tensor name explicitly if this model uses an unrecognized naming scheme.',
+    )
+  }
+  return match
+}
+
+function softmax(x: Float32Array): Float32Array {
+  const max = Math.max(...x)
+  const exp = x.map((v) => Math.exp(v - max))
+  const sum = exp.reduce((a, b) => a + b, 0)
+  return exp.map((v) => v / sum)
+}
+
+/**
+ * Replicates the exact normalization Ludwig fit at train time
+ * (ludwig.features.number_feature.numeric_transformation_registry) — the
+ * ONNX graph itself has none: NumberInputFeature.forward() goes straight
+ * from the raw tensor to its encoder.
+ */
+function preprocessNumber(value: number, spec: PreprocessingInput): Float32Array {
+  let x = value
+  const norm = spec.numberNormalization
+  if (norm) {
+    if (norm.type === 'zscore' && norm.std) {
+      x = (x - (norm.mean ?? 0)) / norm.std
+    } else if (norm.type === 'minmax' && norm.min !== undefined && norm.max !== undefined) {
+      const span = norm.max - norm.min
+      x = span ? (x - norm.min) / span : 0
+    } else if (norm.type === 'log1p') {
+      x = Math.log1p(x)
+    } else if (norm.type === 'iq' && norm.q2 !== undefined) {
+      const span = (norm.q3 ?? 0) - (norm.q1 ?? 0)
+      x = span ? (x - norm.q2) / span : x - norm.q2
+    }
+    // Unrecognized normalization type: passed through unchanged — check
+    // preprocessing.json's `numberNormalization` if predictions look off.
+  }
+  // 1-D, length 1 — matches Ludwig's own create_sample_input() for a
+  // single-example number feature.
+  return new Float32Array([x])
+}
+
+export class TheseusClient {
+  private session!: ort.InferenceSession
+  private manifest: PreprocessingManifest
+  private inputSpecs: PreprocessingInput[]
+  private inputSpec: PreprocessingInput
+  private outputSpec: PreprocessingOutput
+  private onnxInputNames!: Record<string, string>
+  private onnxOutputName!: string
+  private ready: Promise<void>
+  /** Multiple inputs, or a single tabular (number) one, means predict() expects a {column: value} record rather than a file path. */
+  readonly isTabular: boolean
+
+  constructor(
+    private modelPath = join(import.meta.dirname, 'model.onnx'),
+    preprocessingPath = join(import.meta.dirname, 'preprocessing.json'),
+  ) {
+    this.manifest = JSON.parse(readFileSync(preprocessingPath, 'utf-8'))
+    this.inputSpecs = this.manifest.inputs
+    this.inputSpec = this.inputSpecs[0]
+    this.outputSpec = this.manifest.outputs[0]
+    this.isTabular = this.inputSpecs.length > 1 || this.inputSpec.type === 'number'
+    this.ready = this.init()
+  }
+
+  private async init(): Promise<void> {
+    this.session = await ort.InferenceSession.create(this.modelPath)
+    this.onnxInputNames = Object.fromEntries(
+      this.inputSpecs.map((spec) => [spec.name, matchTensorName(this.session.inputNames, spec.column)]),
+    )
+    this.onnxOutputName = matchTensorName(this.session.outputNames, this.outputSpec.column)
+  }
+
+  private async preprocessImage(path: string): Promise<Float32Array> {
+    const pp = (this.inputSpec.ludwigPreprocessing ?? {}) as { height?: number; width?: number }
+    const height = pp.height ?? 224
+    const width = pp.width ?? 224
+
+    const { data } = await sharp(path)
+      .resize(width, height)
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+
+    // HWC uint8 -> CHW float32, [0,1], optionally normalized.
+    const norm = this.inputSpec.imageNormalization
+    const pixels = new Float32Array(3 * height * width)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        for (let c = 0; c < 3; c++) {
+          let v = data[(y * width + x) * 3 + c] / 255
+          if (norm) v = (v - norm.mean[c]) / norm.std[c]
+          pixels[c * height * width + y * width + x] = v
+        }
+      }
+    }
+    return pixels
+  }
+
+  private preprocessRecord(record: Record<string, number>): Record<string, ort.Tensor> {
+    const feed: Record<string, ort.Tensor> = {}
+    for (const spec of this.inputSpecs) {
+      if (spec.type !== 'number') {
+        throw new Error(
+          `No preprocessing implemented for input type '${spec.type}' in a multi-input model. ` +
+            'See preprocessing.json and adapt this method.',
+        )
+      }
+      if (!(spec.column in record)) {
+        throw new Error(`Missing required field '${spec.column}'`)
+      }
+      const data = preprocessNumber(record[spec.column], spec)
+      feed[this.onnxInputNames[spec.name]] = new ort.Tensor('float32', data, [1])
+    }
+    return feed
+  }
+
+  /**
+   * Run inference and return `{className: probability}` sorted descending
+   * (classification), or `{value}` (regression).
+   *
+   * `input` is a file path for a single `image` input, or a
+   * `{column: value}` record — one entry per input feature — for a
+   * tabular (`number`-only) model.
+   */
+  async predict(input: string | Record<string, number>, topK = 5): Promise<Record<string, number>> {
+    await this.ready
+
+    let feed: Record<string, ort.Tensor>
+    if (this.isTabular) {
+      if (typeof input !== 'object') {
+        throw new Error('This model has tabular inputs — pass a {column: value} record, not a file path.')
+      }
+      feed = this.preprocessRecord(input)
+    } else if (this.inputSpec.type === 'image') {
+      if (typeof input !== 'string') {
+        throw new Error('This model takes an image input — pass a file path.')
+      }
+      const pp = (this.inputSpec.ludwigPreprocessing ?? {}) as { height?: number; width?: number }
+      const height = pp.height ?? 224
+      const width = pp.width ?? 224
+      const pixels = await this.preprocessImage(input)
+      feed = { [this.onnxInputNames[this.inputSpec.name]]: new ort.Tensor('float32', pixels, [1, 3, height, width]) }
+    } else {
+      throw new Error(
+        `No preprocessing implemented for input type '${this.inputSpec.type}'. ` +
+          "See preprocessing.json's inputs[0].ludwigPreprocessing and adapt this method.",
+      )
+    }
+
+    const outputs = await this.session.run(feed)
+    const logits = outputs[this.onnxOutputName].data as Float32Array
+
+    const classes = this.outputSpec.classes
+    if (classes && classes.length === logits.length) {
+      const probs = softmax(logits)
+      const ranked = classes
+        .map((name, i) => [name, probs[i]] as const)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topK)
+      return Object.fromEntries(ranked.map(([name, p]) => [name, Math.round(p * 10000) / 10000]))
+    }
+
+    return { value: logits[0] }
+  }
+}

@@ -1,15 +1,24 @@
 import { telemetry } from '@server/lib/telemetry'
+import { apiV1Routes } from '@server/routes/api-v1'
+import { apiKeyRoutes } from '@server/routes/apiKeys'
 import { classRoutes } from '@server/routes/classes'
 import { datasetRoutes } from '@server/routes/datasets'
 import { exportRoutes } from '@server/routes/export'
 import { inferenceRoutes } from '@server/routes/inference'
 import { projectRoutes } from '@server/routes/projects'
+import { sweepRoutes } from '@server/routes/sweeps'
 import { trainingRoutes } from '@server/routes/training'
 import { migrate } from 'drizzle-orm/bun-sql/postgres/migrator'
 import { Elysia } from 'elysia'
 import { auth } from './auth'
 import { db } from './db'
-import { startNatsConsumers, startOrphanReaper } from './lib/microservice'
+import {
+  startExportReaper,
+  startInferenceResultsConsumer,
+  startInferenceUploadReaper,
+  startNatsConsumers,
+  startOrphanReaper,
+} from './lib/microservice'
 import { closeNats, initNats } from './lib/nats'
 import { ensureBuckets } from './lib/storage'
 
@@ -24,7 +33,10 @@ await migrate(db, { migrationsFolder: './drizzle' })
 // instead of leaving it running against a closing connection.
 const shutdownController = new AbortController()
 await startNatsConsumers(shutdownController.signal)
+await startInferenceResultsConsumer(shutdownController.signal)
 startOrphanReaper(shutdownController.signal)
+startExportReaper(shutdownController.signal)
+startInferenceUploadReaper(shutdownController.signal)
 
 async function shutdown() {
   console.log('[index] Shutting down...')
@@ -62,7 +74,10 @@ const app = new Elysia()
   .use(classRoutes)
   .use(datasetRoutes)
   .use(trainingRoutes)
+  .use(sweepRoutes)
   .use(inferenceRoutes)
+  .use(apiKeyRoutes)
+  .use(apiV1Routes)
   .use(exportRoutes)
   .listen({
     port: 3000,

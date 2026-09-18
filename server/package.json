@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "test:integration": "bun --config=bunfig.integration.toml test integration",
     "dev": "bun run --watch index.ts",
     "typecheck": "tsc --noEmit",
     "build": "bun build --compile --target bun --outfile server index.ts",
@@ -22,8 +23,10 @@
     "@nats-io/obj": "^3.4.0",
     "@nats-io/transport-node": "^3.4.0",
     "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.221.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
     "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-metrics": "^2.10.0",
     "@opentelemetry/sdk-node": "^0.221.0",
     "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",

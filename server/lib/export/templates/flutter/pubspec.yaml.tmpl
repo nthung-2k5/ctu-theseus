@@ -1,0 +1,25 @@
+name: {{PACKAGE_NAME}}
+description: "Theseus-exported {{TASK}} model — runs fully on-device, no server."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  onnxruntime: ^1.4.1
+  image: ^4.9.1
+  image_picker: ^1.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/sample/

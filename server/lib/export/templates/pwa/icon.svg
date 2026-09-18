@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="theseus-icon-title">
+  <title id="theseus-icon-title">Theseus app icon</title>
+  <rect width="128" height="128" rx="24" fill="#1864ab"/>
+  <path d="M32 96 L32 32 L96 32 M32 64 L72 64 M64 96 L96 96 L96 48" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

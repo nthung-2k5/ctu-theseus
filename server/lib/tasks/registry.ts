@@ -308,7 +308,91 @@ const questionAnswering: TaskDescriptor = {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Tier 3 — planned, no Ludwig backend yet                           */
+/*  Tier 3 — experimental (file input + free-text output, Ludwig ECD) */
+/*                                                                     */
+/*  Unlike object detection/segmentation/audio segmentation below,     */
+/*  these have a real Ludwig backend: `TextOutputFeature` is a         */
+/*  `SequenceOutputFeature` regardless of what feeds the combiner, so  */
+/*  an image/audio encoder driving a `text`-type output is the same    */
+/*  generic sequence-generation mechanism the Tier-2 `llm` text tasks  */
+/*  use — just with a non-text encoder. `experimental` because this    */
+/*  exact input/output combination is far less battle-tested than     */
+/*  Ludwig's tabular-first usage.                                      */
+/* ------------------------------------------------------------------ */
+
+const imageCaptioning: TaskDescriptor = {
+  id: 'image_captioning',
+  label: 'Image Captioning',
+  modality: 'vision',
+  backend: 'ludwig',
+  status: 'experimental',
+  itemSpec: { payload: 'file', accept: ['image/jpeg', 'image/png'] },
+  annotation: { type: 'text_sequence', requiresLabelClasses: false },
+  columns: [
+    { name: IMAGE_PATH_COLUMN, kind: 'storage_uri' },
+    { name: 'caption', kind: 'text_sequence_label' },
+    { name: SPLIT_COLUMN, kind: 'split' },
+  ],
+  ludwig: {
+    modelType: 'ecd',
+    inputFeatures: () => [{ name: IMAGE_PATH_COLUMN, type: 'image', column: IMAGE_PATH_COLUMN }],
+    outputFeatures: () => [{ name: 'caption', type: 'text', column: 'caption' }],
+    encoders: visionEncoders,
+    trainerKnobs: defaultTrainerKnobs(),
+  },
+}
+
+const audioCaptioning: TaskDescriptor = {
+  id: 'audio_captioning',
+  label: 'Audio Captioning',
+  modality: 'audio',
+  backend: 'ludwig',
+  status: 'experimental',
+  itemSpec: { payload: 'file', accept: ['audio/wav', 'audio/mpeg', 'audio/flac', 'audio/ogg'] },
+  annotation: { type: 'text_sequence', requiresLabelClasses: false },
+  columns: [
+    { name: 'audio_path', kind: 'storage_uri' },
+    { name: 'caption', kind: 'text_sequence_label' },
+    { name: SPLIT_COLUMN, kind: 'split' },
+  ],
+  ludwig: {
+    modelType: 'ecd',
+    inputFeatures: () => [{ name: 'audio_path', type: 'audio', column: 'audio_path' }],
+    outputFeatures: () => [{ name: 'caption', type: 'text', column: 'caption' }],
+    encoders: audioEncoders,
+    trainerKnobs: defaultTrainerKnobs(),
+  },
+}
+
+const automaticSpeechRecognition: TaskDescriptor = {
+  id: 'automatic_speech_recognition',
+  label: 'Automatic Speech Recognition',
+  modality: 'audio',
+  backend: 'ludwig',
+  status: 'experimental',
+  itemSpec: { payload: 'file', accept: ['audio/wav', 'audio/mpeg', 'audio/flac', 'audio/ogg'] },
+  annotation: { type: 'text_sequence', requiresLabelClasses: false },
+  columns: [
+    { name: 'audio_path', kind: 'storage_uri' },
+    { name: 'transcript', kind: 'text_sequence_label' },
+    { name: SPLIT_COLUMN, kind: 'split' },
+  ],
+  ludwig: {
+    modelType: 'ecd',
+    inputFeatures: () => [{ name: 'audio_path', type: 'audio', column: 'audio_path' }],
+    outputFeatures: () => [{ name: 'transcript', type: 'text', column: 'transcript' }],
+    encoders: audioEncoders,
+    trainerKnobs: defaultTrainerKnobs(),
+  },
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tier 3 — planned, no Ludwig backend at all                        */
+/*                                                                     */
+/*  Genuinely blocked, not just unbuilt: Ludwig has no bounding-box or */
+/*  segmentation-mask output feature type, so no amount of labeling   */
+/*  UI makes these trainable through this platform's Ludwig-only      */
+/*  backend — that would need an entirely different training path.    */
 /* ------------------------------------------------------------------ */
 
 function planned(id: ProjectTask, label: string, modality: TaskDescriptor['modality']): TaskDescriptor {
@@ -334,20 +418,8 @@ const unsupportedTasks: TaskDescriptor[] = [
     annotation: { type: 'segmentation_mask', requiresLabelClasses: true },
   },
   {
-    ...planned('image_captioning', 'Image Captioning', 'vision'),
-    annotation: { type: 'text_sequence', requiresLabelClasses: false },
-  },
-  {
-    ...planned('automatic_speech_recognition', 'Automatic Speech Recognition', 'audio'),
-    annotation: { type: 'text_sequence', requiresLabelClasses: false },
-  },
-  {
     ...planned('audio_segmentation', 'Audio Segmentation', 'audio'),
     annotation: { type: 'segmentation_mask', requiresLabelClasses: true },
-  },
-  {
-    ...planned('audio_captioning', 'Audio Captioning', 'audio'),
-    annotation: { type: 'text_sequence', requiresLabelClasses: false },
   },
   {
     ...planned('tabular_clustering', 'Tabular Clustering', 'tabular'),
@@ -379,6 +451,9 @@ export const taskRegistry: Record<ProjectTask, TaskDescriptor> = Object.fromEntr
     summarization,
     sequenceToSequence,
     questionAnswering,
+    imageCaptioning,
+    audioCaptioning,
+    automaticSpeechRecognition,
     ...unsupportedTasks,
   ].map((descriptor) => [descriptor.id, descriptor]),
 ) as Record<ProjectTask, TaskDescriptor>

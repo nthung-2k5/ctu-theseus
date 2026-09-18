@@ -1,10 +1,23 @@
+import CONSTANTS from '@schema/constants.json'
 import { db } from '@server/db'
 import { trainingRuns } from '@server/db/schema'
+import { cleanupRunStorage } from '@server/lib/cleanup'
 import { queueTraining, stopTraining } from '@server/lib/microservice'
 import { createRunEventsConsumer } from '@server/lib/nats'
-import { eq } from 'drizzle-orm'
+import { fileExists, getDownloadUrl, trainingLogsKey } from '@server/lib/storage'
+import { and, eq, inArray } from 'drizzle-orm'
 import { Elysia, sse, status, t } from 'elysia'
 import { betterAuth } from './auth'
+
+/** One misclassified row, as ai_service/services/evaluate.py's `_top_errors` writes it into report.json's `topErrors` array. */
+interface TopError {
+  itemId: string
+  actual: string
+  predicted: string
+  confidence: number | null
+}
+
+const ERRORS_PER_PAGE = 50
 
 export const trainingRoutes = new Elysia({ prefix: '/api' })
   .use(betterAuth)
@@ -26,19 +39,18 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
           createdAt: true,
           datasetVersionId: true,
         },
+        // Denormalized accuracy/macroF1 (see server/db/schema.ts's
+        // runEvaluations comment) so the run list and comparison view can
+        // show/sort on them without a per-run round trip.
+        with: { evaluation: { columns: { status: true, accuracy: true, macroF1: true } } },
         orderBy: { createdAt: 'desc' },
       })
 
-      return {
-        runs: runs.map((run) => ({
-          id: run.id,
-          name: run.name,
-          status: run.status,
-          datasetVersionId: run.datasetVersionId,
-          startedAt: run.startedAt,
-          createdAt: run.createdAt,
-        })),
-      }
+      // `columns` above already restricts the shape, so re-mapping added
+      // nothing — it only silently dropped `failedMessage` and `completedAt`,
+      // which the query was paying to select anyway and which the run list
+      // needs to explain a failure.
+      return { runs }
     },
     { projectBelongToUser: true },
   )
@@ -112,7 +124,7 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
       projectBelongToUser: true,
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 255 }),
-        datasetVersionId: t.String(),
+        datasetVersionId: t.String({ format: 'uuid' }),
         hyperparameters: t.Optional(t.Any()),
       }),
     },
@@ -121,9 +133,40 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
   .post(
     '/runs/:runId/cancel',
     async ({ run }) => {
+      // Only an in-flight run can be canceled. Without this guard, cancelling
+      // an already-succeeded run flipped it to 'canceled' — which permanently
+      // blocks inference (routes/inference.ts) and export (routes/export.ts)
+      // for a model that trained fine, and the terminal-status guard in
+      // microservice.ts means no later event can move it back.
+      if (run.status !== 'queued' && run.status !== 'running') {
+        return status(409, `Cannot cancel a run with status '${run.status}' — it has already finished`)
+      }
+
       // Publish abort command via NATS
       await stopTraining(run.id)
-      await db.update(trainingRuns).set({ status: 'canceled' }).where(eq(trainingRuns.id, run.id))
+      // Scope the write the same way, so a run that finished between the read
+      // above and this update isn't clobbered.
+      await db
+        .update(trainingRuns)
+        .set({ status: 'canceled', completedAt: new Date() })
+        .where(and(eq(trainingRuns.id, run.id), inArray(trainingRuns.status, ['queued', 'running'])))
+      return status(204)
+    },
+    { runBelongToUser: true },
+  )
+  /* ── Delete a training run, regardless of status ── */
+  .delete(
+    '/runs/:runId',
+    async ({ run }) => {
+      // An in-flight run still has a worker training it — stop that job before
+      // tearing down its storage and DB row, otherwise the worker keeps
+      // running against a run that no longer exists.
+      if (run.status === 'queued' || run.status === 'running') {
+        await stopTraining(run.id)
+      }
+      // S3 cleanup before the DB delete, same ordering as project/version deletes.
+      await cleanupRunStorage(run.id)
+      await db.delete(trainingRuns).where(eq(trainingRuns.id, run.id))
       return status(204)
     },
     { runBelongToUser: true },
@@ -176,6 +219,88 @@ export const trainingRoutes = new Elysia({ prefix: '/api' })
       } finally {
         await consumer.delete()
       }
+    },
+    { runBelongToUser: true },
+  )
+  /* ── Evaluation report (confusion matrix / per-class stats / regression metrics) for a finished run ── */
+  .get(
+    '/runs/:runId/evaluation',
+    async ({ run }) => {
+      const evaluation = await db.query.runEvaluations.findFirst({ where: { runId: run.id } })
+      if (!evaluation) return status(404, 'No evaluation report for this run yet')
+      return { evaluation }
+    },
+    { runBelongToUser: true },
+  )
+  /* ── Paginated misclassified rows from the evaluation report, joined back to their pool item ── */
+  .get(
+    '/runs/:runId/evaluation/errors',
+    async ({ run, query }) => {
+      const evaluation = await db.query.runEvaluations.findFirst({ where: { runId: run.id } })
+      if (evaluation?.status !== 'success' || !evaluation.report) {
+        return status(404, 'No evaluation report for this run yet')
+      }
+
+      const report = evaluation.report as { topErrors?: TopError[] }
+      let errors = report.topErrors ?? []
+
+      // classId filters to rows whose ACTUAL label is that class — resolved
+      // to a name first since topErrors stores Ludwig's own idx2str-derived
+      // label strings, never a Postgres class id (see services/evaluate.py's
+      // module docstring for why: label_classes has no idea which index
+      // Ludwig assigned to which class).
+      if (query.classId) {
+        const cls = await db.query.labelClasses.findFirst({ where: { classId: query.classId } })
+        if (!cls) return status(400, 'Unknown label class')
+        errors = errors.filter((e) => e.actual === cls.name)
+      }
+
+      const page = Math.max(1, query.page ?? 1)
+      const total = errors.length
+      const pageErrors = errors.slice((page - 1) * ERRORS_PER_PAGE, page * ERRORS_PER_PAGE)
+
+      const itemIds = pageErrors.map((e) => e.itemId)
+      const items = itemIds.length
+        ? await db.query.datasetItems.findMany({ where: { id: { in: itemIds } }, with: { textFeatures: true } })
+        : []
+      const itemById = new Map(items.map((i) => [i.id, i]))
+
+      const rows = await Promise.all(
+        pageErrors.map(async (e) => {
+          const item = itemById.get(e.itemId)
+          return {
+            ...e,
+            item: item
+              ? {
+                  id: item.id,
+                  text: item.textFeatures?.rawText ?? null,
+                  downloadUrl: item.storageUrl
+                    ? await getDownloadUrl(CONSTANTS.BUCKET_DATASETS, item.storageUrl)
+                    : null,
+                }
+              : null,
+          }
+        }),
+      )
+
+      return { errors: rows, total, page, perPage: ERRORS_PER_PAGE }
+    },
+    {
+      runBelongToUser: true,
+      query: t.Object({
+        page: t.Optional(t.Numeric({ minimum: 1 })),
+        classId: t.Optional(t.String({ format: 'uuid' })),
+      }),
+    },
+  )
+  /* ── Download the run's training log file via S3 presigned URL (train.py uploads it regardless of whether the live console was ever open) ── */
+  .get(
+    '/runs/:runId/logs',
+    async ({ run }) => {
+      const exists = await fileExists(CONSTANTS.BUCKET_TRAINING, trainingLogsKey(run.id))
+      if (!exists) return status(404, 'No log file for this run')
+      const url = await getDownloadUrl(CONSTANTS.BUCKET_TRAINING, trainingLogsKey(run.id))
+      return new Response(null, { status: 302, headers: { Location: url } })
     },
     { runBelongToUser: true },
   )

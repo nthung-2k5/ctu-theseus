@@ -11,7 +11,7 @@ import { GetObjectCommand } from '@aws-sdk/client-s3'
 import CONSTANTS from '@schema/constants.json'
 import { db } from '@server/db'
 import { datasetVersions } from '@server/db/schema'
-import type { ProjectTask } from '@server/lib/enums'
+import type { ProjectTask, SplitType } from '@server/lib/enums'
 import { s3, snapshotManifestKey, snapshotParquetKey, uploadFile } from '@server/lib/storage'
 import type { ColumnSpec, SnapshotContext } from '@server/lib/tasks'
 import { getTaskDescriptor } from '@server/lib/tasks'
@@ -19,10 +19,42 @@ import { record } from '@server/lib/telemetry'
 import { eq } from 'drizzle-orm'
 import { ByteWriter, parquetWriteRows } from 'hyparquet-writer'
 
+/**
+ * Ludwig's `fixed` split preprocessing type (see lib/ludwig/compile.ts)
+ * requires an integer column — its splitter does `column.astype(np.int8)`
+ * then partitions on the literal values 0/1/2 (train/validation/test), so
+ * the human-readable `split` string column (kind: 'split', used by
+ * ai_service/tasks/export.py to pick a test-split golden sample) can't
+ * double as that column. This one is synthetic: appended here, not
+ * declared by any task in the registry, so it never appears in a task's
+ * own input/output features.
+ */
+const SPLIT_INDEX_COLUMN = CONSTANTS.SPLIT_INDEX_COLUMN_NAME
+const SPLIT_INDEX: Record<SplitType, number> = { train: 0, validation: 1, test: 2 }
+
+/**
+ * Synthetic passthrough column carrying each row's pool item id — Ludwig
+ * never references it (not declared by any task's inputFeatures/
+ * outputFeatures), but the worker's evaluation step reads it back off its
+ * own predictions to join a misclassified row back to the item it came
+ * from. Same passthrough pattern as SPLIT_INDEX_COLUMN above.
+ */
+const ITEM_ID_COLUMN = CONSTANTS.ITEM_ID_COLUMN_NAME
+
 interface ManifestV1 {
   itemCount: number
   classCount: number
   classes: string[]
+  /**
+   * Item count per class name, classification tasks only — lets the
+   * compiler build balanced class weights (see lib/ludwig/compile.ts's
+   * `useClassWeights`) without a separate DB round trip at train-dispatch
+   * time. Keyed by class name (not id) for the same reason class weights
+   * themselves are: Ludwig resolves a name-keyed `class_weights` dict
+   * against its own vocabulary internally, so nothing here ever needs to
+   * know the index Ludwig assigns to each class.
+   */
+  classCounts?: Record<string, number>
   columns: ColumnSpec[]
   createdAt: string
 }
@@ -67,7 +99,12 @@ export async function buildSnapshot(versionId: string): Promise<void> {
               name,
               kind: 'scalar' as const,
             }))
-      const columns: ColumnSpec[] = [...task.columns, ...scalarColumns]
+      const columns: ColumnSpec[] = [
+        ...task.columns,
+        ...scalarColumns,
+        { name: SPLIT_INDEX_COLUMN, kind: 'split_index' },
+        { name: ITEM_ID_COLUMN, kind: 'item_id' },
+      ]
 
       const rows = members.map((m) => {
         const row: Record<string, unknown> = {}
@@ -76,6 +113,18 @@ export async function buildSnapshot(versionId: string): Promise<void> {
         }
         return row
       })
+
+      // Only classification tasks have a meaningful class distribution — a
+      // regression 'target' column also has `kind: 'label'` but holds numbers.
+      const labelColumn = columns.find((c) => c.kind === 'label')
+      const classCounts: Record<string, number> | undefined =
+        labelColumn && task.annotation.requiresLabelClasses
+          ? rows.reduce<Record<string, number>>((counts, row) => {
+              const value = row[labelColumn.name]
+              if (typeof value === 'string') counts[value] = (counts[value] ?? 0) + 1
+              return counts
+            }, {})
+          : undefined
 
       const writer = new ByteWriter()
       parquetWriteRows({
@@ -90,6 +139,7 @@ export async function buildSnapshot(versionId: string): Promise<void> {
         itemCount: members.length,
         classCount,
         classes: classRows.map((c) => c.name),
+        classCounts,
         columns,
         createdAt: new Date().toISOString(),
       }
@@ -124,16 +174,21 @@ export async function buildSnapshot(versionId: string): Promise<void> {
   })
 }
 
-type MemberWithItem = Awaited<ReturnType<typeof db.query.datasetVersionItems.findMany>>[number] & {
+export type MemberWithItem = Awaited<ReturnType<typeof db.query.datasetVersionItems.findMany>>[number] & {
   item: {
     storageUrl: string | null
     textFeatures: { rawText: string } | null
     tabularFeatures: { featuresJson: unknown } | null
-    annotations: { classId: string | null; labelStructured: unknown }[]
+    annotations: {
+      classId: string | null
+      labelStructured: unknown
+      annotationType: string
+      labelTextSequence: string | null
+    }[]
   }
 }
 
-function resolveColumnValue(col: ColumnSpec, member: MemberWithItem, classNameById: Map<string, string>): unknown {
+export function resolveColumnValue(col: ColumnSpec, member: MemberWithItem, classNameById: Map<string, string>): unknown {
   switch (col.kind) {
     case 'storage_uri':
       return member.item.storageUrl ? `s3://${CONSTANTS.BUCKET_DATASETS}/${member.item.storageUrl}` : null
@@ -141,6 +196,10 @@ function resolveColumnValue(col: ColumnSpec, member: MemberWithItem, classNameBy
       return member.item.textFeatures?.rawText ?? null
     case 'split':
       return member.splitType
+    case 'split_index':
+      return SPLIT_INDEX[member.splitType]
+    case 'item_id':
+      return member.itemId
     case 'label': {
       const classification = member.item.annotations.find((a) => a.classId !== null)
       if (classification?.classId) return classNameById.get(classification.classId) ?? null
@@ -153,11 +212,17 @@ function resolveColumnValue(col: ColumnSpec, member: MemberWithItem, classNameBy
       const features = member.item.tabularFeatures?.featuresJson as Record<string, unknown> | undefined
       return features?.[col.name] ?? null
     }
+    case 'text_sequence_label': {
+      const sequence = member.item.annotations.find((a) => a.annotationType === 'text_sequence')
+      return sequence?.labelTextSequence ?? null
+    }
   }
 }
 
-function columnParquetType(col: ColumnSpec): 'STRING' | 'DOUBLE' {
-  return col.kind === 'scalar' ? 'DOUBLE' : 'STRING'
+function columnParquetType(col: ColumnSpec): 'STRING' | 'DOUBLE' | 'INT32' {
+  if (col.kind === 'scalar') return 'DOUBLE'
+  if (col.kind === 'split_index') return 'INT32'
+  return 'STRING'
 }
 
 /** Read back a snapshot's manifest — used by training dispatch to rebuild the SnapshotContext for the Ludwig compiler. */
@@ -166,5 +231,5 @@ export async function readSnapshotManifest(versionId: string): Promise<SnapshotC
     new GetObjectCommand({ Bucket: CONSTANTS.BUCKET_DATASETS, Key: snapshotManifestKey(versionId) }),
   )
   const manifest = JSON.parse(await response.Body!.transformToString()) as ManifestV1
-  return { columns: manifest.columns, labelClassNames: manifest.classes }
+  return { columns: manifest.columns, labelClassNames: manifest.classes, classCounts: manifest.classCounts }
 }

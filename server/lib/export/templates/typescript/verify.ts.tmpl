@@ -1,0 +1,66 @@
+/**
+ * Checks that this client's own preprocessing reproduces the platform's
+ * prediction for the bundled sample. `client.ts` re-implements Ludwig's
+ * preprocessing from preprocessing.json; nothing else in this bundle
+ * proves that reimplementation is correct — this script is that proof.
+ */
+
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { TheseusClient } from './client'
+
+const TOLERANCE = 1e-3
+const expectedPath = join(import.meta.dirname, 'expected.json')
+
+if (!existsSync(expectedPath)) {
+  console.log('No expected.json in this bundle — nothing to verify against.')
+  process.exit(0)
+}
+
+const expected = JSON.parse(readFileSync(expectedPath, 'utf-8')) as {
+  sampleFile: string
+  predictions: Record<string, number>
+}
+const samplePath = join(import.meta.dirname, expected.sampleFile)
+
+const client = new TheseusClient()
+const sampleInput: string | Record<string, number> = client.isTabular
+  ? JSON.parse(readFileSync(samplePath, 'utf-8'))
+  : samplePath
+const actual = await client.predict(sampleInput, Object.keys(expected.predictions).length || 5)
+
+const entries = Object.entries(expected.predictions)
+if (entries.length === 0) {
+  console.log('expected.json has no predictions to compare against.')
+  process.exit(0)
+}
+
+const expectedTop1 = entries.reduce((a, b) => (b[1] > a[1] ? b : a))[0]
+const actualEntries = Object.entries(actual)
+const actualTop1 = actualEntries.length > 0 ? actualEntries.reduce((a, b) => (b[1] > a[1] ? b : a))[0] : undefined
+
+let ok = true
+if (actualTop1 !== expectedTop1) {
+  ok = false
+  console.log(`MISMATCH top-1 class: expected '${expectedTop1}', got '${actualTop1}'`)
+}
+
+for (const [className, expectedProb] of entries) {
+  const actualProb = actual[className]
+  if (actualProb === undefined) {
+    ok = false
+    console.log(`MISMATCH class '${className}' missing from this client's output`)
+    continue
+  }
+  const diff = Math.abs(actualProb - expectedProb)
+  if (diff > TOLERANCE) {
+    ok = false
+    console.log(`MISMATCH class '${className}': expected ${expectedProb.toFixed(4)}, got ${actualProb.toFixed(4)} (diff ${diff.toFixed(4)})`)
+  }
+}
+
+if (ok) {
+  console.log(`OK — top-1 '${actualTop1}' matches platform output within ${TOLERANCE}.`)
+  process.exit(0)
+}
+process.exit(1)

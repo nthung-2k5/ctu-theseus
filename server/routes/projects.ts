@@ -1,11 +1,31 @@
 import { db } from '@server/db'
-import { datasets, datasetVersions, projects, trainingRuns } from '@server/db/schema'
+import { datasets, datasetVersionItems, datasetVersions, projects, trainingRuns } from '@server/db/schema'
 import { cleanupProjectStorage } from '@server/lib/cleanup'
 import { ProjectTasks } from '@server/lib/enums'
 import { getTaskDescriptor, taskToModality } from '@server/lib/tasks'
-import { eq } from 'drizzle-orm'
+import { count, eq, inArray } from 'drizzle-orm'
 import { Elysia, status, t } from 'elysia'
 import { betterAuth } from './auth'
+
+type SplitCounts = { train: number; validation: number; test: number }
+
+const EMPTY_SPLIT_COUNTS: SplitCounts = { train: 0, validation: 0, test: 0 }
+
+/**
+ * Attach per-split membership counts (and their total) to a version.
+ *
+ * `itemCount` is derived here rather than read off the column: the column is
+ * only written when a snapshot is built, so it is null for the draft — which
+ * is exactly the version the UI shows a live count for.
+ */
+function withCounts<T extends { id: string }>(version: T, counts: Map<string, SplitCounts>) {
+  const splitCounts = counts.get(version.id) ?? EMPTY_SPLIT_COUNTS
+  return {
+    ...version,
+    splitCounts,
+    itemCount: splitCounts.train + splitCounts.validation + splitCounts.test,
+  }
+}
 
 export const projectRoutes = new Elysia({ prefix: '/api/projects' })
   .use(betterAuth)
@@ -42,20 +62,47 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
   .get(
     '/:projectId',
     async ({ project }) => {
-      const [versionCount, runCount, datasetRow] = await Promise.all([
+      const [versionCount, runCount, datasetRow, splitRows] = await Promise.all([
         db.$count(datasetVersions, eq(datasetVersions.datasetId, project.id)),
         db.$count(trainingRuns, eq(trainingRuns.projectId, project.id)),
+        // Deliberately NOT `with: { items: true }`. That loaded the full
+        // membership set for the draft *and* every snapshot on the route the
+        // frontend hits on every project navigation — hundreds of thousands of
+        // rows for a large pool — when the only thing any consumer reads off
+        // it is counts (the sidebar badge, the stat tile, the split bar).
         db.query.datasets.findFirst({
           where: { projectId: project.id },
-          with: {
-            draft: { with: { items: true } },
-            versions: { with: { items: true } },
-            classes: true,
-          },
+          with: { draft: true, versions: true, classes: true },
         }),
+        // One grouped query, at most three rows per version.
+        db
+          .select({
+            versionId: datasetVersionItems.versionId,
+            splitType: datasetVersionItems.splitType,
+            n: count(),
+          })
+          .from(datasetVersionItems)
+          .innerJoin(datasetVersions, eq(datasetVersions.id, datasetVersionItems.versionId))
+          .where(eq(datasetVersions.datasetId, project.id))
+          .groupBy(datasetVersionItems.versionId, datasetVersionItems.splitType),
       ])
 
-      return { project: { ...project, runCount, versionCount, dataset: datasetRow ?? null } }
+      const countsByVersion = new Map<string, SplitCounts>()
+      for (const row of splitRows) {
+        const entry = countsByVersion.get(row.versionId) ?? { train: 0, validation: 0, test: 0 }
+        entry[row.splitType] = row.n
+        countsByVersion.set(row.versionId, entry)
+      }
+
+      const dataset = datasetRow
+        ? {
+            ...datasetRow,
+            draft: datasetRow.draft ? withCounts(datasetRow.draft, countsByVersion) : null,
+            versions: datasetRow.versions.map((v) => withCounts(v, countsByVersion)),
+          }
+        : null
+
+      return { project: { ...project, runCount, versionCount, dataset } }
     },
     {
       projectBelongToUser: true,
@@ -134,6 +181,11 @@ export const projectRoutes = new Elysia({ prefix: '/api/projects' })
       // Gather + delete S3 objects before the DB cascade removes the rows
       // that reference their keys — cleanupProjectStorage queries them.
       await cleanupProjectStorage(project.id)
+      var versions = await db.query.datasetVersions.findMany({
+        where: { datasetId: project.id },
+        columns: { id: true },
+      })
+      await db.delete(datasetVersionItems).where(inArray(datasetVersionItems.versionId, versions.map((v) => v.id)))
       await db.delete(projects).where(eq(projects.id, project.id))
       return status(204)
     },

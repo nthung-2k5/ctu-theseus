@@ -257,6 +257,8 @@ export async function listKeys(bucket: string, prefix: string): Promise<string[]
 /*    {runId}/config.yaml                        compiled Ludwig cfg  */
 /*    {runId}/results/                           Ludwig output dir    */
 /*    {runId}/logs/train.log                                          */
+/*    {runId}/evaluation/report.json             bounded eval report  */
+/*    {runId}/evaluation/predictions.parquet     full per-row preds   */
 /*                                                                     */
 /*  theseus-models/                                                   */
 /*    {runId}/model.{onnx|pt2|safetensors}       exports only         */
@@ -284,6 +286,18 @@ export function trainingResultsPrefix(runId: string): string {
 
 export function trainingLogsKey(runId: string): string {
   return `${runId}/logs/train.log`
+}
+
+export function evaluationPrefix(runId: string): string {
+  return `${runId}/evaluation/`
+}
+
+export function evaluationReportKey(runId: string): string {
+  return `${evaluationPrefix(runId)}report.json`
+}
+
+export function evaluationPredictionsKey(runId: string): string {
+  return `${evaluationPrefix(runId)}predictions.parquet`
 }
 
 export function exportKey(runId: string, format: string): string {
