@@ -18,7 +18,6 @@
   },
   "packages": {
     "Aspire.Hosting.PostgreSQL": "13.5.4",
-    "Aspire.Hosting.Nats": "13.5.4",
     "CommunityToolkit.Aspire.Hosting.RustFs": "13.5.0",
     "Aspire.Hosting.Python": "13.5.4",
     "Aspire.Hosting.JavaScript": "13.5.4",

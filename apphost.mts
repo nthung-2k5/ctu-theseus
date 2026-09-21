@@ -6,26 +6,21 @@ import CONSTANTS from './schema/constants.json' with { type: 'json' }
 
 const builder = await createBuilder()
 
-const authSecret = process.env.BETTER_AUTH_SECRET
-if (!authSecret) {
-  throw new Error(
-    'BETTER_AUTH_SECRET is not set. Add it to .env (e.g. `openssl rand -base64 32`) before running the AppHost.',
-  )
+const jwtSecret = process.env.JWT_SECRET
+if (!jwtSecret) {
+  throw new Error('JWT_SECRET is not set. Add it to .env (e.g. `openssl rand -base64 32`) before running the AppHost.')
 }
 
 const db = await builder
   .addPostgres('database')
+  // uuidv7() is a Postgres-side column default (the schema relies on it), so this needs Postgres 18.
+  .withImageTag('18')
   .withDataVolume({
     name: 'ctu-theseus-database',
     isReadOnly: false,
   })
   .withPgAdmin()
   .addDatabase('ctu-theseus-db')
-
-const nats = await builder.addNats('nats').withJetStream().withDataVolume({
-  name: 'ctu-theseus-nats',
-  isReadOnly: false,
-})
 
 const s3AccessKey = await builder.addParameter('s3-access-key', {
   secret: true,
@@ -45,15 +40,17 @@ const rustfs = await builder
     name: 'ctu-theseus-rustfs',
     isReadOnly: false,
   })
-  .addBuckets([CONSTANTS.BUCKET_DATASETS, CONSTANTS.BUCKET_TRAINING, CONSTANTS.BUCKET_MODELS])
+  .addBuckets([CONSTANTS.BUCKET_DATASETS, CONSTANTS.BUCKET_TRAINING, CONSTANTS.BUCKET_MODELS, CONSTANTS.BUCKET_UPLOADS])
 
 const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/CommunityToolkit/Aspire/blob/ef0aa306095fb4c7fd0c3ad2fc8c92caa18d5e2d/src/CommunityToolkit.Aspire.Hosting.RustFs/RustFsResource.cs#L12
 
 const AI_WORKER_CUDA_IMAGE = 'nvidia/cuda:13.1.2-runtime-ubuntu24.04'
 
-// Moved to Docker because Ludwig can't work on Windows
-const worker = await builder
-  .addDockerfileBuilder('ai-worker', './ai_service', async (ctx) => {
+// The whole backend: the REST API, the job queue and Ludwig training/export/inference run in this one
+// process (a hard requirement, see theseus.lifespan.assert_single_process). It lives in Docker because
+// Ludwig can't work on Windows.
+const api = await builder
+  .addDockerfileBuilder('api', './ai_service', async (ctx) => {
     await ctx
       .builder()
       .from(AI_WORKER_CUDA_IMAGE)
@@ -80,40 +77,24 @@ const worker = await builder
   })
   .withContainerRuntimeArgs(['--gpus', 'all'])
   .withHttpEndpoint({
-    name: 'health',
+    name: 'http',
     targetPort: 8000,
     env: 'PORT',
   })
   .withHttpHealthCheck({
     path: '/health',
-    endpointName: 'health',
-  })
-  .withReference(nats)
-  .withEnvironment('S3_ENDPOINT', s3Endpoint)
-  .withEnvironment('S3_ACCESS_KEY', s3AccessKey)
-  .withEnvironment('S3_SECRET_KEY', s3SecretKey)
-  .waitFor(nats)
-  .waitFor(rustfs)
-  .withBindMount('./schema', '/schema', { isReadOnly: true })
-
-const gateway = await builder
-  .addBunApp('gateway', './server', 'index.ts')
-  .withHttpEndpoint({
-    port: 3000,
-    targetPort: 3000,
-    isProxied: false,
-    env: 'PORT',
+    endpointName: 'http',
   })
   .withReference(db)
-  .withReference(nats)
   .withEnvironment('S3_ENDPOINT', s3Endpoint)
   .withEnvironment('S3_ACCESS_KEY', s3AccessKey)
   .withEnvironment('S3_SECRET_KEY', s3SecretKey)
-  .withEnvironment('BETTER_AUTH_SECRET', authSecret)
+  .withEnvironment('JWT_SECRET', jwtSecret)
+  // Only needed if the browser reaches the app through a host the proxy doesn't forward (see verify_origin).
+  .withEnvironment('ALLOWED_ORIGINS', process.env.ALLOWED_ORIGINS ?? '')
   .waitFor(db)
-  .waitFor(nats)
   .waitFor(rustfs)
-  .waitFor(worker)
+  .withBindMount('./schema', '/schema', { isReadOnly: true })
 
 const web = await builder
   .addViteApp('web', './web')
@@ -123,17 +104,17 @@ const web = await builder
     port: 5173,
     isProxied: false,
   })
-  .withReference(gateway)
-  .waitFor(gateway)
+  .withReference(api)
+  .waitFor(api)
   .withExternalHttpEndpoints()
 
 await builder
   .addYarp('proxy')
   .withConfiguration(async (config) => {
     await config.addCatchAllRoute(web)
-    await config.addRoute('/api/{**catch-all}', gateway)
+    await config.addRoute('/api/{**catch-all}', api)
   })
-  .waitFor(gateway)
+  .waitFor(api)
   .waitFor(web)
 
 await builder.build().run()

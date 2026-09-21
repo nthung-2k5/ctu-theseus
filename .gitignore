@@ -219,3 +219,6 @@ pyrightconfig.json
 node_modules/
 dist/
 .aspire/
+
+# Orval output (regenerate with `bun run generate` in web/; source is schema/openapi.json)
+/web/lib/api/generated/

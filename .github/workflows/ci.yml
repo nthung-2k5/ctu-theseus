@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: biome check
+        run: bunx --bun @biomejs/biome check .
+
+  backend:
+    name: Backend (ruff + pytest + schema drift)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: theseus
+          POSTGRES_PASSWORD: theseus
+          POSTGRES_DB: theseus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U theseus"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URI: postgresql://theseus:theseus@127.0.0.1:5432/theseus_test
+    defaults:
+      run:
+        working-directory: ai_service
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --frozen
+      - name: ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - run: uv run pytest
+      - name: schema/openapi.json and task_registry.json are up to date
+        run: uv run python scripts/export_schema.py --check
+
+  web:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install web deps
+        run: bun install --frozen-lockfile
+        working-directory: web
+      # `bun run build` regenerates the Orval client from schema/openapi.json first (prebuild).
+      - name: Build
+        run: bun run build
+        working-directory: web
