@@ -9,6 +9,7 @@
   "BUCKET_DATASETS": "theseus-datasets",
   "BUCKET_TRAINING": "theseus-training",
   "BUCKET_MODELS": "theseus-models",
+  "BUCKET_UPLOADS": "theseus-uploads",
   "TRAINING_CONFIG_FILENAME": "config.yaml",
   "DATASET_VERSION_FILENAME": "dataset.parquet"
 }

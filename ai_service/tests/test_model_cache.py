@@ -1,7 +1,8 @@
 import asyncio
 
 import pytest
-from services.model_cache import ModelCache
+
+from theseus.services.model_cache import ModelCache
 
 
 class _FakeModel:
@@ -21,7 +22,7 @@ def cache(monkeypatch):
         return _FakeModel(run_id)
 
     monkeypatch.setattr(ModelCache, "_load_sync", staticmethod(fake_load_sync))
-    monkeypatch.setattr("services.model_cache.cleanup_temp", lambda *a, **k: None)
+    monkeypatch.setattr("theseus.services.model_cache.cleanup_temp", lambda *a, **k: None)
 
     instance = ModelCache(max_size=2)
     instance.load_calls = load_calls
@@ -64,7 +65,7 @@ async def test_failed_load_does_not_poison_the_cache(monkeypatch):
         return _FakeModel(run_id)
 
     monkeypatch.setattr(ModelCache, "_load_sync", staticmethod(flaky_load))
-    monkeypatch.setattr("services.model_cache.cleanup_temp", lambda *a, **k: None)
+    monkeypatch.setattr("theseus.services.model_cache.cleanup_temp", lambda *a, **k: None)
     cache = ModelCache(max_size=2)
 
     with pytest.raises(RuntimeError):

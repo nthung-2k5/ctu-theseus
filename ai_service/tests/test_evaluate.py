@@ -1,5 +1,6 @@
 import pandas as pd
-from services.evaluate import MAX_TOP_ERRORS, _pick_eval_split, build_evaluation_report
+
+from theseus.services.evaluate import MAX_TOP_ERRORS, _pick_eval_split, build_evaluation_report
 
 SPLIT_COL = "split"
 ITEM_ID_COL = "_theseus_item_id"
@@ -94,9 +95,7 @@ def test_category_report_labels_axes_from_idx2str_not_row_order():
             "overall_stats": {"token_accuracy": 1.0, "avg_f1_score_macro": 1.0},
         }
     }
-    predictions = pd.DataFrame(
-        {"class_predictions": ["dog", "cat", "bird"], "class_probability": [0.9, 0.8, 0.7]}
-    )
+    predictions = pd.DataFrame({"class_predictions": ["dog", "cat", "bird"], "class_probability": [0.9, 0.8, 0.7]})
     model = _FakeModel(output_feature, {"class": {"idx2str": idx2str}}, eval_stats, predictions)
 
     result = build_evaluation_report(model, df, SPLIT_COL, ITEM_ID_COL)

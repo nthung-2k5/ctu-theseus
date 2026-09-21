@@ -8,11 +8,25 @@ dependencies = [
   # Schema generation
   'pydantic',
 
-  # Health endpoint
-  'aiohttp',
+  # HTTP API
+  'fastapi',
+  'uvicorn[standard]',
+  'python-multipart',
+  'pydantic-settings',
 
-  # NATS messaging
-  'nats-py',
+  # Database
+  'sqlalchemy[asyncio]',
+  'asyncpg',
+  'alembic',
+
+  # Auth
+  'pyjwt',
+  'argon2-cffi',
+
+  # Snapshots / config / ids
+  'pyarrow',
+  'pyyaml',
+  'uuid-utils',
 
   # S3-compatible storage
   'boto3',
@@ -31,10 +45,12 @@ dependencies = [
   # Telemetry
   "opentelemetry-sdk>=1.44.0",
   "opentelemetry-exporter-otlp-proto-http>=1.44.0",
+  "opentelemetry-instrumentation-fastapi",
+  "opentelemetry-instrumentation-sqlalchemy",
 ]
 
 [dependency-groups]
-dev = ["datamodel-code-generator>=0.72.3", "pytest>=9.1.1", "pytest-asyncio>=1.0.0"]
+dev = ["pytest>=9.1.1", "pytest-asyncio>=1.0.0", "httpx", "ruff"]
 
 [tool.pytest.ini_options]
 # Modules are imported as top-level (e.g. `from services.predict import ...`)
@@ -51,3 +67,14 @@ torchaudio = [{ index = "pytorch-cu130" }]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["migrations/versions", "schema", "theseus/export/templates"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"theseus/export/readme.py" = ["E501"]  # README prose

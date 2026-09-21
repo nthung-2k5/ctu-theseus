@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{RUN_NAME}}</title>
+  <meta name="description" content="Theseus-exported {{TASK}} model — runs entirely on-device." />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icon.svg" />
+  <meta name="theme-color" content="#1864ab" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main>
+    <h1>{{RUN_NAME}}</h1>
+    <p class="task">{{TASK}}</p>
+    <p class="note">Runs fully on-device in your browser — nothing is uploaded.</p>
+
+    <label class="dropzone" id="dropzone" for="file-input">
+      <span id="dropzone-label">Choose an image, or drag one here</span>
+      <input id="file-input" type="file" accept="image/*" hidden />
+    </label>
+    <img id="preview" hidden alt="preview" />
+
+    <section id="results" hidden>
+      <h2>Predictions</h2>
+      <ul id="predictions"></ul>
+    </section>
+
+    <section id="verify-section">
+      <button id="verify-btn" type="button">Run built-in self-check</button>
+      <p id="verify-result"></p>
+    </section>
+
+    <p id="status" role="status"></p>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -10,9 +10,12 @@ produced the file and every bundle silently lost its Verify section.
 These tests pin the row-selection shape without needing a real Ludwig model.
 """
 
+import numpy as np
 import pandas as pd
 import pytest
-from constants import SPLIT_COLUMN_NAME
+
+from theseus.constants import SPLIT_COLUMN_NAME
+from theseus.jobs.export import _shape_input_value
 
 
 def _select_sample(df: pd.DataFrame) -> pd.DataFrame:
@@ -76,9 +79,6 @@ def test_to_frame_on_a_dataframe_is_the_original_bug():
 # ──────────────────────────────────────────────────────────────────
 # _shape_input_value — single-feature scalar vs. multi-feature (tabular) record
 # ──────────────────────────────────────────────────────────────────
-
-import numpy as np
-from tasks.export import _shape_input_value
 
 
 class _FakeFeature:

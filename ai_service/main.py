@@ -1,65 +1,42 @@
-import asyncio
+"""Process entrypoint: apply database migrations, then serve the API.
+
+    python main.py
+
+Migrations run here, before uvicorn starts, and NOT in the FastAPI lifespan: a slow migration
+inside lifespan would fail the health check, and it is the wrong place for it structurally.
+
+The service must run as exactly ONE process (see theseus.lifespan.assert_single_process), so this
+never passes workers or reload to uvicorn.
+"""
+
 import logging
 import os
+from pathlib import Path
 
-from aiohttp import web
-from tasks import close_task_workers, run_task_workers
-from telemetry import init_telemetry
+import uvicorn
+from alembic import command
+from alembic.config import Config
 
-logger = logging.getLogger(__name__)
+from theseus.settings import get_settings
 
-
-async def healthcheck(_request):
-    """Health check endpoint for Docker / load-balancer probes."""
-    return web.json_response({"status": "healthy"})
+HERE = Path(__file__).resolve().parent
 
 
-async def task_worker_context(_app):
-    """
-    Context manager to tie background tasks to the app's lifecycle.
-    This ensures NATS workers don't block the web server and shut down cleanly.
-    """
-    logger.info("Starting AI Microservice...")
-
-    worker_task = asyncio.create_task(run_task_workers())
-
-    # Yield control back to aiohttp so it can start the web server
-    yield
-
-    # Shutdown sequence begins here (triggered by SIGINT/SIGTERM)
-    logger.info("Shutting down AI Microservice...")
-
-    # Close the NATS connections first to stop accepting new work
-    await close_task_workers()
-
-    # Cancel the infinite 'while True' polling loops
-    worker_task.cancel()
-    try:
-        # Await the cancelled task to ensure it exits cleanly
-        await worker_task
-    except asyncio.CancelledError:
-        logger.info("AI Microservice cleanly stopped.")
+def run_migrations() -> None:
+    cfg = Config(str(HERE / "alembic.ini"))
+    cfg.set_main_option("script_location", str(HERE / "migrations"))
+    command.upgrade(cfg, "head")
 
 
-def main():
-    init_telemetry()
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+    settings = get_settings()
+    if not os.environ.get("SKIP_MIGRATIONS"):
+        run_migrations()
+    from theseus.app import app
 
-    # Set up the aiohttp app
-    app = web.Application()
-    app.router.add_get("/health", healthcheck)
-
-    app.cleanup_ctx.append(task_worker_context)
-
-    # web.run_app automatically handles the asyncio event loop,
-    # OS signals (SIGINT/SIGTERM), and graceful shutdown.
-    port = int(os.environ.get("PORT", "8080"))
-    web.run_app(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=settings.port, log_config=None)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    )
-
     main()

@@ -1,121 +1,113 @@
 # ai_service
 
-The Python worker for CTU Theseus. Consumes NATS JetStream tasks dispatched by the gateway
-(`server/`), runs [Ludwig](https://ludwig.ai) for AutoML training/export/inference, and
-publishes progress events and artifacts back over NATS/S3. Never talks to Postgres directly —
-all durable state lives in the gateway's database; this service only reads/writes S3 objects and
-publishes events.
+The CTU Theseus backend: a single FastAPI service that serves the REST API, owns the Postgres
+database, runs the durable job queue, and runs [Ludwig](https://ludwig.ai) for AutoML
+training / export / inference. (It used to be only the Ludwig worker behind a separate Bun
+gateway, joined by NATS. That gateway and NATS are gone.)
 
-See the repo root `README.md` for the full architecture picture, NATS subject topology, and S3
-key layout. This file covers just this package.
+See the repo root `README.md` for the architecture picture (job queue, restart recovery, run
+events, auth) and the S3 key layout. This file covers just this package.
 
 ## Running
 
-Managed by the Aspire AppHost (`../apphost.mts`, `addDockerfileBuilder('ai-worker',
-'./ai_service', ...)`) — normally you don't run this directly, `aspire run` from the repo root
-starts it alongside Postgres/NATS/RustFS/the gateway. If you need to run it standalone for
-debugging:
+Managed by the Aspire AppHost (`../apphost.mts`, `addDockerfileBuilder('api', './ai_service', ...)`).
+Normally you don't run this directly: `aspire run` from the repo root starts it alongside
+Postgres and RustFS. To run it standalone (needs Postgres 18 and an S3-compatible store):
 
 ```bash
 cd ai_service
 uv sync
-uv run main.py
+uv run python main.py      # applies Alembic migrations, then serves on $PORT (default 8000)
 ```
 
-Requires `NATS_URI` (or Aspire's injected connection string env var), `S3_ENDPOINT`,
-`S3_ACCESS_KEY`, `S3_SECRET_KEY`, and `PORT` (health endpoint) in the environment — Aspire injects
-all of these automatically when launched via `aspire run`. `S3_ACCESS_KEY`/`S3_SECRET_KEY` must
-match the gateway's (`server/lib/config.ts`); both default to `ctu-theseus`/`ctu-theseus-secret`
-in development and are required outright when `ENVIRONMENT=production`.
+Environment (Aspire injects all of these; `theseus/settings.py` is the reference):
+
+| Variable | Purpose |
+|---|---|
+| `CTU_THESEUS_DB_URI` | Postgres connection string (`postgres://` is converted to `postgresql+asyncpg://`) |
+| `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | object store |
+| `JWT_SECRET` | signs access tokens |
+| `ALLOWED_ORIGINS` | extra origins allowed to make cookie-authenticated writes |
+| `ENVIRONMENT` | `production` requires the values above explicitly and makes cookies Secure |
+| `COOKIE_SECURE`, `PORT`, `TEMP_DIR`, `INFERENCE_*`, `JOB_*`, `RUN_LOG_MAX_ROWS` | tuning |
+
+**Run exactly one process.** No `--reload`, no `--workers`, no gunicorn: `theseus.lifespan`
+refuses to start otherwise. Event fanout, the GPU lanes, the model cache, the rate limiter and the
+abort registry all live in process memory.
 
 ## Layout
 
 ```
-main.py              aiohttp health endpoint + NATS worker lifecycle
-config.py             environment/config loading
-constants.py          shared constants (bucket names, filenames — mirrors server/lib/config.ts)
-telemetry.py           OpenTelemetry setup, trace context propagation over NATS headers
+main.py                 migrations, then uvicorn
+alembic.ini, migrations/  Alembic (async env); 0001_baseline is the whole schema
+scripts/export_schema.py  writes/checks ../schema/openapi.json and ../schema/task_registry.json
 
-tasks/
-  __init__.py          registers a consumer/subscription per subject (train/export/inference are
-                        JetStream pull consumers; inference-warm is core NATS — see the
-                        "Inference transport" note below)
-  train.py             theseus.task.train.{runId} — compiles+runs a Ludwig training job
-  export.py            theseus.task.export.{jobId} — converts a trained model to onnx/torchscript
-  inference.py          theseus.task.inference.{inferenceId} — runs one inference job and
-                        publishes its result; also theseus.inference.warm.{runId}
-                        (fire-and-forget preload)
+theseus/
+  app.py                create_app(): side-effect free (no DB, S3 or torch import), so the schema
+                        export script and tests can import it
+  lifespan.py           startup: single-process check, event writer, log handler, recovery,
+                        dispatcher, reapers
+  settings.py, constants.py, telemetry.py, metrics.py, errors.py, deps.py
+  db/                   engine/session, enums, models (21 tables)
+  auth/                 password (argon2id), JWT, refresh tokens, API keys, rate limiter
+  routers/              one module per area; /api/v1 is the public API-key surface
+  schemas/              pydantic request/response models (these are the OpenAPI contract)
+  services/             domain logic: task_registry, ludwig_config, snapshot (parquet), sweep,
+                        datasets, training, inference, storage, evaluate, predict, model_cache, ...
+  jobs/                 queue (claim/lease/CAS), dispatcher + lanes, train, export, inference,
+                        abort, recovery, reapers
+  events/               single-writer run_events, in-process bus, SSE stream, log capture
+  export/               bundle assembly, preprocessing decompiler, README generation, templates/
 
-services/
-  nats.py               connection setup, stream/consumer declarations, typed publish helpers
-  storage.py             S3 helpers (download training inputs, upload results/artifacts)
-  model_cache.py         in-process LRU cache of loaded LudwigModel instances, keyed by run id —
-                          see "Inference transport" below
-  predict.py             build_inference_output() — the tagged-union shape /api/inference
-                          returns (classification/regression/text/tokens); parse_prediction_row()
-                          — the flat {label: confidence} shape used only by export.py's
-                          golden-sample verification step, kept separate since every generated
-                          devkit/app client depends on that exact shape
-
-schema/                 Pydantic models generated from server/lib/schema.ts — do not hand-edit,
-                        regenerate via `bun run server/compile_schema.ts` from the repo root
-
-tests/                  pytest; pythonpath=. is set in pyproject.toml so `from services.x import y`
-                        resolves the same way it does at runtime (main.py's cwd is ai_service/)
+tests/                  pytest; DB tests need Postgres 18 and skip when it is unreachable
 ```
 
 ## Key implementation notes
 
-- **`training_set_metadata.json` is the source of truth for label indices.** Ludwig writes this
-  alongside the trained model (`theseus-training/{runId}/results/**/model/`); its `idx2str` array
-  is the only correct mapping from a model's output index to a class name. `inference.py` reads
-  it for live inference; the gateway's export bundle assembly (`server/lib/export/metadata.ts`)
-  reads the same file for generated-client label decoding. Never substitute the `label_classes`
-  Postgres table for this — Postgres doesn't know Ludwig's internal index assignment.
+- **The status column is the lock.** Every state transition is a guarded
+  `UPDATE ... WHERE status = <expected> RETURNING`; zero rows means another actor got there first
+  and the caller does nothing. Follow this for any new job kind or transition. Handlers must be
+  idempotent for the same reason (startup recovery can re-queue a job whose first attempt already
+  wrote something).
+- **`training_set_metadata.json` is the source of truth for label indices.** Ludwig writes it
+  under `theseus-training/{runId}/results/**/model/`; its `idx2str` array is the only correct
+  mapping from a model's output index to a class name. Live inference and export bundle assembly
+  (`theseus/export/metadata.py`) both read it. Never substitute the `label_classes` table:
+  Postgres doesn't know the index Ludwig assigned, and getting this wrong yields a bundle that
+  runs, predicts confidently, and mislabels everything.
+- **Only one thing inserts into `run_events`.** `events/writer.py` is the single writer, because a
+  `BIGSERIAL` is not commit-ordered. Emitters (the training thread, request handlers, reapers)
+  enqueue; the writer inserts and applies the projection in the same transaction.
+- **Cancellation** is `cancel_requested_at` (durable) plus a `threading.Event` (fast path). Training
+  raises `TrainingAborted(Exception)`, never `KeyboardInterrupt`.
 - **`predict.py`'s two functions serve different consumers, deliberately.** `parse_prediction_row`
-  turns raw Ludwig prediction output into a sorted `{label: confidence}` dict — used only for
-  producing the `expected.json` golden sample that shipped devkit/app export bundles verify
-  themselves against (every generated client, in every language, decodes that exact shape).
-  `build_inference_output` is the live `/api/inference` response: a tagged union
-  (`classification`/`regression`/`text`/`tokens`) since a flat `{label: confidence}` dict can't
-  represent generated text or a token-tagged sequence. Don't merge them — changing
-  `parse_prediction_row`'s shape breaks every previously-exported bundle's verify step.
-- **Export golden sample.** `tasks/export.py` runs one real test-split row through the trained
-  `LudwigModel.predict` after conversion and uploads it as `expected.json`
-  (`theseus-models/{runId}/expected.json`). This is what the generated devkit/app bundle's
-  `verify` script checks itself against — without it, a bug in the generated client's
-  reimplemented preprocessing would ship silently.
-- **Inference transport.** Inference is dispatched onto `THESEUS_TASKS` like train/export
-  (`theseus.task.inference.{inferenceId}`, `subscribe_tasks` durable `"inference-worker"`) — not
-  the core-NATS request/reply an earlier version used, which had no persistence, no redelivery,
-  and a hard client-side timeout a cold model load routinely exceeded. `handle_inference_task`
-  publishes the terminal result to `theseus.inference.result.{inferenceId}`
-  (`THESEUS_INFERENCE_RESULTS`, `max_msgs_per_subject: 1`, 1-hour retention) on success;
-  `on_inference_permanent_failure` does the same once `_consume_loop` exhausts retries, so a
-  client polling `GET /api/inference/:runId/jobs/:inferenceId` never waits out the stream's full
-  retention for nothing. There is deliberately no "pending"/"running" message — the poll route
-  treats the absence of a result as pending. Because a task can be redelivered
-  (`max_deliver=3`), a file-backed payload's upload is *not* deleted mid-attempt
-  (`_resolve_file_input`); it's deleted once the outcome is final, in `handle_inference_task` on
-  success or `on_inference_permanent_failure` after exhausted retries — deleting it eagerly would
-  make a retry after a transient failure fail permanently with `FileNotFoundError`.
-
-  Loaded models are cached in-process by `services/model_cache.py` (`model_cache`), an LRU
-  bounded by `INFERENCE_MODEL_CACHE_SIZE` (`config.py`) — `LudwigModel.load()` deserializing the
-  full checkpoint on every request was the dominant cost before this existed. The gateway fires
-  `theseus.inference.warm.{runId}` (fire-and-forget core NATS, no reply, `handle_inference_warm`)
-  when a user selects a model in the inference UI, to populate the cache before their first real
-  request — this stays a request/reply-adjacent fire-and-forget signal rather than a dispatched
-  task since there's no result to poll for.
+  yields the sorted `{label: confidence}` dict used only for the `expected.json` golden sample that
+  every generated devkit/app client verifies itself against. `build_inference_output` is the live
+  inference response: a tagged union (`classification`/`regression`/`text`/`tokens`). Don't merge
+  them: changing `parse_prediction_row`'s shape breaks every previously exported bundle's verify step.
+- **Export golden sample.** After conversion the export job runs one real test-split row through the
+  trained model and uploads it as `expected.json`; the bundle's verify script checks against it.
+- **Inference.** Sync predict (`/api/v1/predict/{runId}/sync`) awaits a shielded job with a bounded
+  wait and falls back to `202 + inferenceId` on timeout (the job keeps running). Async and batch
+  inputs go to the `theseus-uploads` bucket and are deleted once the job ends. Loaded models are
+  cached in-process by `services/model_cache.py` (LRU, `INFERENCE_MODEL_CACHE_SIZE`), and
+  `POST /api/inference/{runId}/warm` preloads one.
+- **Templates are package data** (`theseus/export/templates/`), read from the installed package,
+  and must be present in the Docker image (the Dockerfile copies the whole project).
+- **Postgres generic plans.** After a prepared statement has run five times, Postgres may switch to
+  a generic plan in which a bind parameter in an `ON CONFLICT ... WHERE` cannot match a partial
+  unique index. The classify path therefore writes that predicate as a literal; keep it that way.
 
 ## Testing
 
 ```bash
-uv run pytest -v
+uv run pytest -q
+uv run ruff check . && uv run ruff format --check .
+uv run python scripts/export_schema.py --check     # committed OpenAPI/task-registry are current
 ```
 
-Tests are pure-function unit tests — no NATS or S3, though the suite does import `torch` and
-`ludwig` (via `tasks/inference` → `services/model_cache`), so the full dependency set has to be
-installed to collect it. See `tests/test_predict.py` for the pattern. There is deliberately no integration test that spins up
-a real Ludwig training run; that needs the full Aspire stack and is a manual smoke-test path
-instead (see the repo root README).
+The suite runs against a real Postgres 18 (`TEST_DATABASE_URI`, default
+`postgres://theseus:theseus@127.0.0.1:55432/theseus_test`; the test database is dropped and
+recreated). Use `127.0.0.1`, not `localhost`, on Windows (IPv6 makes asyncpg hang). S3, Ludwig and
+the GPU are faked, so a real training run, real S3 and CUDA paths remain a manual smoke test via
+`aspire run`.

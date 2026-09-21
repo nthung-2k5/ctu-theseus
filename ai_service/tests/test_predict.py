@@ -1,14 +1,13 @@
 import pandas as pd
-from services.predict import parse_prediction_row
+
+from theseus.services.predict import build_batch_result_frame, build_inference_output, parse_prediction_row
 
 
 def test_category_with_idx2str_list():
     predictions = pd.DataFrame({"class_probabilities": [[0.1, 0.7, 0.2]]})
     idx2str = ["cat", "dog", "bird"]
 
-    result = parse_prediction_row(
-        "class", "category", predictions, idx2str, threshold=0.0
-    )
+    result = parse_prediction_row("class", "category", predictions, idx2str, threshold=0.0)
 
     assert result == {"dog": 0.7, "bird": 0.2, "cat": 0.1}
 
@@ -17,9 +16,7 @@ def test_category_threshold_filters_low_confidence():
     predictions = pd.DataFrame({"class_probabilities": [[0.1, 0.7, 0.2]]})
     idx2str = ["cat", "dog", "bird"]
 
-    result = parse_prediction_row(
-        "class", "category", predictions, idx2str, threshold=0.5
-    )
+    result = parse_prediction_row("class", "category", predictions, idx2str, threshold=0.5)
 
     assert result == {"dog": 0.7}
 
@@ -27,9 +24,7 @@ def test_category_threshold_filters_low_confidence():
 def test_category_with_dict_probabilities():
     predictions = pd.DataFrame({"class_probabilities": [{"cat": 0.3, "dog": 0.6}]})
 
-    result = parse_prediction_row(
-        "class", "category", predictions, idx2str=None, threshold=0.0
-    )
+    result = parse_prediction_row("class", "category", predictions, idx2str=None, threshold=0.0)
 
     assert result == {"dog": 0.6, "cat": 0.3}
 
@@ -37,9 +32,7 @@ def test_category_with_dict_probabilities():
 def test_number_falls_back_to_predictions_column():
     predictions = pd.DataFrame({"target_predictions": [42.5]})
 
-    result = parse_prediction_row(
-        "target", "number", predictions, idx2str=None, threshold=0.0
-    )
+    result = parse_prediction_row("target", "number", predictions, idx2str=None, threshold=0.0)
 
     assert result == {"target": 42.5}
 
@@ -47,9 +40,7 @@ def test_number_falls_back_to_predictions_column():
 def test_missing_probability_column_returns_empty():
     predictions = pd.DataFrame({"other_column": [1]})
 
-    result = parse_prediction_row(
-        "class", "category", predictions, idx2str=["a", "b"], threshold=0.0
-    )
+    result = parse_prediction_row("class", "category", predictions, idx2str=["a", "b"], threshold=0.0)
 
     assert result == {}
 
@@ -58,9 +49,7 @@ def test_results_sorted_descending_by_confidence():
     predictions = pd.DataFrame({"class_probabilities": [[0.2, 0.5, 0.3]]})
     idx2str = ["a", "b", "c"]
 
-    result = parse_prediction_row(
-        "class", "category", predictions, idx2str, threshold=0.0
-    )
+    result = parse_prediction_row("class", "category", predictions, idx2str, threshold=0.0)
 
     assert list(result.keys()) == ["b", "c", "a"]
 
@@ -70,8 +59,6 @@ def test_results_sorted_descending_by_confidence():
 # (InferenceResponseSchema.output in server/lib/schema.ts), distinct from
 # parse_prediction_row above (kept only for the export golden-sample path).
 # ──────────────────────────────────────────────────────────────────
-
-from services.predict import build_inference_output
 
 
 def test_classification_from_idx2str_list():
@@ -165,8 +152,6 @@ def test_token_sequence_output_without_input_tokens_still_returns_tags():
 # build_batch_result_frame — batch inference's input + predictions concat
 # ──────────────────────────────────────────────────────────────────
 
-from services.predict import build_batch_result_frame
-
 
 def test_batch_result_frame_concatenates_inputs_and_predictions_columns():
     input_df = pd.DataFrame({"age": [34, 52], "income": [52000, 61000]})
@@ -175,7 +160,12 @@ def test_batch_result_frame_concatenates_inputs_and_predictions_columns():
     result = build_batch_result_frame(input_df, predictions)
 
     assert list(result.columns) == ["age", "income", "class_predictions", "class_probability"]
-    assert result.iloc[0].to_dict() == {"age": 34, "income": 52000, "class_predictions": "approved", "class_probability": 0.9}
+    assert result.iloc[0].to_dict() == {
+        "age": 34,
+        "income": 52000,
+        "class_predictions": "approved",
+        "class_probability": 0.9,
+    }
     assert len(result) == 2
 
 
