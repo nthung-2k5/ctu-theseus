@@ -12,7 +12,7 @@ import { Badge, Button, Card, Group, Select, Stack, Table, Text, Title } from '@
 import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon, StopIcon, TrophyIcon } from '@phosphor-icons/react'
 import { EmptyState, QueryBoundary, StatusBadge } from '@public/components/ui'
-import { rest } from '@public/lib/api'
+import { cancelSweep as cancelSweepRequest } from '@public/lib/api/generated/sweeps/sweeps'
 import { sweepDetailQueryOptions, useSweepDetail } from '@public/lib/queries'
 import type { SweepSearchSpace, SweepTrial } from '@public/store/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -52,8 +52,7 @@ export function SweepDetailPanel({
 
   const cancelSweep = useMutation({
     mutationFn: async () => {
-      const { error } = await rest.sweeps({ sweepId }).cancel.post()
-      if (error) throw error
+      await cancelSweepRequest(sweepId)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: sweepDetailQueryOptions(sweepId).queryKey })

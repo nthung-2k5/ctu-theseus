@@ -19,7 +19,12 @@ import {
   PageHeader,
   QueryBoundary,
 } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import {
+  getCreateApiKeyMutationOptions,
+  getListApiKeysQueryKey,
+  getListApiKeysQueryOptions,
+  revokeApiKey,
+} from '@public/lib/api/generated/api-keys/api-keys'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
@@ -33,11 +38,10 @@ interface ApiKeySummary {
 }
 
 export function ApiKeysPage() {
-  const eden = useEden()
   const queryClient = useQueryClient()
-  const keysQueryKey = eden.api.keys.get.queryKey()
+  const keysQueryKey = getListApiKeysQueryKey()
 
-  const { data, isLoading, isError, refetch } = useQuery(eden.api.keys.get.queryOptions())
+  const { data, isLoading, isError, refetch } = useQuery(getListApiKeysQueryOptions())
   const keys: ApiKeySummary[] = (data as { keys: ApiKeySummary[] } | undefined)?.keys ?? []
 
   const [createOpened, { open: openCreate, close: closeCreateModal }] = useDisclosure(false)
@@ -55,7 +59,7 @@ export function ApiKeysPage() {
   })
 
   const createKey = useMutation({
-    ...eden.api.keys.post.mutationOptions(),
+    ...getCreateApiKeyMutationOptions(),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: keysQueryKey })
       setNewKey((result as { key: string }).key)
@@ -65,8 +69,7 @@ export function ApiKeysPage() {
 
   const revokeKey = useMutation({
     mutationFn: async (keyId: string) => {
-      const { error } = await rest.keys({ keyId }).delete()
-      if (error) throw error
+      await revokeApiKey(keyId)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keysQueryKey })
@@ -202,7 +205,7 @@ export function ApiKeysPage() {
             </Group>
           </Stack>
         ) : (
-          <form onSubmit={form.onSubmit((values) => createKey.mutate({ name: values.name }))}>
+          <form onSubmit={form.onSubmit((values) => createKey.mutate({ data: { name: values.name } }))}>
             <Stack gap="md">
               <TextInput
                 label="Name"

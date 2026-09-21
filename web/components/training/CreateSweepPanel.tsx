@@ -21,8 +21,8 @@ import {
 } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { FlaskIcon } from '@phosphor-icons/react'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectDetail, SweepSearchSpace, SweepStrategyValue } from '@public/store/types'
-import { getTaskDescriptor } from '@server/lib/tasks'
 
 export interface SweepStartConfig {
   name: string

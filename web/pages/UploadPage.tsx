@@ -18,9 +18,9 @@ import { PageHeader } from '@public/components/ui'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
 import { formatBytes } from '@public/lib/format'
 import { projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import { type StagedDraft, useUploadQueue } from '@public/lib/uploadQueue'
 import type { LabelClass, SplitType } from '@public/store/types'
-import { getTaskDescriptor } from '@server/lib/tasks'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -109,9 +109,7 @@ function FileStagePanel({
             <CloudArrowUpIcon size={24} />
           </ThemeIcon>
           <div>
-            <Text fw={600}>
-              Drop files here or click to browse
-            </Text>
+            <Text fw={600}>Drop files here or click to browse</Text>
             <Text size="xs" c="dimmed">
               Nothing is uploaded until you review the batch and press Upload.
             </Text>

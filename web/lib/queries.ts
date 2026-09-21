@@ -1,30 +1,55 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
-import { edenOptions } from './api'
+import type { SplitType } from './api/enums'
+import { getListClassesQueryKey, getListClassesQueryOptions } from './api/generated/classes/classes'
+import {
+  getGetDatasetHealthQueryOptions,
+  getListItemsQueryKey,
+  getListItemsQueryOptions,
+} from './api/generated/datasets/datasets'
+import {
+  getGetProjectQueryKey,
+  getGetProjectQueryOptions,
+  getListProjectsQueryKey,
+  getListProjectsQueryOptions,
+} from './api/generated/projects/projects'
+import { getGetSweepQueryOptions, getListSweepsQueryOptions } from './api/generated/sweeps/sweeps'
+import {
+  getGetRunEvaluationErrorsQueryOptions,
+  getGetRunEvaluationQueryOptions,
+  getGetRunQueryOptions,
+  getListRunsQueryKey,
+  getListRunsQueryOptions,
+} from './api/generated/training/training'
 
-export const projectsQueryOptions = () => edenOptions.api.projects.get.queryOptions()
+/**
+ * Orval types `queryFn` as possibly `skipToken`, which `useSuspenseQuery` (route loaders, panels) rejects.
+ * These option factories always supply a real function, so narrow it once here.
+ */
+function defined<T extends { queryFn?: unknown }>(options: T) {
+  return options as Omit<T, 'queryFn'> & { queryFn: Exclude<T['queryFn'], symbol | undefined> }
+}
 
-export const projectDetailQueryOptions = (projectId: string) =>
-  edenOptions.api.projects({ projectId }).get.queryOptions()
+export const projectsQueryOptions = () => defined(getListProjectsQueryOptions())
 
-export const labelClassesQueryOptions = (projectId: string) =>
-  edenOptions.api.projects({ projectId }).classes.get.queryOptions()
+export const projectDetailQueryOptions = (projectId: string) => defined(getGetProjectQueryOptions(projectId))
 
-export const datasetHealthQueryOptions = (projectId: string) =>
-  edenOptions.api.projects({ projectId }).dataset.health.get.queryOptions()
+export const labelClassesQueryOptions = (projectId: string) => defined(getListClassesQueryOptions(projectId))
+
+export const datasetHealthQueryOptions = (projectId: string) => defined(getGetDatasetHealthQueryOptions(projectId))
 
 export const projectItemsQueryOptions = (
   projectId: string,
   query?: {
     versionId?: string
-    split?: 'train' | 'validation' | 'test'
+    split?: SplitType
     classId?: string
     search?: string
     page?: number
     perPage?: number
     sort?: 'newest' | 'oldest' | 'filename'
   },
-) => edenOptions.api.projects({ projectId }).items.get.queryOptions(query)
+) => defined(getListItemsQueryOptions(projectId, query))
 
 /**
  * Polls every 3s while any run is queued/running — cheap, and it's what
@@ -32,7 +57,7 @@ export const projectItemsQueryOptions = (
  * status/metrics come from the SSE stream (useRunEvents) instead.
  */
 export const trainingRunsQueryOptions = (projectId: string) => ({
-  ...edenOptions.api.projects({ projectId }).runs.get.queryOptions(),
+  ...defined(getListRunsQueryOptions(projectId)),
   refetchInterval: (query: { state: { data: unknown } }) => {
     const data = query.state.data as { runs: { status: string }[] } | undefined
     if (!data) return false
@@ -41,21 +66,21 @@ export const trainingRunsQueryOptions = (projectId: string) => ({
   },
 })
 
-export const trainingRunDetailQueryOptions = (runId: string) => edenOptions.api.runs({ runId }).get.queryOptions()
+export const trainingRunDetailQueryOptions = (runId: string) => defined(getGetRunQueryOptions(runId))
 
 /** Polls while the run is still active — no evaluation row exists until the worker finishes training. */
 export const runEvaluationQueryOptions = (runId: string, isActive: boolean) => ({
-  ...edenOptions.api.runs({ runId }).evaluation.get.queryOptions(),
+  ...defined(getGetRunEvaluationQueryOptions(runId)),
   retry: false,
   refetchInterval: (isActive ? 5000 : false) as number | false,
 })
 
 export const runEvaluationErrorsQueryOptions = (runId: string, page: number, classId?: string) =>
-  edenOptions.api.runs({ runId }).evaluation.errors.get.queryOptions({ page, ...(classId && { classId }) })
+  defined(getGetRunEvaluationErrorsQueryOptions(runId, { page, ...(classId && { classId }) }))
 
 /** Polls while any sweep still has a running/queued trial. */
 export const projectSweepsQueryOptions = (projectId: string) => ({
-  ...edenOptions.api.projects({ projectId }).sweeps.get.queryOptions(),
+  ...defined(getListSweepsQueryOptions(projectId)),
   refetchInterval: (query: { state: { data: unknown } }) => {
     const data = query.state.data as { sweeps: { status: string }[] } | undefined
     if (!data) return false
@@ -64,7 +89,7 @@ export const projectSweepsQueryOptions = (projectId: string) => ({
 })
 
 export const sweepDetailQueryOptions = (sweepId: string) => ({
-  ...edenOptions.api.sweeps({ sweepId }).get.queryOptions(),
+  ...defined(getGetSweepQueryOptions(sweepId)),
   refetchInterval: (query: { state: { data: unknown } }) => {
     const data = query.state.data as { sweep: { status: string } } | undefined
     return data?.sweep.status === 'running' ? 5000 : false
@@ -91,7 +116,7 @@ export function useProjectItems(
   projectId: string | undefined,
   query?: {
     versionId?: string
-    split?: 'train' | 'validation' | 'test'
+    split?: SplitType
     classId?: string
     search?: string
     page?: number
@@ -146,18 +171,18 @@ export function useSweepDetail(sweepId: string | undefined) {
  */
 export function invalidateProjectScope(queryClient: QueryClient, projectId: string) {
   return Promise.all([
-    queryClient.invalidateQueries({ queryKey: edenOptions.api.projects({ projectId }).get.queryKey() }),
-    queryClient.invalidateQueries({ queryKey: edenOptions.api.projects({ projectId }).items.get.queryKey() }),
-    queryClient.invalidateQueries({ queryKey: edenOptions.api.projects({ projectId }).classes.get.queryKey() }),
+    queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) }),
+    queryClient.invalidateQueries({ queryKey: getListItemsQueryKey(projectId) }),
+    queryClient.invalidateQueries({ queryKey: getListClassesQueryKey(projectId) }),
   ])
 }
 
 /** Invalidate the project list (after create/rename/delete). */
 export function invalidateProjectList(queryClient: QueryClient) {
-  return queryClient.invalidateQueries({ queryKey: edenOptions.api.projects.get.queryKey() })
+  return queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() })
 }
 
 /** Invalidate a project's training runs (after dispatch/cancel/delete). */
 export function invalidateRunScope(queryClient: QueryClient, projectId: string) {
-  return queryClient.invalidateQueries({ queryKey: edenOptions.api.projects({ projectId }).runs.get.queryKey() })
+  return queryClient.invalidateQueries({ queryKey: getListRunsQueryKey(projectId) })
 }

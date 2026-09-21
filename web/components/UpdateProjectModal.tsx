@@ -2,8 +2,9 @@ import { Button, Group, Stack, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
-import { useEden } from '@public/lib/api'
-import { assert } from '@public/lib/assert'
+import { apiErrorMessage } from '@public/lib/api/client'
+import { getUpdateProjectMutationOptions } from '@public/lib/api/generated/projects/projects'
+import { invalidateProjectList, invalidateProjectScope } from '@public/lib/queries'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 /** Shared by DashboardPage's and ProjectPage's "Edit project" modals — same form, same mutation, same error handling. */
@@ -25,33 +26,25 @@ export function UpdateProjectModal({
     },
   })
 
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   const updateProject = useMutation({
-    ...eden.api.projects({ projectId }).patch.mutationOptions(),
+    ...getUpdateProjectMutationOptions(),
     onSuccess: ({ project }) => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects.get.queryKey() })
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
+      invalidateProjectList(queryClient)
+      invalidateProjectScope(queryClient, projectId)
       notifications.show({ title: 'Project updated', message: `"${project.name}" has been updated`, color: 'green' })
       form.reset()
       onDone?.()
       modals.closeAll()
     },
     onError: (error) => {
-      assert(error.status === 404 || error.status === 422)
-      const value: unknown = error.value
-      const message = error.status === 404 ? value : (value as { message?: string } | undefined)?.message
-      notifications.show({
-        title: 'Error',
-        message: typeof message === 'string' ? message : 'Failed to update project',
-        color: 'red',
-      })
+      notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to update project'), color: 'red' })
     },
   })
 
   return (
-    <form onSubmit={form.onSubmit((values) => updateProject.mutate(values))}>
+    <form onSubmit={form.onSubmit((values) => updateProject.mutate({ projectId, data: values }))}>
       <Stack gap="md">
         <TextInput label="Project name" placeholder="e.g. Traffic Signs" {...form.getInputProps('name')} />
         <Textarea

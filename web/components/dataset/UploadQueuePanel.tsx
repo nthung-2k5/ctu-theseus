@@ -16,8 +16,9 @@ import { ActionIcon, Badge, Box, Button, Group, Select, Stack, Text, ThemeIcon, 
 import { notifications } from '@mantine/notifications'
 import { ListChecksIcon, TrashIcon, UploadSimpleIcon, XIcon } from '@phosphor-icons/react'
 import { DataTable, type DataTableColumn } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import { createItems, uploadItems } from '@public/lib/api/generated/datasets/datasets'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
+import { invalidateProjectScope } from '@public/lib/queries'
 import type { StagedEdit, StagedItem } from '@public/lib/uploadQueue'
 import type { LabelClass, SplitType } from '@public/store/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -57,7 +58,6 @@ export function UploadQueuePanel({
   onRemove: (id: string) => void
   onClear: () => void
 }) {
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   const classOptions = useMemo(() => classes.map((c) => ({ value: c.classId, label: c.name })), [classes])
@@ -89,31 +89,33 @@ export function UploadQueuePanel({
       }
 
       for (const group of groups.values()) {
-        const { error } = await rest.projects({ projectId }).upload.post({
-          split: group[0].split,
-          classId: group[0].classId ?? undefined,
-          files: group.map((item) => item.file as File),
-        })
-        if (error) failed += group.length
-        else uploaded += group.length
+        try {
+          await uploadItems(projectId, {
+            split: group[0].split,
+            classId: group[0].classId ?? undefined,
+            files: group.map((item) => item.file as File),
+          })
+          uploaded += group.length
+        } catch {
+          failed += group.length
+        }
       }
 
       const recordItems = items.filter((item) => !item.file)
       if (recordItems.length > 0) {
-        const { data, error } = await rest.projects({ projectId }).items.post({ items: recordItems.map(toItemPayload) })
-        if (error || !data) {
-          failed += recordItems.length
-        } else {
+        try {
+          const data = await createItems(projectId, { items: recordItems.map(toItemPayload) })
           uploaded += data.created.length
           failed += data.failed.length
+        } catch {
+          failed += recordItems.length
         }
       }
 
       return { uploaded, failed }
     },
     onSuccess: ({ uploaded, failed }) => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).items.get.queryKey() })
+      invalidateProjectScope(queryClient, projectId)
 
       notifications.show(
         failed > 0

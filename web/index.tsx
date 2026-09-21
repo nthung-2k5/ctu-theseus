@@ -7,7 +7,6 @@ import { ModalsProvider } from '@mantine/modals'
 import { theme } from '@public/theme'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
-import { client, EdenProvider } from './lib/api'
 import { createAppRouter } from './router'
 
 const queryClient = new QueryClient({
@@ -24,14 +23,12 @@ const router = createAppRouter(queryClient)
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <EdenProvider client={client} queryClient={queryClient}>
-        <MantineProvider theme={theme} defaultColorScheme="dark">
-          <ModalsProvider>
-            <Notifications position="top-right" />
-            <RouterProvider router={router} />
-          </ModalsProvider>
-        </MantineProvider>
-      </EdenProvider>
+      <MantineProvider theme={theme} defaultColorScheme="dark">
+        <ModalsProvider>
+          <Notifications position="top-right" />
+          <RouterProvider router={router} />
+        </ModalsProvider>
+      </MantineProvider>
     </QueryClientProvider>
   )
 }

@@ -8,8 +8,8 @@
 
 import { Badge, Card, Group, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useTrainingRunDetail } from '@public/lib/queries'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectTask, TrainingRunSummary } from '@public/store/types'
-import { getTaskDescriptor } from '@server/lib/tasks'
 import type { ReactNode } from 'react'
 import { STATUS_COLORS } from './constants'
 
@@ -72,9 +72,7 @@ export function RunOverviewPanel({ run, task }: { run: TrainingRunSummary; task:
   const durationEnd = completedAt ?? (isActive ? new Date() : null)
   const duration = startedAt && durationEnd ? formatDuration(durationEnd.getTime() - startedAt.getTime()) : null
 
-  const configEntries = hyperparameters
-    ? Object.entries(hyperparameters).filter(([key]) => key !== 'encoderId')
-    : []
+  const configEntries = hyperparameters ? Object.entries(hyperparameters).filter(([key]) => key !== 'encoderId') : []
 
   return (
     <Card withBorder p="lg" radius="md">

@@ -10,7 +10,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@schema': path.resolve(import.meta.dirname, '../schema'),
-      '@server': path.resolve(import.meta.dirname, '../server'),
       '@public': path.resolve(import.meta.dirname, '.'),
     },
   },

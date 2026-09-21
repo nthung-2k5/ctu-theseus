@@ -35,11 +35,11 @@ import {
 import { STATUS_COLORS } from '@public/components/training/constants'
 import { UpdateProjectModal } from '@public/components/UpdateProjectModal'
 import { confirmDelete, StatCard } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import type { DatasetModality } from '@public/lib/api/enums'
+import { deleteProject as deleteProjectRequest } from '@public/lib/api/generated/projects/projects'
 import { formatDate } from '@public/lib/format'
-import { projectDetailQueryOptions, useTrainingRuns } from '@public/lib/queries'
-import type { DatasetModality } from '@server/lib/enums'
-import { getTaskDescriptor, isClassificationTask } from '@server/lib/tasks'
+import { invalidateProjectList, projectDetailQueryOptions, useTrainingRuns } from '@public/lib/queries'
+import { getTaskDescriptor, isClassificationTask } from '@public/lib/tasks'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { useMemo } from 'react'
@@ -63,7 +63,6 @@ const MODALITY_CONFIG: Record<
 export function ProjectPage() {
   const { projectId } = routeApi.useParams()
   const navigate = useNavigate()
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   const {
@@ -186,14 +185,7 @@ export function ProjectPage() {
     )
 
     return steps
-  }, [
-    activeProject.task,
-    draftItemsCount,
-    classesCount,
-    readySnapshotsCount,
-    totalRunsCount,
-    hasReadySnapshot,
-  ])
+  }, [activeProject.task, draftItemsCount, classesCount, readySnapshotsCount, totalRunsCount, hasReadySnapshot])
 
   const handleEditClick = () => {
     modals.open({
@@ -211,11 +203,10 @@ export function ProjectPage() {
 
   const deleteProject = useMutation({
     mutationFn: async () => {
-      const { error } = await rest.projects({ projectId }).delete()
-      if (error) throw error
+      await deleteProjectRequest(projectId)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects.get.queryKey() })
+      invalidateProjectList(queryClient)
       notifications.show({
         title: 'Project deleted',
         message: `"${activeProject.name}" has been removed`,

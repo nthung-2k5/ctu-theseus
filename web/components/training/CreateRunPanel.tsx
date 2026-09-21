@@ -11,8 +11,8 @@
 import { Button, Card, Checkbox, Group, MultiSelect, NumberInput, Select, Stack, TextInput, Title } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { BrainIcon } from '@phosphor-icons/react'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
-import { getTaskDescriptor } from '@server/lib/tasks'
 
 interface CreateRunPanelProps {
   project: ProjectDetail

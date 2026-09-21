@@ -7,13 +7,15 @@ export const SPLIT_TYPES = ['train', 'validation', 'test'] as const
 
 /**
  * Per-split membership counts, computed server-side (see
- * `server/routes/projects.ts`). This used to tally a raw `version.items`
+ * `ai_service/theseus/routers/projects.py`). This used to tally a raw `version.items`
  * array, which meant every project navigation shipped the entire membership
  * table just so the UI could count it.
  */
 export const splitCounts = (version: DatasetVersion) =>
-  version.splitCounts ??
-  (Object.fromEntries(SPLIT_TYPES.map((s) => [s, 0])) as Record<(typeof SPLIT_TYPES)[number], number>)
+  Object.fromEntries(SPLIT_TYPES.map((s) => [s, version.splitCounts?.[s] ?? 0])) as Record<
+    (typeof SPLIT_TYPES)[number],
+    number
+  >
 
 /* ── Split progress bar (top of the item list — visualizes train/validation/test membership) ── */
 export const SplitProgressBar = ({ version }: { version: DatasetVersion }) => {

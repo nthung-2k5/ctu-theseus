@@ -10,7 +10,12 @@ import { Alert, Button, Card, Group, Select, Stack, Text, Title } from '@mantine
 import { notifications } from '@mantine/notifications'
 import { DownloadSimpleIcon, PackageIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { EmptyState, StatusBadge } from '@public/components/ui'
-import { useEden } from '@public/lib/api'
+import { apiErrorMessage } from '@public/lib/api/client'
+import {
+  getCreateExportMutationOptions,
+  getListExportsQueryKey,
+  getListExportsQueryOptions,
+} from '@public/lib/api/generated/export/export'
 import type { TrainingRunSummary } from '@public/store/types'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -95,12 +100,11 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
   const [format, setFormat] = useState<ExportFormat>('onnx')
   const [lang, setLang] = useState<ExportLang>('python')
 
-  const eden = useEden()
   const queryClient = useQueryClient()
-  const exportsQueryKey = eden.api.runs({ runId: run.id }).exports.get.queryKey()
+  const exportsQueryKey = getListExportsQueryKey(run.id)
 
   const { data } = useQuery({
-    ...eden.api.runs({ runId: run.id }).exports.get.queryOptions(),
+    ...getListExportsQueryOptions(run.id),
     enabled: run.status === 'succeeded',
     refetchInterval: (query) => {
       const exports = query.state.data?.exports ?? []
@@ -113,15 +117,13 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
   const exports = data?.exports ?? []
 
   const dispatchExport = useMutation({
-    ...eden.api.runs({ runId: run.id }).exports.post.mutationOptions(),
+    ...getCreateExportMutationOptions(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: exportsQueryKey })
       notifications.show({ title: 'Export started', message: `Building the ${tier} bundle…`, color: 'blue' })
     },
     onError: (error) => {
-      const value: unknown = error.value
-      const message = typeof value === 'string' ? value : (value as { message?: string } | undefined)?.message
-      notifications.show({ title: 'Error', message: message ?? 'Failed to start export', color: 'red' })
+      notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to start export'), color: 'red' })
     },
   })
 
@@ -196,7 +198,10 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
             size="sm"
             loading={dispatchExport.isPending}
             onClick={() =>
-              dispatchExport.mutate({ tier, format: isTiered ? 'onnx' : format, lang: isTiered ? lang : undefined })
+              dispatchExport.mutate({
+                runId: run.id,
+                data: { tier, format: isTiered ? 'onnx' : format, lang: isTiered ? lang : undefined },
+              })
             }
           >
             Export

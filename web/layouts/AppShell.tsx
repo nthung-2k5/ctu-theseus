@@ -32,10 +32,11 @@ import {
   TagIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
-import { authClient, sessionQueryOptions } from '@public/lib/auth'
+import { logout } from '@public/lib/api/generated/auth/auth'
+import { sessionQueryOptions } from '@public/lib/auth'
 import { projectDetailQueryOptions } from '@public/lib/queries'
+import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
-import { isClassificationTask } from '@server/lib/tasks'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useMatch, useNavigate } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
@@ -97,7 +98,7 @@ export function AppShell({ children }: AppShellProps) {
 
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure()
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
-  const { data: session } = authClient.useSession()
+  const { data: user } = useQuery(sessionQueryOptions)
   const { colorScheme, setColorScheme } = useMantineColorScheme()
   const toggleColorScheme = () => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')
 
@@ -113,8 +114,9 @@ export function AppShell({ children }: AppShellProps) {
   const activeProject = projectData?.project
 
   const handleLogout = async () => {
-    await authClient.signOut()
-    queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
+    await logout().catch(() => undefined) // the cookies are cleared server-side; a network failure must not trap the user
+    queryClient.clear() // drop the previous user's cached data
+    queryClient.setQueryData(sessionQueryOptions.queryKey, null)
     navigate({ to: '/login' })
   }
 
@@ -165,10 +167,10 @@ export function AppShell({ children }: AppShellProps) {
                 <UnstyledButton>
                   <Group gap="xs">
                     <Avatar size="sm" radius="xl" color="primary">
-                      {session?.user?.name?.[0]?.toUpperCase() ?? 'U'}
+                      {user?.name?.[0]?.toUpperCase() ?? 'U'}
                     </Avatar>
                     <Text size="sm" fw={500} visibleFrom="sm">
-                      {session?.user?.name ?? 'User'}
+                      {user?.name ?? 'User'}
                     </Text>
                     <CaretDownIcon size={14} />
                   </Group>

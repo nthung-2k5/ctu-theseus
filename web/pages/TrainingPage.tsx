@@ -31,7 +31,15 @@ import {
   PageHeader,
   QueryBoundary,
 } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import { apiErrorMessage } from '@public/lib/api/client'
+import type { TrainBody } from '@public/lib/api/generated/models'
+import { getCreateSweepMutationOptions } from '@public/lib/api/generated/sweeps/sweeps'
+import {
+  cancelRun,
+  deleteRun as deleteRunRequest,
+  getListRunsQueryKey,
+  getStartTrainingMutationOptions,
+} from '@public/lib/api/generated/training/training'
 import {
   projectDetailQueryOptions,
   projectSweepsQueryOptions,
@@ -76,12 +84,11 @@ export function TrainingPage() {
   /* ── Sweeps ── */
   const { data: sweepsData } = useProjectSweeps(projectId)
   const sweeps: SweepSummary[] = sweepsData?.sweeps ?? []
-  const eden = useEden()
   const queryClient = useQueryClient()
   const sweepsQueryKey = projectSweepsQueryOptions(projectId).queryKey
 
   const startSweep = useMutation({
-    ...eden.api.projects({ projectId }).sweeps.post.mutationOptions(),
+    ...getCreateSweepMutationOptions(),
     onSuccess: ({ sweep }) => {
       queryClient.invalidateQueries({ queryKey: sweepsQueryKey })
       notifications.show({
@@ -92,12 +99,10 @@ export function TrainingPage() {
       goToSweep(sweep.id)
     },
     onError: (error) => {
-      const value: unknown = error.value
-      const message = typeof value === 'string' ? value : (value as { message?: string } | undefined)?.message
-      notifications.show({ title: 'Error', message: message ?? 'Failed to start sweep', color: 'red' })
+      notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to start sweep'), color: 'red' })
     },
   })
-  const handleStartSweep = (config: SweepStartConfig) => startSweep.mutate(config)
+  const handleStartSweep = (config: SweepStartConfig) => startSweep.mutate({ projectId, data: config })
 
   /* ── Fetch runs from API (polls while any run is active) ── */
   const { data: runsData, isLoading, isError, refetch } = useTrainingRuns(projectId)
@@ -131,11 +136,11 @@ export function TrainingPage() {
   const canUseModel = selectedRun?.status === 'succeeded'
   const activeTab = tab && (tab === 'metrics' || canUseModel) ? tab : 'metrics'
 
-  const runsQueryKey = eden.api.projects({ projectId }).runs.get.queryKey()
+  const runsQueryKey = getListRunsQueryKey(projectId)
 
   /* ── Start training mutation ── */
   const startTraining = useMutation({
-    ...eden.api.projects({ projectId }).train.post.mutationOptions(),
+    ...getStartTrainingMutationOptions(),
     onSuccess: ({ run }) => {
       queryClient.invalidateQueries({ queryKey: runsQueryKey })
       goToRun(run.id)
@@ -145,9 +150,7 @@ export function TrainingPage() {
   /* ── Stop training mutation ── */
   const stopTraining = useMutation({
     mutationFn: async (runId: string) => {
-      const { data, error } = await rest.runs({ runId }).cancel.post()
-      if (error) throw error
-      return data
+      return cancelRun(runId)
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: runsQueryKey })
@@ -157,9 +160,7 @@ export function TrainingPage() {
   /* ── Delete run mutation ── */
   const deleteRun = useMutation({
     mutationFn: async (runId: string) => {
-      const { data, error } = await rest.runs({ runId }).delete()
-      if (error) throw error
-      return data
+      return deleteRunRequest(runId)
     },
     onSuccess: (_data, runId) => {
       queryClient.invalidateQueries({ queryKey: runsQueryKey })
@@ -169,7 +170,7 @@ export function TrainingPage() {
 
   /* ── Handlers ── */
   const handleStartTraining = (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) => {
-    startTraining.mutate(config)
+    startTraining.mutate({ projectId, data: config as TrainBody })
   }
 
   const handleStopTraining = () => {

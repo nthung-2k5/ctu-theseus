@@ -2,7 +2,9 @@ import { Anchor, Box, Button, Card, Center, PasswordInput, Stack, Text, TextInpu
 import { useForm } from '@mantine/form'
 import { notifications } from '@mantine/notifications'
 import { EnvelopeSimpleIcon, LockIcon } from '@phosphor-icons/react'
-import { authClient, sessionQueryOptions } from '@public/lib/auth'
+import { apiErrorMessage } from '@public/lib/api/client'
+import { login } from '@public/lib/api/generated/auth/auth'
+import { sessionQueryOptions } from '@public/lib/auth'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 
@@ -22,12 +24,14 @@ export function LoginPage() {
   })
 
   const handleSubmit = async (values: typeof form.values) => {
-    const { data, error } = await authClient.signIn.email(values)
-    if (error) {
-      notifications.show({ title: 'Login failed', message: error.message ?? 'Login failed', color: 'red' })
+    let user: { name: string }
+    try {
+      user = (await login(values)).user
+    } catch (error) {
+      notifications.show({ title: 'Login failed', message: apiErrorMessage(error, 'Login failed'), color: 'red' })
       return
     }
-    notifications.show({ title: 'Welcome back', message: `Signed in as ${data.user.name}`, color: 'green' })
+    notifications.show({ title: 'Welcome back', message: `Signed in as ${user.name}`, color: 'green' })
     await queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
     navigate({ to: redirect ?? '/' })
   }

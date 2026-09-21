@@ -46,10 +46,17 @@ import {
   XCircleIcon,
 } from '@phosphor-icons/react'
 import { EmptyState } from '@public/components/ui'
-import { rest } from '@public/lib/api'
+import { apiErrorMessage } from '@public/lib/api/client'
+import {
+  getInferenceJob,
+  listInferenceJobs,
+  runBatchInference,
+  runInference,
+  warmInferenceModel,
+} from '@public/lib/api/generated/inference/inference'
 import { projectDetailQueryOptions } from '@public/lib/queries'
+import { getInferenceInputSpec, getInferenceOutputKind, getTaskDescriptor } from '@public/lib/tasks'
 import type { TrainingRunSummary } from '@public/store/types'
-import { getInferenceInputSpec, getInferenceOutputKind, getTaskDescriptor } from '@server/lib/tasks'
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
@@ -129,9 +136,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   const historyQuery = useQuery({
     queryKey: historyQueryKey,
     queryFn: async (): Promise<InferenceJobHistoryItem[]> => {
-      const response = await rest.inference({ runId }).jobs.get()
-      if (response.error) throw new Error('Could not load inference history')
-      return (response.data as { jobs: InferenceJobHistoryItem[] }).jobs
+      return (await listInferenceJobs(runId)).jobs as InferenceJobHistoryItem[]
     },
     enabled: isReady,
   })
@@ -181,10 +186,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   // normal cold-start cost instead.
   useEffect(() => {
     if (!isReady) return
-    rest
-      .inference({ runId })
-      .warm.post()
-      .catch(() => {})
+    warmInferenceModel(runId).catch(() => {})
   }, [runId, isReady])
 
   // Switching runs in the sidebar keeps this panel mounted — drop any job
@@ -198,28 +200,21 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   /* ── Dispatch ──────────────────────────────────────────────────── */
   const dispatchMutation = useMutation({
     mutationFn: async (): Promise<string> => {
-      const response = batchMode
-        ? await rest.inference({ runId }).batch.post({ file: batchFile as File })
-        : await rest
-            .inference({ runId })
-            .post(
+      try {
+        const accepted = batchMode
+          ? await runBatchInference(runId, { file: batchFile as File })
+          : await runInference(
+              runId,
               isFileTask
                 ? { file: inputFile as File }
                 : isTextTask
                   ? { fields: JSON.stringify(textFields) }
                   : { fields: recordJson },
             )
-
-      if (response.error) {
-        const value: unknown = response.error.value
-        const message =
-          typeof value === 'string'
-            ? value
-            : ((value as { message?: string } | undefined)?.message ?? 'Could not start inference')
-        throw new Error(message)
+        return accepted.inferenceId
+      } catch (error) {
+        throw new Error(apiErrorMessage(error, 'Could not start inference'))
       }
-
-      return (response.data as { inferenceId: string }).inferenceId
     },
     onSuccess: (id) => {
       setInferenceId(id)
@@ -231,12 +226,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   const jobQuery = useQuery({
     queryKey: ['inference-job', runId, inferenceId],
     queryFn: async (): Promise<InferenceJobStatus> => {
-      const response = await rest
-        .inference({ runId })
-        .jobs({ inferenceId: inferenceId as string })
-        .get()
-      if (response.error) throw new Error('Could not check inference status')
-      return response.data as InferenceJobStatus
+      return (await getInferenceJob(runId, inferenceId as string)) as InferenceJobStatus
     },
     enabled: !!inferenceId,
     refetchInterval: (query) => (query.state.data?.status === 'pending' && !gaveUp ? POLL_INTERVAL_MS : false),

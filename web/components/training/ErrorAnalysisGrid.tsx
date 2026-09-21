@@ -61,7 +61,7 @@ function ErrorCard({ row, modality }: { row: EvaluationErrorRow; modality: Modal
               {row.predicted}
             </Text>
           </Group>
-          {row.confidence !== null && (
+          {row.confidence != null && (
             <Text size="xs" c="dimmed">
               {(row.confidence * 100).toFixed(1)}% confidence
             </Text>

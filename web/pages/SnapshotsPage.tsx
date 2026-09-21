@@ -14,11 +14,16 @@ import { type ItemSort, ItemsFilterBar } from '@public/components/dataset/ItemsF
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
 import { SPLIT_TYPES, SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { confirmDelete, DataTable, type DataTableColumn, EmptyState, PageHeader } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import { deleteVersion as deleteVersionRequest } from '@public/lib/api/generated/datasets/datasets'
 import { SPLIT_CHART_COLORS } from '@public/lib/constants'
-import { projectDetailQueryOptions, useLabelClasses, useProjectItems } from '@public/lib/queries'
+import {
+  invalidateProjectScope,
+  projectDetailQueryOptions,
+  useLabelClasses,
+  useProjectItems,
+} from '@public/lib/queries'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import type { DatasetVersion } from '@public/store/types'
-import { getTaskDescriptor } from '@server/lib/tasks'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 
@@ -93,7 +98,6 @@ export function SnapshotsPage() {
   const { projectId } = routeApi.useParams()
   const { page, perPage, versionId, split, classId, search, sort } = routeApi.useSearch()
   const navigate = routeApi.useNavigate()
-  const eden = useEden()
   const queryClient = useQueryClient()
   const {
     data: { project: activeProject },
@@ -121,11 +125,10 @@ export function SnapshotsPage() {
 
   const deleteVersion = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await rest.versions({ versionId: id }).delete()
-      if (error) throw error
+      await deleteVersionRequest(id)
     },
     onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
+      invalidateProjectScope(queryClient, projectId)
       notifications.show({ title: 'Snapshot deleted', message: 'The snapshot has been removed', color: 'green' })
       if (versionId === id) goToList()
     },

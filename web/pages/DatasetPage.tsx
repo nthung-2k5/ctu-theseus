@@ -42,7 +42,15 @@ import { ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
 import { SPLIT_TYPES, SplitProgressBar } from '@public/components/dataset/VersionBrowsing'
 import { confirmDelete, EmptyState, PageHeader } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import {
+  autoSplitItems,
+  classifyItems,
+  createAnnotation,
+  deleteItems,
+  getCreateVersionMutationOptions,
+  setItemsSplit,
+  updateAnnotation,
+} from '@public/lib/api/generated/datasets/datasets'
 import {
   invalidateProjectScope,
   projectDetailQueryOptions,
@@ -50,7 +58,7 @@ import {
   useLabelClasses,
   useProjectItems,
 } from '@public/lib/queries'
-import { getTaskDescriptor } from '@server/lib/tasks'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
@@ -74,7 +82,6 @@ const CreateVersionModal = ({
     },
   })
 
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   // Cheap way to get the draft's total/labeledCount without fetching every
@@ -86,9 +93,9 @@ const CreateVersionModal = ({
   const unlabeledCount = total - labeledCount
 
   const createVersion = useMutation({
-    ...eden.api.projects({ projectId }).versions.post.mutationOptions(),
+    ...getCreateVersionMutationOptions(),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects({ projectId }).get.queryKey() })
+      invalidateProjectScope(queryClient, projectId)
       notifications.show({ title: 'Version created', message: 'New snapshot version created', color: 'green' })
       form.reset()
       onClose()
@@ -99,7 +106,7 @@ const CreateVersionModal = ({
   })
 
   return (
-    <form onSubmit={form.onSubmit((values) => createVersion.mutate(values))}>
+    <form onSubmit={form.onSubmit((values) => createVersion.mutate({ projectId, data: values }))}>
       <Stack gap="md">
         {needsAnnotations && unlabeledCount > 0 && (
           <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unlabeled items in the draft">
@@ -142,12 +149,7 @@ const AutoSplitModal = ({
 
   const autoSplit = useMutation({
     mutationFn: async () => {
-      const { data, error } = await rest.projects({ projectId }).items['auto-split'].post({
-        ratios,
-        stratify: requiresLabelClasses ? stratify : false,
-      })
-      if (error) throw error
-      return data
+      return autoSplitItems(projectId, { ratios, stratify: requiresLabelClasses ? stratify : false })
     },
     onSuccess: (data) => {
       invalidateProjectScope(queryClient, projectId)
@@ -255,8 +257,7 @@ const BulkActionsToolbar = ({
 
   const reassignSplit = useMutation({
     mutationFn: async (split: (typeof SPLIT_TYPES)[number]) => {
-      const { error } = await rest.projects({ projectId }).items.split.patch({ itemIds: [...selectedIds], split })
-      if (error) throw error
+      await setItemsSplit(projectId, { itemIds: [...selectedIds], split })
     },
     onSuccess: () => {
       notifications.show({ title: 'Split updated', message: `${selectedIds.size} item(s) reassigned`, color: 'green' })
@@ -268,8 +269,7 @@ const BulkActionsToolbar = ({
 
   const assignClass = useMutation({
     mutationFn: async (classId: string) => {
-      const { error } = await rest.projects({ projectId }).items.classify.post({ itemIds: [...selectedIds], classId })
-      if (error) throw error
+      await classifyItems(projectId, { itemIds: [...selectedIds], classId })
     },
     onSuccess: () => {
       notifications.show({ title: 'Class assigned', message: `${selectedIds.size} item(s) updated`, color: 'green' })
@@ -281,8 +281,7 @@ const BulkActionsToolbar = ({
 
   const bulkDelete = useMutation({
     mutationFn: async () => {
-      const { error } = await rest.projects({ projectId }).items.delete({ itemIds: [...selectedIds] })
-      if (error) throw error
+      await deleteItems(projectId, { itemIds: [...selectedIds] })
     },
     onSuccess: () => {
       notifications.show({
@@ -510,10 +509,8 @@ export function DatasetPage() {
       existingAnnotationId: string | null
       text: string
     }) => {
-      const { error } = existingAnnotationId
-        ? await rest.annotations({ annotationId: existingAnnotationId }).patch({ labelTextSequence: text })
-        : await rest.items({ itemId }).annotations.post({ annotationType: 'text_sequence', labelTextSequence: text })
-      if (error) throw error
+      if (existingAnnotationId) await updateAnnotation(existingAnnotationId, { labelTextSequence: text })
+      else await createAnnotation(itemId, { annotationType: 'text_sequence', labelTextSequence: text })
     },
     onSuccess: () => invalidateProjectScope(queryClient, projectId),
     onError: () => notifications.show({ title: 'Error', message: 'Failed to save', color: 'red' }),

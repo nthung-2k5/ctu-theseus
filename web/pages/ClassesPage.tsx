@@ -19,10 +19,14 @@ import {
   PageHeader,
   QueryBoundary,
 } from '@public/components/ui'
-import { useEden } from '@public/lib/api'
+import {
+  getCreateClassMutationOptions,
+  getDeleteClassMutationOptions,
+  getUpdateClassMutationOptions,
+} from '@public/lib/api/generated/classes/classes'
 import { invalidateProjectScope, projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
+import { getTaskDescriptor } from '@public/lib/tasks'
 import type { LabelClass } from '@public/store/types'
-import { getTaskDescriptor } from '@server/lib/tasks'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -53,14 +57,13 @@ function ClassFormModal({
     },
   })
 
-  const eden = useEden()
   const queryClient = useQueryClient()
   // Project scope: class names also render in the item list, and the sidebar
   // badge counts them off project detail.
   const invalidate = () => invalidateProjectScope(queryClient, projectId)
 
   const createClass = useMutation({
-    ...eden.api.projects({ projectId }).classes.post.mutationOptions(),
+    ...getCreateClassMutationOptions(),
     onSuccess: () => {
       invalidate()
       notifications.show({ title: 'Class created', message: `"${form.values.name}" added`, color: 'green' })
@@ -73,10 +76,7 @@ function ClassFormModal({
   })
 
   const updateClass = useMutation({
-    ...eden.api
-      .projects({ projectId })
-      .classes({ classId: existing?.classId ?? '' })
-      .patch.mutationOptions(),
+    ...getUpdateClassMutationOptions(),
     onSuccess: () => {
       invalidate()
       notifications.show({ title: 'Class updated', message: `"${form.values.name}" updated`, color: 'green' })
@@ -93,10 +93,10 @@ function ClassFormModal({
       description: values.description.trim() || undefined,
       uiColorHex: values.uiColorHex,
     }
-    if (isEdit) {
-      updateClass.mutate(body)
+    if (existing) {
+      updateClass.mutate({ projectId, classId: existing.classId, data: body })
     } else {
-      createClass.mutate(body)
+      createClass.mutate({ projectId, data: body })
     }
   }
 
@@ -157,11 +157,10 @@ function ClassActions({
   projectId: string
   onEdit: (cls: LabelClass) => void
 }) {
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   const deleteClass = useMutation({
-    ...eden.api.projects({ projectId }).classes({ classId: cls.classId }).delete.mutationOptions(),
+    ...getDeleteClassMutationOptions(),
     onSuccess: () => {
       invalidateProjectScope(queryClient, projectId)
       notifications.show({ title: 'Deleted', message: `"${cls.name}" removed`, color: 'green' })
@@ -184,7 +183,7 @@ function ClassActions({
           this class.
         </>
       ),
-      onConfirm: () => deleteClass.mutate(),
+      onConfirm: () => deleteClass.mutate({ projectId, classId: cls.classId }),
     })
   }
 

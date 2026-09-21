@@ -42,11 +42,15 @@ import {
 } from '@phosphor-icons/react'
 import { UpdateProjectModal } from '@public/components/UpdateProjectModal'
 import { confirmDelete, EmptyState, PageHeader, QueryBoundary } from '@public/components/ui'
-import { rest, useEden } from '@public/lib/api'
+import { apiErrorMessage } from '@public/lib/api/client'
+import type { DatasetModality, ProjectTask } from '@public/lib/api/enums'
+import {
+  deleteProject as deleteProjectRequest,
+  getCreateProjectMutationOptions,
+} from '@public/lib/api/generated/projects/projects'
 import { formatDate } from '@public/lib/format'
-import { useProjects } from '@public/lib/queries'
-import type { DatasetModality, ProjectTask } from '@server/lib/enums'
-import { taskRegistry } from '@server/lib/tasks'
+import { invalidateProjectList, useProjects } from '@public/lib/queries'
+import { taskRegistry } from '@public/lib/tasks'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
@@ -149,24 +153,21 @@ const CreateProjectModal = () => {
     },
   })
 
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   const selectedTaskDescriptor = form.values.task ? taskRegistry[form.values.task as ProjectTask] : undefined
   const selectedModality = selectedTaskDescriptor?.modality
 
   const createProject = useMutation({
-    ...eden.api.projects.post.mutationOptions(),
+    ...getCreateProjectMutationOptions(),
     onSuccess: ({ project }) => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects.get.queryKey() })
+      invalidateProjectList(queryClient)
       notifications.show({ title: 'Project created', message: `"${project.name}" is ready`, color: 'green' })
       form.reset()
       modals.closeAll()
     },
     onError: (error) => {
-      const value: unknown = error.value
-      const message = typeof value === 'string' ? value : (value as { message?: string } | undefined)?.message
-      notifications.show({ title: 'Error', message: message ?? 'Failed to create project', color: 'red' })
+      notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to create project'), color: 'red' })
     },
   })
 
@@ -181,7 +182,9 @@ const CreateProjectModal = () => {
   return (
     <form
       onSubmit={form.onSubmit((values) =>
-        createProject.mutate({ name: values.name, description: values.description, task: values.task as ProjectTask }),
+        createProject.mutate({
+          data: { name: values.name, description: values.description, task: values.task as ProjectTask },
+        }),
       )}
     >
       <Stack gap="md">
@@ -288,7 +291,6 @@ const CreateProjectModal = () => {
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const eden = useEden()
   const queryClient = useQueryClient()
 
   const { data, isLoading, isError, refetch } = useProjects()
@@ -331,11 +333,10 @@ export function DashboardPage() {
 
   const deleteProject = useMutation({
     mutationFn: async (projectId: string) => {
-      const { error } = await rest.projects({ projectId }).delete()
-      if (error) throw error
+      await deleteProjectRequest(projectId)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: eden.api.projects.get.queryKey() })
+      invalidateProjectList(queryClient)
       notifications.show({ title: 'Project deleted', message: 'The project has been removed', color: 'green' })
     },
     onError: () => {
@@ -551,216 +552,108 @@ export function DashboardPage() {
           onRetry={() => refetch()}
           loadingFallback={
             <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
-            {Array.from({ length: 6 }, (_, i) => `skeleton-${i}`).map((key) => (
-              <Card key={key} withBorder padding="lg" radius="md">
-                <Stack gap="md">
-                  <Group justify="space-between">
-                    <Skeleton height={24} width="50%" radius="sm" />
-                    <Skeleton height={20} width={70} radius="xl" />
-                  </Group>
-                  <Skeleton height={14} width="90%" radius="sm" />
-                  <Skeleton height={14} width="60%" radius="sm" />
-                  <Divider />
-                  <Group justify="space-between">
-                    <Skeleton height={16} width={80} radius="sm" />
-                    <Skeleton height={28} width={90} radius="md" />
-                  </Group>
-                </Stack>
-              </Card>
+              {Array.from({ length: 6 }, (_, i) => `skeleton-${i}`).map((key) => (
+                <Card key={key} withBorder padding="lg" radius="md">
+                  <Stack gap="md">
+                    <Group justify="space-between">
+                      <Skeleton height={24} width="50%" radius="sm" />
+                      <Skeleton height={20} width={70} radius="xl" />
+                    </Group>
+                    <Skeleton height={14} width="90%" radius="sm" />
+                    <Skeleton height={14} width="60%" radius="sm" />
+                    <Divider />
+                    <Group justify="space-between">
+                      <Skeleton height={16} width={80} radius="sm" />
+                      <Skeleton height={28} width={90} radius="md" />
+                    </Group>
+                  </Stack>
+                </Card>
               ))}
             </SimpleGrid>
           }
         >
           {projects.length === 0 ? (
-          <Paper withBorder p="xl" radius="md" style={{ textAlign: 'center' }}>
-            <Stack align="center" gap="md" py="xl">
-              <ThemeIcon size={64} radius="xl" variant="light" color="primary">
-                <FolderSimpleIcon size={36} />
-              </ThemeIcon>
-              <div>
-                <Title order={3}>Welcome to CTU Theseus</Title>
-                <Text size="sm" c="dimmed" mt={4} maw={500} mx="auto">
-                  Build and train machine learning models end-to-end. Create your first project to start uploading data,
-                  defining labels, and training neural networks.
-                </Text>
-              </div>
-              <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal} mt="sm">
-                Create your first project
-              </Button>
-            </Stack>
-          </Paper>
-        ) : filteredProjects.length === 0 ? (
-          <Paper withBorder p="xl" radius="md">
-            <EmptyState
-              icon={MagnifyingGlassIcon}
-              title="No projects match your filter"
-              description={`No projects found matching "${searchQuery}" in ${selectedModality === 'all' ? 'all modalities' : selectedModality}.`}
-              action={
-                <Button
-                  variant="light"
-                  onClick={() => {
-                    setSearchQuery('')
-                    setSelectedModality('all')
-                  }}
-                >
-                  Clear search & filters
+            <Paper withBorder p="xl" radius="md" style={{ textAlign: 'center' }}>
+              <Stack align="center" gap="md" py="xl">
+                <ThemeIcon size={64} radius="xl" variant="light" color="primary">
+                  <FolderSimpleIcon size={36} />
+                </ThemeIcon>
+                <div>
+                  <Title order={3}>Welcome to CTU Theseus</Title>
+                  <Text size="sm" c="dimmed" mt={4} maw={500} mx="auto">
+                    Build and train machine learning models end-to-end. Create your first project to start uploading
+                    data, defining labels, and training neural networks.
+                  </Text>
+                </div>
+                <Button leftSection={<PlusIcon size={18} />} onClick={openCreateProjectModal} mt="sm">
+                  Create your first project
                 </Button>
-              }
-            />
-          </Paper>
-        ) : viewMode === 'grid' ? (
-          /* ─── Grid Cards View ─── */
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
-            {filteredProjects.map((project) => {
-              const descriptor = taskRegistry[project.task]
-              const modality = descriptor?.modality ?? 'vision'
-              const meta = MODALITY_META[modality] ?? MODALITY_META.vision
-              const ModalityIcon = meta.icon
+              </Stack>
+            </Paper>
+          ) : filteredProjects.length === 0 ? (
+            <Paper withBorder p="xl" radius="md">
+              <EmptyState
+                icon={MagnifyingGlassIcon}
+                title="No projects match your filter"
+                description={`No projects found matching "${searchQuery}" in ${selectedModality === 'all' ? 'all modalities' : selectedModality}.`}
+                action={
+                  <Button
+                    variant="light"
+                    onClick={() => {
+                      setSearchQuery('')
+                      setSelectedModality('all')
+                    }}
+                  >
+                    Clear search & filters
+                  </Button>
+                }
+              />
+            </Paper>
+          ) : viewMode === 'grid' ? (
+            /* ─── Grid Cards View ─── */
+            <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="lg">
+              {filteredProjects.map((project) => {
+                const descriptor = taskRegistry[project.task]
+                const modality = descriptor?.modality ?? 'vision'
+                const meta = MODALITY_META[modality] ?? MODALITY_META.vision
+                const ModalityIcon = meta.icon
 
-              return (
-                <Card
-                  key={project.id}
-                  withBorder
-                  padding="lg"
-                  radius="md"
-                  className="card-elevated"
-                  style={{
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                  }}
-                  onClick={() => openProject(project.id)}
-                >
-                  <Stack gap="sm">
-                    {/* Top row: Modality Icon, Task Badge, and Actions */}
-                    <Group justify="space-between" align="flex-start" wrap="nowrap">
-                      <Group gap="xs" wrap="nowrap">
-                        <ThemeIcon size="md" variant="light" color={meta.color} radius="md">
-                          <ModalityIcon size={18} />
-                        </ThemeIcon>
-                        <div>
-                          <Badge variant="light" color={meta.color} size="sm">
-                            {taskLabel(project.task)}
-                          </Badge>
-                        </div>
-                      </Group>
-
-                      {/* Card Action Menu */}
-                      <Group gap={4} wrap="nowrap">
-                        <Tooltip label="Edit project">
-                          <ActionIcon
-                            variant="subtle"
-                            color="gray"
-                            size="sm"
-                            onClick={(e) => openUpdateProjectModal(e, project.id, project.name, project.description)}
-                          >
-                            <PencilSimpleIcon size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="Delete project">
-                          <ActionIcon
-                            variant="subtle"
-                            color="red"
-                            size="sm"
-                            loading={deleteProject.isPending && deleteProject.variables === project.id}
-                            onClick={(e) => handleDeleteClick(e, project.id, project.name)}
-                          >
-                            <TrashIcon size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
-                    </Group>
-
-                    {/* Title & Description */}
-                    <div>
-                      <Title order={4} lineClamp={1}>
-                        {project.name}
-                      </Title>
-                      <Text size="sm" c="dimmed" lineClamp={2} mt={4} style={{ minHeight: '2.6em' }}>
-                        {project.description || (
-                          <Text component="span" fs="italic" c="dimmed">
-                            No description provided
-                          </Text>
-                        )}
-                      </Text>
-                    </div>
-                  </Stack>
-
-                  {/* Card Footer: Date & Open Button */}
-                  <Box mt="md">
-                    <Divider mb="sm" />
-                    <Group justify="space-between" align="center">
-                      <Group gap={6}>
-                        <CalendarBlankIcon size={14} color="var(--mantine-color-dimmed)" />
-                        <Text size="xs" c="dimmed">
-                          {formatDate(project.createdAt)}
-                        </Text>
-                      </Group>
-                      <Group gap={4} c="primary">
-                        <Text size="xs" fw={600}>
-                          Open
-                        </Text>
-                        <ArrowRightIcon size={14} />
-                      </Group>
-                    </Group>
-                  </Box>
-                </Card>
-              )
-            })}
-          </SimpleGrid>
-        ) : (
-          /* ─── List / Table View ─── */
-          <Paper withBorder radius="md">
-            <Table highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Project</Table.Th>
-                  <Table.Th>Modality & Task</Table.Th>
-                  <Table.Th>Created</Table.Th>
-                  <Table.Th style={{ textAlign: 'right' }}>Actions</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {filteredProjects.map((project) => {
-                  const descriptor = taskRegistry[project.task]
-                  const modality = descriptor?.modality ?? 'vision'
-                  const meta = MODALITY_META[modality] ?? MODALITY_META.vision
-                  const ModalityIcon = meta.icon
-
-                  return (
-                    <Table.Tr key={project.id} style={{ cursor: 'pointer' }} onClick={() => openProject(project.id)}>
-                      <Table.Td style={{ minWidth: 200 }}>
-                        <Group gap="sm" wrap="nowrap">
+                return (
+                  <Card
+                    key={project.id}
+                    withBorder
+                    padding="lg"
+                    radius="md"
+                    className="card-elevated"
+                    style={{
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                    }}
+                    onClick={() => openProject(project.id)}
+                  >
+                    <Stack gap="sm">
+                      {/* Top row: Modality Icon, Task Badge, and Actions */}
+                      <Group justify="space-between" align="flex-start" wrap="nowrap">
+                        <Group gap="xs" wrap="nowrap">
                           <ThemeIcon size="md" variant="light" color={meta.color} radius="md">
                             <ModalityIcon size={18} />
                           </ThemeIcon>
                           <div>
-                            <Text size="sm" fw={600}>
-                              {project.name}
-                            </Text>
-                            <Text size="xs" c="dimmed" lineClamp={1}>
-                              {project.description || 'No description provided'}
-                            </Text>
+                            <Badge variant="light" color={meta.color} size="sm">
+                              {taskLabel(project.task)}
+                            </Badge>
                           </div>
                         </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge variant="light" color={meta.color} size="sm">
-                          {taskLabel(project.task)}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="xs" c="dimmed">
-                          {formatDate(project.createdAt)}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>
-                        <Group gap={4} justify="flex-end" wrap="nowrap">
+
+                        {/* Card Action Menu */}
+                        <Group gap={4} wrap="nowrap">
                           <Tooltip label="Edit project">
                             <ActionIcon
                               variant="subtle"
                               color="gray"
+                              size="sm"
                               onClick={(e) => openUpdateProjectModal(e, project.id, project.name, project.description)}
                             >
                               <PencilSimpleIcon size={16} />
@@ -770,31 +663,141 @@ export function DashboardPage() {
                             <ActionIcon
                               variant="subtle"
                               color="red"
+                              size="sm"
                               loading={deleteProject.isPending && deleteProject.variables === project.id}
                               onClick={(e) => handleDeleteClick(e, project.id, project.name)}
                             >
                               <TrashIcon size={16} />
                             </ActionIcon>
                           </Tooltip>
-                          <Button
-                            size="xs"
-                            variant="light"
-                            rightSection={<ArrowRightIcon size={14} />}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openProject(project.id)
-                            }}
-                          >
-                            Open
-                          </Button>
                         </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  )
-                })}
-              </Table.Tbody>
-            </Table>
-          </Paper>
+                      </Group>
+
+                      {/* Title & Description */}
+                      <div>
+                        <Title order={4} lineClamp={1}>
+                          {project.name}
+                        </Title>
+                        <Text size="sm" c="dimmed" lineClamp={2} mt={4} style={{ minHeight: '2.6em' }}>
+                          {project.description || (
+                            <Text component="span" fs="italic" c="dimmed">
+                              No description provided
+                            </Text>
+                          )}
+                        </Text>
+                      </div>
+                    </Stack>
+
+                    {/* Card Footer: Date & Open Button */}
+                    <Box mt="md">
+                      <Divider mb="sm" />
+                      <Group justify="space-between" align="center">
+                        <Group gap={6}>
+                          <CalendarBlankIcon size={14} color="var(--mantine-color-dimmed)" />
+                          <Text size="xs" c="dimmed">
+                            {formatDate(project.createdAt)}
+                          </Text>
+                        </Group>
+                        <Group gap={4} c="primary">
+                          <Text size="xs" fw={600}>
+                            Open
+                          </Text>
+                          <ArrowRightIcon size={14} />
+                        </Group>
+                      </Group>
+                    </Box>
+                  </Card>
+                )
+              })}
+            </SimpleGrid>
+          ) : (
+            /* ─── List / Table View ─── */
+            <Paper withBorder radius="md">
+              <Table highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Project</Table.Th>
+                    <Table.Th>Modality & Task</Table.Th>
+                    <Table.Th>Created</Table.Th>
+                    <Table.Th style={{ textAlign: 'right' }}>Actions</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {filteredProjects.map((project) => {
+                    const descriptor = taskRegistry[project.task]
+                    const modality = descriptor?.modality ?? 'vision'
+                    const meta = MODALITY_META[modality] ?? MODALITY_META.vision
+                    const ModalityIcon = meta.icon
+
+                    return (
+                      <Table.Tr key={project.id} style={{ cursor: 'pointer' }} onClick={() => openProject(project.id)}>
+                        <Table.Td style={{ minWidth: 200 }}>
+                          <Group gap="sm" wrap="nowrap">
+                            <ThemeIcon size="md" variant="light" color={meta.color} radius="md">
+                              <ModalityIcon size={18} />
+                            </ThemeIcon>
+                            <div>
+                              <Text size="sm" fw={600}>
+                                {project.name}
+                              </Text>
+                              <Text size="xs" c="dimmed" lineClamp={1}>
+                                {project.description || 'No description provided'}
+                              </Text>
+                            </div>
+                          </Group>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge variant="light" color={meta.color} size="sm">
+                            {taskLabel(project.task)}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {formatDate(project.createdAt)}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: 'right' }}>
+                          <Group gap={4} justify="flex-end" wrap="nowrap">
+                            <Tooltip label="Edit project">
+                              <ActionIcon
+                                variant="subtle"
+                                color="gray"
+                                onClick={(e) =>
+                                  openUpdateProjectModal(e, project.id, project.name, project.description)
+                                }
+                              >
+                                <PencilSimpleIcon size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label="Delete project">
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                loading={deleteProject.isPending && deleteProject.variables === project.id}
+                                onClick={(e) => handleDeleteClick(e, project.id, project.name)}
+                              >
+                                <TrashIcon size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Button
+                              size="xs"
+                              variant="light"
+                              rightSection={<ArrowRightIcon size={14} />}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openProject(project.id)
+                              }}
+                            >
+                              Open
+                            </Button>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    )
+                  })}
+                </Table.Tbody>
+              </Table>
+            </Paper>
           )}
         </QueryBoundary>
       </Box>
