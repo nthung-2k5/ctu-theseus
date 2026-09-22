@@ -6,11 +6,11 @@
  * or the whole snapshot deleted.
  */
 
-import { Badge, Box, Button, Stack, Text } from '@mantine/core'
+import { Alert, Badge, Box, Button, Group, Stack, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { ArchiveIcon, ArrowLeftIcon, TrashIcon } from '@phosphor-icons/react'
+import { ArchiveIcon, ArrowLeftIcon, MagicWandIcon, TrashIcon } from '@phosphor-icons/react'
 import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
-import { type ItemSort, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
+import { type ItemOrigin, type ItemSort, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
 import { SPLIT_TYPES, SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { confirmDelete, DataTable, type DataTableColumn, EmptyState, PageHeader } from '@public/components/ui'
@@ -29,6 +29,9 @@ import { getRouteApi } from '@tanstack/react-router'
 
 const routeApi = getRouteApi('/_app/project/$projectId/snapshots')
 
+/** "image_horizontal_flip" -> "horizontal flip": the op ids are `<modality>_<name>`. */
+const augmentationLabel = (id: string) => id.split('_').slice(1).join(' ')
+
 /* ── Items viewer for the selected snapshot/split ── */
 const SnapshotItemsPanel = ({
   projectId,
@@ -41,6 +44,7 @@ const SnapshotItemsPanel = ({
   page,
   perPage,
   sort,
+  origin,
   onPageChange,
   onPerPageChange,
 }: {
@@ -54,6 +58,7 @@ const SnapshotItemsPanel = ({
   page: number
   perPage: number
   sort: ItemSort
+  origin: ItemOrigin | null
   onPageChange: (page: number) => void
   onPerPageChange: (perPage: number) => void
 }) => {
@@ -65,6 +70,7 @@ const SnapshotItemsPanel = ({
     page,
     perPage,
     sort,
+    origin: origin ?? undefined,
   })
   const items = data?.items ?? []
   const total = data?.total ?? 0
@@ -96,7 +102,7 @@ const SnapshotItemsPanel = ({
 /* ── Main Snapshots page ── */
 export function SnapshotsPage() {
   const { projectId } = routeApi.useParams()
-  const { page, perPage, versionId, split, classId, search, sort } = routeApi.useSearch()
+  const { page, perPage, versionId, split, classId, search, sort, origin } = routeApi.useSearch()
   const navigate = routeApi.useNavigate()
   const queryClient = useQueryClient()
   const {
@@ -122,6 +128,8 @@ export function SnapshotsPage() {
   const selectSearch = (nextSearch: string) =>
     navigate({ search: (prev) => ({ ...prev, search: nextSearch || undefined, page: 1 }) })
   const selectSort = (nextSort: ItemSort) => navigate({ search: (prev) => ({ ...prev, sort: nextSort, page: 1 }) })
+  const selectOrigin = (nextOrigin: ItemOrigin | null) =>
+    navigate({ search: (prev) => ({ ...prev, origin: nextOrigin ?? undefined, page: 1 }) })
 
   const deleteVersion = useMutation({
     mutationFn: async (id: string) => {
@@ -151,9 +159,16 @@ export function SnapshotsPage() {
       key: 'versionTag',
       header: 'Snapshot',
       render: (version) => (
-        <Text size="sm" fw={600}>
-          {version.versionTag ?? 'Untitled snapshot'}
-        </Text>
+        <Group gap="xs" wrap="nowrap">
+          <Text size="sm" fw={600}>
+            {version.versionTag ?? 'Untitled snapshot'}
+          </Text>
+          {version.augmentedCount > 0 && (
+            <Badge size="xs" variant="light" color="grape" leftSection={<MagicWandIcon size={10} />}>
+              +{version.augmentedCount} augmented
+            </Badge>
+          )}
+        </Group>
       ),
     },
     ...SPLIT_TYPES.map((splitType) => ({
@@ -224,6 +239,18 @@ export function SnapshotsPage() {
           />
 
           <Stack gap="md">
+            {selectedVersion.augmentationConfig && (
+              <Alert icon={<MagicWandIcon size={16} />} color="grape" variant="light" title="Augmented snapshot">
+                {selectedVersion.augmentedCount} augmented item{selectedVersion.augmentedCount === 1 ? '' : 's'} were
+                added to the train split ({selectedVersion.augmentationConfig.copiesPerItem ?? 1} cop
+                {(selectedVersion.augmentationConfig.copiesPerItem ?? 1) === 1 ? 'y' : 'ies'} per item) using{' '}
+                {selectedVersion.augmentationConfig.ops.map((o) => augmentationLabel(o.id)).join(', ')}. Validation and
+                test items are original.
+                {selectedVersion.augmentationConfig.skippedItems
+                  ? ` ${selectedVersion.augmentationConfig.skippedItems} item(s) could not be augmented and were skipped.`
+                  : ''}
+              </Alert>
+            )}
             <Stack gap="sm">
               <SplitProgressBar version={selectedVersion} />
               <ItemsFilterBar
@@ -237,6 +264,8 @@ export function SnapshotsPage() {
                 onSearchChange={selectSearch}
                 sort={sort ?? 'newest'}
                 onSortChange={selectSort}
+                origin={origin ?? null}
+                onOriginChange={selectOrigin}
               />
             </Stack>
             <SnapshotItemsPanel
@@ -250,6 +279,7 @@ export function SnapshotsPage() {
               page={page}
               perPage={perPage}
               sort={sort ?? 'newest'}
+              origin={selectedVersion.augmentedCount > 0 ? (origin ?? null) : null}
               onPageChange={(page) => navigate({ search: (prev) => ({ ...prev, page }) })}
               onPerPageChange={(perPage) => navigate({ search: (prev) => ({ ...prev, perPage, page: 1 }) })}
             />

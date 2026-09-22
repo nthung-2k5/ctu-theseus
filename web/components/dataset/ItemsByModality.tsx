@@ -12,6 +12,7 @@ import {
   Text,
   Textarea,
   ThemeIcon,
+  Tooltip,
 } from '@mantine/core'
 import { CheckIcon, SpeakerHighIcon } from '@phosphor-icons/react'
 import { DataTable, type DataTableColumn, EmptyState, QueryBoundary, StatusBadge } from '@public/components/ui'
@@ -36,6 +37,39 @@ export interface DatasetListItem {
   visionFeatures?: { width: number; height: number; imageFormat: string | null } | null
   audioFeatures?: { durationSeconds: string | number; sampleRateHz: number } | null
   tabularFeatures?: { featuresJson: unknown } | null
+  /** Set on an augmented copy (only snapshots built with augmentation have these). */
+  sourceItemId?: string | null
+  sourceExternalId?: string | null
+  augmentation?: unknown
+}
+
+/** "image_horizontal_flip" -> "Horizontal flip": the op ids are `<modality>_<name>`. */
+const opLabel = (id: string) => {
+  const words = id.split('_').slice(1).join(' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** The ops that produced an augmented copy, from its stored `{copy, ops: [{id, params}]}` record. */
+const appliedOps = (item: DatasetListItem): string[] => {
+  const ops = (item.augmentation as { ops?: { id: string }[] } | null | undefined)?.ops
+  return Array.isArray(ops) ? ops.map((o) => opLabel(o.id)) : []
+}
+
+const AugmentedBadge = ({ item }: { item: DatasetListItem }) => {
+  if (!item.sourceItemId) return null
+  const ops = appliedOps(item)
+  return (
+    <Tooltip
+      label={`Augmented from ${item.sourceExternalId ?? 'an original item'}${ops.length ? ` · ${ops.join(', ')}` : ''}`}
+      withArrow
+      multiline
+      maw={280}
+    >
+      <Badge size="xs" variant="light" color="grape">
+        Augmented
+      </Badge>
+    </Tooltip>
+  )
 }
 
 /** Per-item checkbox selection, for pages with batch operations (e.g. the Dataset draft page). */
@@ -159,6 +193,24 @@ const MediaItemDetails = ({
             <Text size="sm">{className}</Text>
           </Group>
         )}
+        {item.sourceItemId && (
+          <>
+            <Group justify="space-between" py={4}>
+              <Text size="sm" c="dimmed">
+                Augmented from
+              </Text>
+              <Text size="sm">{item.sourceExternalId ?? 'an original item'}</Text>
+            </Group>
+            {appliedOps(item).length > 0 && (
+              <Group justify="space-between" py={4}>
+                <Text size="sm" c="dimmed">
+                  Applied
+                </Text>
+                <Text size="sm">{appliedOps(item).join(', ')}</Text>
+              </Group>
+            )}
+          </>
+        )}
         {modality === 'vision' && item.visionFeatures && (
           <Group justify="space-between" py={4}>
             <Text size="sm" c="dimmed">
@@ -272,6 +324,7 @@ const MediaItemsGrid = <T extends DatasetListItem>({
                 </Text>
                 <Group gap={4} mt={4}>
                   <StatusBadge value={item.splitType} colorMap={SPLIT_COLORS} size="xs" />
+                  <AugmentedBadge item={item} />
                   {className && (
                     <Badge size="xs" variant="light" color="teal">
                       {className}
@@ -357,7 +410,12 @@ const TabularTextItemsTable = <T extends DatasetListItem>({
   columns.push({
     key: 'externalId',
     header: 'External ID',
-    render: (item) => <Text size="xs">{item.externalId ?? '—'}</Text>,
+    render: (item) => (
+      <Group gap={6} wrap="nowrap">
+        <Text size="xs">{item.externalId ?? '—'}</Text>
+        <AugmentedBadge item={item} />
+      </Group>
+    ),
   })
 
   if (modality === 'text') {

@@ -63,17 +63,32 @@ class DatasetVersion(Base):
     item_count: Mapped[int | None] = mapped_column(sa.Integer)
     class_count: Mapped[int | None] = mapped_column(sa.Integer)
     parquet_key: Mapped[str | None] = mapped_column(sa.Text)
+    # What the snapshot was built with (theseus.augmentation.config.AugmentationConfig), NULL for none.
+    augmentation_config: Mapped[Any | None] = mapped_column(JSONB)
+    # Augmented copies added to the train split; included in item_count.
+    augmented_count: Mapped[int] = mapped_column(sa.Integer, server_default="0")
     failed_message: Mapped[str | None] = mapped_column(sa.Text)
     built_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
 
 
 class DatasetItem(Base):
-    """A row in the project-wide, content-addressed, deduplicated pool."""
+    """A row in the project-wide, content-addressed, deduplicated pool.
+
+    Augmented copies are rows too, but they are NOT pool members: `source_item_id` marks them, they
+    belong to exactly one snapshot (never the draft), and their files live under that snapshot's
+    S3 prefix. Pool dedup on (dataset_id, content_hash) therefore only covers originals.
+    """
 
     __tablename__ = "dataset_items"
     __table_args__ = (
-        sa.UniqueConstraint("dataset_id", "content_hash", name="dataset_items_datasetId_contentHash_key"),
+        sa.Index(
+            "dataset_items_pool_contentHash_key",
+            "dataset_id",
+            "content_hash",
+            unique=True,
+            postgresql_where=sa.text("source_item_id IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
@@ -82,6 +97,13 @@ class DatasetItem(Base):
     storage_url: Mapped[str | None] = mapped_column(sa.Text)
     content_hash: Mapped[str | None] = mapped_column(sa.CHAR(64))
     byte_size: Mapped[int | None] = mapped_column(sa.Integer)
+    # The original this item was augmented from; NULL for real (pool) items. RESTRICT: an original
+    # with augmented copies is soft-deleted, never hard-deleted, like one referenced by a snapshot.
+    source_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("dataset_items.id", ondelete="RESTRICT"), index=True
+    )
+    # The ops (and params) that produced this copy.
+    augmentation: Mapped[Any | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at()
     # Set instead of hard-deleting when a snapshot RESTRICT FK blocks the delete.
     deleted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))

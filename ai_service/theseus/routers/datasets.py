@@ -12,7 +12,7 @@ import logging
 import os
 import uuid
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import sqlalchemy as sa
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
@@ -20,6 +20,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from theseus import constants as C
+from theseus.augmentation.config import MAX_AUGMENTED_ITEMS
+from theseus.augmentation.registry import AugmentationConfigError, describe, list_augmentations, validate_config
 from theseus.db.models import (
     Annotation,
     AudioFeatures,
@@ -39,6 +41,7 @@ from theseus.schemas.datasets import (
     AnnotationResponse,
     AudioFeaturesOut,
     AudioHealth,
+    AugmentationListResponse,
     AutoSplitBody,
     AutoSplitCounts,
     AutoSplitResponse,
@@ -80,6 +83,7 @@ from theseus.schemas.datasets import (
 from theseus.schemas.projects import DatasetSplit, VersionOut
 from theseus.services import datasets as svc
 from theseus.services import storage
+from theseus.services.augmentation import delete_augmented_items
 from theseus.services.cleanup import cleanup_version_storage
 from theseus.services.dataset_views import split_counts_for_dataset
 from theseus.services.image_size import read_image_dimensions
@@ -104,10 +108,39 @@ def _num(value: Any) -> float:
 
 @router.post("/projects/{project_id}/versions", status_code=202, response_model=VersionCreatedResponse)
 async def create_version(body: CreateVersionBody, draft: DraftDep, session: SessionDep) -> VersionCreatedResponse:
-    """Snapshot the draft current pool membership into a new immutable version (built asynchronously)."""
+    """Snapshot the draft current pool membership into a new immutable version (built asynchronously).
+
+    With `augmentation`, the build also materializes augmented copies of the TRAIN split (see
+    services/augmentation.py); validation and test stay original so metrics measure real data.
+    """
     tag = body.version_tag
 
-    version = DatasetVersion(dataset_id=draft.project.id, version_tag=tag, status="building")
+    augmentation_config = None
+    if body.augmentation is not None:
+        try:
+            config = validate_config(get_task_descriptor(draft.project.task), body.augmentation)
+        except AugmentationConfigError as e:
+            raise HTTPException(400, str(e)) from None
+        train_count = (
+            await session.execute(
+                sa.select(sa.func.count()).where(
+                    DatasetVersionItem.version_id == draft.draft.id, DatasetVersionItem.split_type == "train"
+                )
+            )
+        ).scalar_one()
+        if train_count == 0:
+            raise HTTPException(400, "The draft has no training items to augment")
+        if train_count * config.copies_per_item > MAX_AUGMENTED_ITEMS:
+            raise HTTPException(
+                400,
+                f"{train_count} training items x {config.copies_per_item} copies exceeds the limit of "
+                f"{MAX_AUGMENTED_ITEMS} augmented items per snapshot",
+            )
+        augmentation_config = config.model_dump(by_alias=True, exclude_none=True)
+
+    version = DatasetVersion(
+        dataset_id=draft.project.id, version_tag=tag, status="building", augmentation_config=augmentation_config
+    )
     session.add(version)
     try:
         await session.flush()
@@ -155,8 +188,18 @@ async def delete_version(version: VersionDep, session: SessionDep) -> None:
     if version.version_tag is None:
         raise HTTPException(400, "Cannot delete draft version")
     await cleanup_version_storage(version.id, version.version_tag)
+    # Augmented copies belong to this snapshot alone: their rows go with it (membership first, see
+    # delete_augmented_items), unlike pool items which other snapshots and the draft may share.
+    await delete_augmented_items(session, version.id)
     await session.delete(version)
     await session.commit()
+
+
+@router.get("/projects/{project_id}/augmentations", response_model=AugmentationListResponse)
+async def list_augmentation_options(project: ProjectDep) -> AugmentationListResponse:
+    """The augmentations a snapshot of this project can be built with (installed op classes that support its task)."""
+    task = get_task_descriptor(project.task)
+    return AugmentationListResponse(augmentations=[describe(op) for op in list_augmentations(task)])
 
 
 # -- Listing ---------------------------------------------------------------------------------
@@ -173,8 +216,12 @@ async def list_items(
     page: Annotated[int, Query(ge=1)] = 1,
     per_page: Annotated[int, Query(alias="perPage", ge=1, le=1000)] = 30,
     sort: str | None = None,
+    origin: Annotated[Literal["all", "original", "augmented"], Query()] = "all",
 ) -> ItemListResponse:
-    """Paginated pool items for the draft (default) or a given version."""
+    """Paginated pool items for the draft (default) or a given version.
+
+    `origin` narrows a snapshot to its real items or to its augmented copies (the draft has no copies).
+    """
     if version_id is not None:
         version = await session.get(DatasetVersion, version_id)
         if version is None or version.dataset_id != project.id:
@@ -210,6 +257,13 @@ async def list_items(
     # Split/search-scoped but deliberately WITHOUT the class filter: the class-count breakdown groups
     # over this, so every class count reflects the current split and search whatever class is selected.
     base = [vi.version_id == version.id]
+    if origin != "all":
+        # correlate(vi) only: the listing query joins DatasetItem itself, and auto-correlation would
+        # otherwise strip it from this subquery's FROM.
+        is_original = (
+            sa.exists().where(DatasetItem.id == vi.item_id, DatasetItem.source_item_id.is_(None)).correlate(vi)
+        )
+        base.append(is_original if origin == "original" else ~is_original)
     if split_value:
         base.append(vi.split_type == split_value)
     if search:
@@ -296,6 +350,13 @@ async def list_items(
             )
         ).scalars():
             anns.setdefault(a.item_id, []).append(a)
+        source_ids = {i.source_item_id for i in rows.values() if i.source_item_id is not None}
+        source_names: dict[uuid.UUID, str | None] = {}
+        if source_ids:
+            source_rows = await session.execute(
+                sa.select(DatasetItem.id, DatasetItem.external_id).where(DatasetItem.id.in_(source_ids))
+            )
+            source_names = {item_id: name for item_id, name in source_rows.all()}
 
         for item_id, split_type in members:
             item = rows.get(item_id)
@@ -315,6 +376,9 @@ async def list_items(
                     download_url=storage.get_download_url(C.BUCKET_DATASETS, item.storage_url, 3600)
                     if item.storage_url
                     else None,
+                    source_item_id=item.source_item_id,
+                    source_external_id=source_names.get(item.source_item_id) if item.source_item_id else None,
+                    augmentation=item.augmentation,
                 )
             )
 
@@ -417,7 +481,9 @@ async def upload_items(
                 existing = (
                     await session.execute(
                         sa.select(DatasetItem).where(
-                            DatasetItem.dataset_id == project_id, DatasetItem.content_hash == upload.hash
+                            DatasetItem.dataset_id == project_id,
+                            DatasetItem.content_hash == upload.hash,
+                            DatasetItem.source_item_id.is_(None),  # never dedup onto an augmented copy
                         )
                     )
                 ).scalar_one_or_none()
@@ -470,6 +536,8 @@ async def upload_items(
 
 @router.delete("/items/{item_id}", status_code=204)
 async def delete_item(item: ItemDep, session: SessionDep) -> None:
+    if item.source_item_id is not None:
+        raise HTTPException(400, "Augmented items belong to a snapshot; delete the snapshot instead")
     await svc.delete_item_from_pool(session, item.id, item.dataset_id)
     await session.commit()
 
@@ -653,7 +721,11 @@ async def get_dataset_health(draft: DraftDep, session: SessionDep) -> DatasetHea
     small = [c for c in distribution if c.count < svc.MIN_ITEMS_PER_CLASS]
 
     # Pool-wide integrity check: the (dataset, content_hash) dedup should keep both of these at 0.
-    live = (DatasetItem.dataset_id == project.id, DatasetItem.deleted_at.is_(None))
+    live = (
+        DatasetItem.dataset_id == project.id,
+        DatasetItem.deleted_at.is_(None),
+        DatasetItem.source_item_id.is_(None),  # augmented copies belong to snapshots, not the pool
+    )
     dup_groups = (
         await session.execute(
             sa.select(DatasetItem.content_hash)

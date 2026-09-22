@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import Field
 
+from theseus.augmentation.config import AugmentationConfig, AugmentationInfo
 from theseus.db.enums import (
     AnnotationType,
     AudioCodec,
@@ -29,6 +30,12 @@ class VersionDetail(VersionOut):
 
 class CreateVersionBody(ApiModel):
     version_tag: str = Field(min_length=1, max_length=50)
+    # Add augmented copies of the train split to the snapshot. Omit for a plain snapshot.
+    augmentation: AugmentationConfig | None = None
+
+
+class AugmentationListResponse(ApiModel):
+    augmentations: list[AugmentationInfo]
 
 
 class VersionCreatedResponse(ApiModel):
@@ -103,6 +110,10 @@ class ItemOut(ItemRow):
     annotations: list[AnnotationOut] = []
     split_type: SplitType
     download_url: str | None = None
+    # Set on augmented copies: the original they came from and the ops that produced them.
+    source_item_id: uuid.UUID | None = None
+    source_external_id: str | None = None
+    augmentation: Any | None = None
 
 
 class ClassCount(ApiModel):

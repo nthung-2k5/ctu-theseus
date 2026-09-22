@@ -21,16 +21,6 @@ from theseus.schemas.common import ApiModel
 
 LudwigFeatureType = Literal["image", "text", "audio", "number", "category", "binary", "sequence", "vector"]
 
-# Ludwig built-in image augmentation ops (ludwig.schema.features.augmentation.image).
-IMAGE_AUGMENTATION_TYPES = (
-    "random_horizontal_flip",
-    "random_vertical_flip",
-    "random_rotate",
-    "random_blur",
-    "random_brightness",
-    "random_contrast",
-)
-
 # A common, dependency-free subset of Ludwig optimizers (none need bitsandbytes).
 LUDWIG_OPTIMIZER_TYPES = ("adam", "adamw", "sgd", "rmsprop", "adagrad")
 

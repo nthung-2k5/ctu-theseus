@@ -64,6 +64,13 @@ exactly this reason — don't reintroduce filesystem template loading there.
   migration or frontend edit. `exports.format` is free text (a plugin id), not a Postgres enum. The
   actual model conversions live in `export/artifacts.py`; note Ludwig's `export_model` takes a
   *directory* and writes `model.onnx` / `model.pt2` inside it.
+- **Augmentation happens at snapshot creation, not training.** Ops are Python classes in
+  `ai_service/theseus/augmentation/ops/` (subclass `Augmentation`, a pydantic `Params` model, `apply`);
+  `GET /api/projects/{id}/augmentations` serves them and their parameters to the snapshot dialog.
+  `services/augmentation.py` materializes the copies as real train-split `dataset_items`
+  (`source_item_id` set) during `build_snapshot`. Augmented copies are NOT pool items: their files live
+  under `snapshots/{versionId}/augmented/`, pool dedup lookups must filter `source_item_id IS NULL`, and
+  they are deleted with their snapshot. There is no augmentation in the Ludwig training config.
 - **NATS event handlers must stay fast.** `server/lib/nats.ts` sets a short ack window; handlers
   in `server/lib/microservice.ts` flip a Postgres row's status and enqueue follow-up work, they
   don't do the follow-up work inline (e.g. export bundle assembly happens in a separate step, not

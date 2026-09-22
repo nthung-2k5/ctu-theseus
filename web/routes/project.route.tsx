@@ -72,6 +72,8 @@ const snapshotsSearchSchema = z.object({
   classId: itemClassIdSchema,
   search: z.string().optional().catch(undefined),
   sort: itemSortSchema,
+  // Absent means every item. Only meaningful for a snapshot built with augmentation.
+  origin: z.enum(['original', 'augmented']).optional().catch(undefined),
 })
 
 export const snapshotsRoute = createRoute({

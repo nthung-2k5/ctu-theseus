@@ -6,9 +6,13 @@
  * task registry — this is what makes it a no-code trainer: the form is
  * generated from what Ludwig actually supports for this task, not a
  * free-form JSON blob the user has to know the shape of.
+ *
+ * Augmentation is not a training option: it is chosen when a snapshot is
+ * created (see DatasetPage), so the augmented copies are real, browsable
+ * train-split items of that snapshot.
  */
 
-import { Button, Card, Checkbox, Group, MultiSelect, NumberInput, Select, Stack, TextInput, Title } from '@mantine/core'
+import { Button, Card, Checkbox, Group, NumberInput, Select, Stack, TextInput, Title } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { BrainIcon } from '@phosphor-icons/react'
 import { getTaskDescriptor } from '@public/lib/tasks'
@@ -20,15 +24,6 @@ interface CreateRunPanelProps {
 }
 
 const BATCH_SIZE_LABEL = (v: number | 'auto') => (v === 'auto' ? 'Auto' : String(v))
-
-const AUGMENTATION_OPTIONS = [
-  { value: 'random_horizontal_flip', label: 'Random Horizontal Flip' },
-  { value: 'random_vertical_flip', label: 'Random Vertical Flip' },
-  { value: 'random_rotate', label: 'Random Rotate' },
-  { value: 'random_blur', label: 'Random Blur' },
-  { value: 'random_brightness', label: 'Random Brightness' },
-  { value: 'random_contrast', label: 'Random Contrast' },
-]
 
 const IMAGE_SIZE_OPTIONS = [
   { value: '128', label: '128 × 128' },
@@ -68,7 +63,10 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
   const versionOptions =
     dataset?.versions
       ?.filter((v) => v.status === 'ready')
-      .map((v) => ({ value: v.id, label: `${v.versionTag} (${v.itemCount ?? 0} items)` })) ?? []
+      .map((v) => ({
+        value: v.id,
+        label: `${v.versionTag} (${v.itemCount ?? 0} items${v.augmentedCount ? `, ${v.augmentedCount} augmented` : ''})`,
+      })) ?? []
 
   const isClassification = descriptor.annotation.requiresLabelClasses
   const isVision = descriptor.modality === 'vision'
@@ -88,7 +86,6 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
       earlyStopPatience: knobs?.earlyStopPatience.default ?? 5,
       encoderId: encoders[0]?.id ?? '',
       useClassWeights: false,
-      augmentations: [] as string[],
       imageSize: '',
       optimizer: '',
       validationMetric: '',
@@ -110,7 +107,6 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
         earlyStopPatience: values.earlyStopPatience,
         ...(values.encoderId && { encoderId: values.encoderId }),
         ...(isClassification && values.useClassWeights && { useClassWeights: true }),
-        ...(isVision && values.augmentations.length > 0 && { augmentations: values.augmentations }),
         ...(isVision && values.imageSize && { imageSize: Number(values.imageSize) }),
         ...(values.optimizer && { optimizer: values.optimizer }),
         ...(values.validationMetric && { validationMetric: values.validationMetric }),
@@ -218,16 +214,6 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
               label="Weight classes by inverse frequency"
               description="Balances the loss so a minority class isn't drowned out by a majority one — recommended for imbalanced datasets"
               {...form.getInputProps('useClassWeights', { type: 'checkbox' })}
-            />
-          )}
-
-          {isVision && (
-            <MultiSelect
-              label="Augmentation"
-              description="Randomly perturb training images each epoch to reduce overfitting on a small dataset"
-              placeholder="No augmentation"
-              data={AUGMENTATION_OPTIONS}
-              {...form.getInputProps('augmentations')}
             />
           )}
 

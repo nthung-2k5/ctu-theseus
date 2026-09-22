@@ -105,6 +105,7 @@ theseus-datasets/
   pool/{projectId}/{hash[0:2]}/{hash}{ext}   content-addressed, deduped upload pool
   snapshots/{versionId}/dataset.parquet      immutable, cut from the pool
   snapshots/{versionId}/manifest.json
+  snapshots/{versionId}/augmented/...        augmented copies built with that snapshot (not pooled)
 
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config
@@ -122,6 +123,29 @@ theseus-models/
 
 Dataset pool uploads are deduplicated per-project by sha256: the same file uploaded twice
 (or referenced from two dataset versions) is stored once.
+
+### Snapshot augmentation
+
+Augmentation is chosen when a **snapshot** is created, not when training. The "Create Snapshot"
+dialog can add N augmented copies of every item in the **train** split (validation and test stay
+original, so metrics measure real data). During the build these copies are materialized as real
+`dataset_items` rows (`source_item_id` points at the original, with the modality features and a copy
+of its labels) and train-split members of that snapshot, so the parquet, manifest, split counts and
+the Snapshots page all include them. The Snapshots page shows an "Augmented" badge and an
+Original / Augmented filter, and the training form has no augmentation option.
+
+Augmented copies are *not* pool items: their files live under `snapshots/{versionId}/augmented/`,
+pool dedup only considers originals (`source_item_id IS NULL`), and deleting the snapshot deletes
+its copies. Copies are seeded from (snapshot, item, copy index), so a rebuild reproduces them.
+
+**Adding an augmentation:** create a module in `ai_service/theseus/augmentation/ops/` with a
+subclass of `Augmentation` that sets `id`, `label`, `modality`, a pydantic `Params` model (its
+`ge`/`le`/`default`/`title` become the form fields) and implements `apply(sample, params, rng)`.
+Restart the backend. `GET /api/projects/{id}/augmentations` returns it for projects whose task it
+supports (by default label-preserving classification and regression tasks of its modality) and the
+snapshot dialog renders its parameters, with no frontend change. Shipped ops: image (flip, rotate,
+brightness, contrast, saturation, blur, crop, noise), text (word deletion, swap, duplication,
+typos), audio (gain, noise, time shift, speed) and tabular (noise, scale jitter, feature dropout).
 
 ### Export formats
 

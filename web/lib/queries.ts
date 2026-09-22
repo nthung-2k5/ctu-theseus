@@ -48,6 +48,7 @@ export const projectItemsQueryOptions = (
     page?: number
     perPage?: number
     sort?: 'newest' | 'oldest' | 'filename'
+    origin?: 'all' | 'original' | 'augmented'
   },
 ) => defined(getListItemsQueryOptions(projectId, query))
 
@@ -122,6 +123,7 @@ export function useProjectItems(
     page?: number
     perPage?: number
     sort?: 'newest' | 'oldest' | 'filename'
+    origin?: 'all' | 'original' | 'augmented'
   },
 ) {
   return useQuery({ ...projectItemsQueryOptions(projectId ?? '', query), enabled: !!projectId })

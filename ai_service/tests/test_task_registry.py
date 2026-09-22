@@ -88,7 +88,7 @@ def test_descriptors_are_immutable_data_the_compiler_can_not_corrupt():
     compile_ludwig_config(
         get_task_descriptor("image_classification"),
         SnapshotContext(),
-        TrainerSelections(image_size=64, augmentations=["random_rotate"]),
+        TrainerSelections(image_size=64),
     )
     assert get_task_descriptor("image_classification").model_dump() == before
 

@@ -9,6 +9,7 @@ from datetime import datetime
 
 from pydantic import Field
 
+from theseus.augmentation.config import AugmentationConfig
 from theseus.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType
 from theseus.schemas.common import ApiModel
 
@@ -46,6 +47,9 @@ class VersionOut(ApiModel):
     class_count: int | None
     failed_message: str | None
     parquet_key: str | None
+    # What the snapshot was built with (None: no augmentation), and how many augmented copies it holds.
+    augmentation_config: AugmentationConfig | None
+    augmented_count: int
     built_at: datetime | None
     created_at: datetime
     split_counts: SplitCounts | None = None

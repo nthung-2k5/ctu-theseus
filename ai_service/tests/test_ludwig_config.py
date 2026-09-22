@@ -123,23 +123,20 @@ class TestClassWeighting:
             compile_("image_captioning", CAPTIONING, use_class_weights=True)
 
 
-class TestAugmentationAndResize:
+class TestResize:
     def test_untouched_by_default(self):
         f = compile_("image_classification", VISION)["input_features"][0]
         assert "augmentation" not in f and "preprocessing" not in f
 
-    def test_attaches_requested_augmentations(self):
-        f = compile_("image_classification", VISION, augmentations=["random_horizontal_flip", "random_rotate"])[
-            "input_features"
-        ][0]
-        assert f["augmentation"] == [{"type": "random_horizontal_flip"}, {"type": "random_rotate"}]
+    def test_training_config_never_carries_augmentation(self):
+        # Augmentation happens at snapshot creation now; a stale client that still sends the old field
+        # must not switch Ludwig train-time augmentation back on.
+        config = compile_("image_classification", VISION, augmentations=["random_rotate"])
+        assert "augmentation" not in config["input_features"][0]
+        assert "augmentations" not in TrainerSelections.model_fields
 
-    def test_unknown_augmentation_raises(self):
-        with pytest.raises(ConfigError, match="Unknown augmentation"):
-            compile_("image_classification", VISION, augmentations=["not_a_real_augmentation"])
-
-    def test_augmentation_and_resize_are_noops_for_non_image_tasks(self):
-        config = compile_("tabular_classification", TABULAR, augmentations=["random_rotate"], image_size=128)
+    def test_resize_is_a_noop_for_non_image_tasks(self):
+        config = compile_("tabular_classification", TABULAR, image_size=128)
         for f in config["input_features"]:
             assert "augmentation" not in f and "preprocessing" not in f
 

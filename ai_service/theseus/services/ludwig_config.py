@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from theseus import constants as C
 from theseus.schemas.common import ApiModel
 from theseus.services.task_registry import (
-    IMAGE_AUGMENTATION_TYPES,
     LUDWIG_OPTIMIZER_TYPES,
     EncoderChoice,
     SnapshotContext,
@@ -39,8 +38,8 @@ class TrainerSelections(ApiModel):
     encoder_id: str | None = None
     # Weight each class loss inversely to its snapshot frequency (category outputs only).
     use_class_weights: bool | None = None
-    # Ludwig image augmentation ops applied to every image input feature. Ignored for non-vision tasks.
-    augmentations: list[str] | None = None
+    # There is deliberately no augmentation here: it moved to snapshot creation, where the augmented
+    # copies are real, browsable train-split items (see services/augmentation.py).
     # Square-resize every image input feature to this many pixels per side. Ignored for non-vision tasks.
     image_size: int | None = None
     # Metric tracked for early stopping / best epoch instead of Ludwig per-output-type default.
@@ -116,10 +115,7 @@ def compile_ludwig_config(
     declared = copy.deepcopy(ludwig.input_features)
     if declared:
         input_features = [
-            _with_image_resize(
-                _with_augmentation(_with_encoder(f, ludwig.encoders, sel.encoder_id), sel.augmentations), sel.image_size
-            )
-            for f in declared
+            _with_image_resize(_with_encoder(f, ludwig.encoders, sel.encoder_id), sel.image_size) for f in declared
         ]
     else:
         # Tabular tasks do not know their column names statically: derive one number feature
@@ -181,16 +177,6 @@ def _with_encoder(feature: dict[str, Any], encoders: list[EncoderChoice], encode
         **feature,
         "encoder": {"type": encoder.encoder_type, "use_pretrained": encoder.pretrained, **(encoder.params or {})},
     }
-
-
-def _with_augmentation(feature: dict[str, Any], augmentations: list[str] | None) -> dict[str, Any]:
-    """Attach Ludwig built-in image augmentation ops. A no-op for every non-image feature."""
-    if not augmentations or feature["type"] != "image":
-        return feature
-    unknown = next((a for a in augmentations if a not in IMAGE_AUGMENTATION_TYPES), None)
-    if unknown:
-        raise ConfigError(f'Unknown augmentation "{unknown}" (available: {", ".join(IMAGE_AUGMENTATION_TYPES)})')
-    return {**feature, "augmentation": [{"type": a} for a in augmentations]}
 
 
 def _with_image_resize(feature: dict[str, Any], size: int | None) -> dict[str, Any]:

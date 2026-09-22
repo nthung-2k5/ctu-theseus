@@ -7,6 +7,7 @@ theseus-datasets/
   pool/{projectId}/{hash[0:2]}/{hash}{ext}   content-addressed, deduplicated upload pool
   snapshots/{versionId}/dataset.parquet      immutable, cut from the pool
   snapshots/{versionId}/manifest.json
+  snapshots/{versionId}/augmented/{hh}/{hash}{ext}   augmented copies built with that snapshot (not pooled)
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config
   {runId}/results/                           Ludwig output tree (incl. training_set_metadata.json)
@@ -14,7 +15,7 @@ theseus-training/
   {runId}/evaluation/report.json             bounded evaluation report
   {runId}/evaluation/predictions.parquet     full per-row predictions
 theseus-models/
-  {runId}/model.{onnx|torchscript}           raw single-file export artifacts
+  {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for verify scripts
   {runId}/predictions/{inferenceId}.csv      batch inference results
@@ -86,6 +87,17 @@ def snapshot_manifest_key(version_id: str) -> str:
     return f"snapshots/{version_id}/manifest.json"
 
 
+def augmented_prefix(version_id: str) -> str:
+    """Everything a snapshot's augmentation wrote. Version-scoped on purpose, NOT in the content-addressed
+    pool: an augmented copy belongs to exactly one snapshot, so deleting the snapshot deletes the prefix
+    and no copy can be shared with (or deduplicated onto) a real pool item."""
+    return f"snapshots/{version_id}/augmented/"
+
+
+def augmented_key(version_id: str, content_hash: str, ext: str) -> str:
+    return f"{augmented_prefix(version_id)}{content_hash[:2]}/{content_hash}{ext}"
+
+
 def training_config_key(run_id: str) -> str:
     return f"{run_id}/{C.TRAINING_CONFIG_FILENAME}"
 
@@ -110,8 +122,9 @@ def evaluation_predictions_key(run_id: str) -> str:
     return f"{evaluation_prefix(run_id)}predictions.parquet"
 
 
-def export_key(run_id: str, fmt: str) -> str:
-    return f"{run_id}/model.{fmt}"
+def export_key(run_id: str, artifact_filename: str) -> str:
+    """The converted model artifact, e.g. `{run}/model.onnx`. Shared by every format built from it."""
+    return f"{run_id}/{artifact_filename}"
 
 
 def bundle_key(run_id: str, export_id: str) -> str:

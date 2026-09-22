@@ -42,6 +42,7 @@ def _version_steps(version_id: uuid.UUID | str, version_tag: str | None) -> list
     return [
         (storage.delete_file, (C.BUCKET_DATASETS, storage.snapshot_parquet_key(v))),
         (storage.delete_file, (C.BUCKET_DATASETS, storage.snapshot_manifest_key(v))),
+        (storage.delete_prefix, (C.BUCKET_DATASETS, storage.augmented_prefix(v))),
     ]
 
 
@@ -62,7 +63,7 @@ def _run_steps(run_id: uuid.UUID | str, upload_keys: Iterable[str] = ()) -> list
 
 
 async def cleanup_version_storage(version_id: uuid.UUID | str, version_tag: str | None) -> None:
-    """Delete one snapshot version S3 objects. A no-op for the draft."""
+    """Delete one snapshot version S3 objects (parquet, manifest, augmented copies). A no-op for the draft."""
     await _run(_version_steps(version_id, version_tag))
 
 

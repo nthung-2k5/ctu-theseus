@@ -17,6 +17,7 @@ import {
   Modal,
   NumberInput,
   Stack,
+  Switch,
   Text,
   TextInput,
   Tooltip,
@@ -36,18 +37,25 @@ import {
   WarningCircleIcon,
   XIcon,
 } from '@phosphor-icons/react'
+import {
+  AugmentationConfigForm,
+  emptyAugmentationDraft,
+  toAugmentationConfig,
+} from '@public/components/dataset/AugmentationConfigForm'
 import { DatasetHealthPanel } from '@public/components/dataset/DatasetHealthPanel'
 import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
 import { SPLIT_TYPES, SplitProgressBar } from '@public/components/dataset/VersionBrowsing'
 import { confirmDelete, EmptyState, PageHeader } from '@public/components/ui'
+import { apiErrorMessage } from '@public/lib/api/client'
 import {
   autoSplitItems,
   classifyItems,
   createAnnotation,
   deleteItems,
   getCreateVersionMutationOptions,
+  getListAugmentationOptionsQueryOptions,
   setItemsSplit,
   updateAnnotation,
 } from '@public/lib/api/generated/datasets/datasets'
@@ -59,7 +67,7 @@ import {
   useProjectItems,
 } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
-import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 
@@ -84,6 +92,16 @@ const CreateVersionModal = ({
 
   const queryClient = useQueryClient()
 
+  // Augmentation is chosen here, at snapshot creation: the augmented copies become real train-split
+  // items of the snapshot (viewable and filterable on the Snapshots page), not a training-time option.
+  const { data: augmentationOptions } = useQuery(getListAugmentationOptionsQueryOptions(projectId))
+  const augmentations = augmentationOptions?.augmentations ?? []
+  const [augment, setAugment] = useState(false)
+  const [augmentationDraft, setAugmentationDraft] = useState(emptyAugmentationDraft)
+  const { data: trainItems } = useProjectItems(augment ? projectId : undefined, { perPage: 1, split: 'train' })
+  const trainCount = trainItems?.total ?? 0
+  const augmentationConfig = augment ? toAugmentationConfig(augmentationDraft) : undefined
+
   // Cheap way to get the draft's total/labeledCount without fetching every
   // row — the aggregate counts are computed server-side regardless of
   // perPage (see GET /projects/:projectId/items).
@@ -98,15 +116,21 @@ const CreateVersionModal = ({
       invalidateProjectScope(queryClient, projectId)
       notifications.show({ title: 'Version created', message: 'New snapshot version created', color: 'green' })
       form.reset()
+      setAugment(false)
+      setAugmentationDraft(emptyAugmentationDraft())
       onClose()
     },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Failed to create version', color: 'red' })
+    onError: (error) => {
+      notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to create version'), color: 'red' })
     },
   })
 
   return (
-    <form onSubmit={form.onSubmit((values) => createVersion.mutate({ projectId, data: values }))}>
+    <form
+      onSubmit={form.onSubmit((values) =>
+        createVersion.mutate({ projectId, data: { versionTag: values.versionTag, augmentation: augmentationConfig } }),
+      )}
+    >
       <Stack gap="md">
         {needsAnnotations && unlabeledCount > 0 && (
           <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unlabeled items in the draft">
@@ -119,11 +143,29 @@ const CreateVersionModal = ({
           placeholder="e.g. v1.0, snapshot-2024-01"
           {...form.getInputProps('versionTag')}
         />
+        {augmentations.length > 0 && (
+          <Stack gap="sm">
+            <Switch
+              label="Augment the training split"
+              description="Add extra, randomly perturbed copies of every training item to this snapshot. You can browse and filter them on the Snapshots page."
+              checked={augment}
+              onChange={(e) => setAugment(e.currentTarget.checked)}
+            />
+            {augment && (
+              <AugmentationConfigForm
+                options={augmentations}
+                draft={augmentationDraft}
+                onChange={setAugmentationDraft}
+                trainCount={trainCount}
+              />
+            )}
+          </Stack>
+        )}
         <Group justify="flex-end">
           <Button variant="subtle" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" loading={createVersion.isPending}>
+          <Button type="submit" loading={createVersion.isPending} disabled={augment && !augmentationConfig}>
             Create Snapshot
           </Button>
         </Group>
@@ -618,7 +660,13 @@ export function DatasetPage() {
         )}
       </Stack>
 
-      <Modal opened={createVersionOpened} onClose={closeCreateVersion} title="Create Snapshot Version" centered>
+      <Modal
+        opened={createVersionOpened}
+        onClose={closeCreateVersion}
+        title="Create Snapshot Version"
+        size="lg"
+        centered
+      >
         <CreateVersionModal projectId={projectId} needsAnnotations={needsAnnotations} onClose={closeCreateVersion} />
       </Modal>
 

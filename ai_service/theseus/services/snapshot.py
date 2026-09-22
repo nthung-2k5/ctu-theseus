@@ -31,6 +31,7 @@ from theseus.db.models import (
     TextFeatures,
 )
 from theseus.services import storage
+from theseus.services.augmentation import delete_augmented_items, materialize_augmentations
 from theseus.services.task_registry import ColumnSpec, SnapshotContext, TaskDescriptor, get_task_descriptor
 
 logger = logging.getLogger(__name__)
@@ -219,7 +220,22 @@ async def build_snapshot(version_id: uuid.UUID) -> None:
     """Build the parquet and manifest, then flip building -> ready | failed. Never raises."""
     sessionmaker = get_sessionmaker()
     loop = asyncio.get_running_loop()
+    augmentation_config: dict[str, Any] | None = None
+    augmented = 0
     try:
+        # Phase 1 (only when requested): materialize augmented train-split copies as real items, so the
+        # membership load below, and with it the parquet, manifest and counts, includes them unchanged.
+        async with sessionmaker() as session:
+            version = await session.get(DatasetVersion, version_id)
+            if version is None:
+                raise ValueError(f"Version {version_id} not found")
+            augmentation_config = version.augmentation_config
+        if augmentation_config:
+            result = await materialize_augmentations(version_id)
+            augmented = result.created
+            if result.skipped:
+                augmentation_config = {**augmentation_config, "skippedItems": result.skipped}
+
         async with sessionmaker() as session:
             version = await session.get(DatasetVersion, version_id)
             if version is None:
@@ -271,6 +287,8 @@ async def build_snapshot(version_id: uuid.UUID) -> None:
                     item_count=len(members),
                     class_count=len(class_names),
                     parquet_key=parquet_key,
+                    augmented_count=augmented,
+                    augmentation_config=augmentation_config,
                     built_at=sa.func.now(),
                 )
             )
@@ -288,6 +306,22 @@ async def build_snapshot(version_id: uuid.UUID) -> None:
         except Exception:
             # Startup recovery fails any version left in `building`, so this is not fatal.
             logger.exception("Could not record snapshot failure for version %s", version_id)
+        if augmentation_config:
+            await _discard_partial_augmentation(version_id)
+
+
+async def _discard_partial_augmentation(version_id: uuid.UUID) -> None:
+    """A failed build must not leave half an augmentation behind: its rows and S3 objects are useless
+    (nothing trains on a failed snapshot) and would otherwise linger until the version is deleted."""
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, storage.delete_prefix, C.BUCKET_DATASETS, storage.augmented_prefix(str(version_id))
+        )
+        async with get_sessionmaker()() as session:
+            await delete_augmented_items(session, version_id)
+            await session.commit()
+    except Exception:
+        logger.exception("Could not discard partial augmentation for version %s", version_id)
 
 
 async def read_snapshot_manifest(version_id: uuid.UUID | str) -> SnapshotContext:

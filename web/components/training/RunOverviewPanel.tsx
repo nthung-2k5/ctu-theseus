@@ -19,7 +19,9 @@ const HYPERPARAM_LABELS: Record<string, string> = {
   learningRate: 'Learning Rate',
   earlyStopPatience: 'Early Stop Patience',
   useClassWeights: 'Class Weighting',
-  augmentations: 'Augmentation',
+  // No longer a training option (augmentation is set when a snapshot is created), but runs started
+  // before that change still carry it in their hyperparameters.
+  augmentations: 'Augmentation (legacy)',
 }
 
 function formatHyperparamValue(value: unknown): string {
