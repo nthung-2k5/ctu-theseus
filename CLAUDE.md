@@ -57,6 +57,13 @@ exactly this reason — don't reintroduce filesystem template loading there.
   `theseus-training/{runId}/results/**/model/`), never from the `label_classes` Postgres table.
   Postgres doesn't know what index Ludwig assigned to which class; getting this wrong produces a
   bundle that runs, returns confident predictions, and silently mislabels everything.
+- **Export formats are plugins.** One Python class per format in
+  `ai_service/theseus/export/formats/` (subclass `ExportFormat`, set `id`/`label`/`group`/`artifact`,
+  implement `assemble`). `GET /api/export-formats` lists them and the web's single "Export format"
+  combobox renders that list, so adding a format is a new class plus a backend restart: no enum,
+  migration or frontend edit. `exports.format` is free text (a plugin id), not a Postgres enum. The
+  actual model conversions live in `export/artifacts.py`; note Ludwig's `export_model` takes a
+  *directory* and writes `model.onnx` / `model.pt2` inside it.
 - **NATS event handlers must stay fast.** `server/lib/nats.ts` sets a short ack window; handlers
   in `server/lib/microservice.ts` flip a Postgres row's status and enqueue follow-up work, they
   don't do the follow-up work inline (e.g. export bundle assembly happens in a separate step, not

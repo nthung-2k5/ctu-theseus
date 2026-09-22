@@ -11,9 +11,6 @@ from theseus.db.base import Base
 from theseus.db.models._common import created_at, pg_enum, updated_at, uuid_pk
 from theseus.db.models.training import JobColumns
 
-export_tier_t = pg_enum(e.ExportTier, "export_tier")
-export_format_t = pg_enum(e.ExportFormat, "export_format")
-export_lang_t = pg_enum(e.ExportLang, "export_lang")
 export_status_t = pg_enum(e.ExportStatus, "export_status")
 inference_job_status_t = pg_enum(e.InferenceJobStatus, "inference_job_status")
 
@@ -33,10 +30,9 @@ class ModelExport(JobColumns, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     run_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("training_runs.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id", ondelete="CASCADE"))
-    tier: Mapped[str] = mapped_column(export_tier_t)
-    format: Mapped[str] = mapped_column(export_format_t)
-    # NULL for the model tier: only devkit/app generate a client library.
-    lang: Mapped[str | None] = mapped_column(export_lang_t)
+    # An export format plugin id (theseus/export/formats/). Deliberately free text, not a Postgres
+    # enum: adding a format is a new Python class, never a migration.
+    format: Mapped[str] = mapped_column(sa.String(64))
     status: Mapped[str] = mapped_column(export_status_t, server_default="pending", index=True)
     bundle_key: Mapped[str | None] = mapped_column(sa.Text)
     byte_size: Mapped[int | None] = mapped_column(sa.Integer)

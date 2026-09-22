@@ -1,24 +1,66 @@
-"""Model exports in three tiers (model / devkit / app), assembled as a zip bundle.
+"""Model exports, assembled as a zip bundle by a pluggable export format.
 
+GET /export-formats lists the installed formats (theseus/export/formats/, one class each).
 POST /runs/{run_id}/exports inserts a `pending` row and returns 202. One export job (jobs/export.py)
 then walks pending -> converting -> assembling -> ready | failed, converting the model artifact only
-if an earlier export of another tier or language has not already produced it. There is no
+if an earlier export of another format has not already produced it. There is no
 lazy-reconcile-on-GET: a crashed job is re-queued by lease expiry or startup recovery.
 """
 
+import uuid
+from typing import Annotated
+
 import sqlalchemy as sa
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from theseus import constants as C
-from theseus.db.enums import APP_TARGETS, DEVKIT_LANGS
 from theseus.db.models import ModelExport, Project
-from theseus.deps import ExportDep, RunDep, SessionDep
+from theseus.deps import ExportDep, RunDep, SessionDep, UserId, owned_run
+from theseus.export.registry import find_export_format
+from theseus.export.registry import list_export_formats as installed_export_formats
 from theseus.jobs.dispatcher import nudge
-from theseus.schemas.serving import CreateExportBody, ExportAccepted, ExportListResponse, ExportResponse, ExportRow
+from theseus.schemas.serving import (
+    CreateExportBody,
+    ExportAccepted,
+    ExportFormatListResponse,
+    ExportFormatOut,
+    ExportListResponse,
+    ExportResponse,
+    ExportRow,
+)
 from theseus.services import storage
+from theseus.services.task_registry import get_task_descriptor
 
 router = APIRouter(tags=["export"])
+
+
+@router.get("/export-formats", response_model=ExportFormatListResponse)
+async def list_export_formats(
+    user_id: UserId, session: SessionDep, run_id: Annotated[uuid.UUID | None, Query(alias="runId")] = None
+) -> ExportFormatListResponse:
+    """Installed export formats, grouped and ordered for display.
+
+    With `runId`, only the formats that support that run's project task.
+    """
+    task = None
+    if run_id is not None:
+        run = await owned_run(run_id, user_id, session)
+        project = await session.get(Project, run.project_id)
+        task = get_task_descriptor(project.task)
+    return ExportFormatListResponse(
+        formats=[
+            ExportFormatOut(
+                id=f.id,
+                label=f.label,
+                description=f.description,
+                notice=f.notice,
+                group=f.group,
+                artifact=f.artifact,
+            )
+            for f in installed_export_formats(task)
+        ]
+    )
 
 
 @router.post("/runs/{run_id}/exports", status_code=202, response_model=ExportAccepted)
@@ -26,26 +68,15 @@ async def create_export(body: CreateExportBody, run: RunDep, session: SessionDep
     if run.status != "succeeded":
         raise HTTPException(409, f"Run is not succeeded (status: {run.status})")
 
-    if body.tier != "model":
-        # devkit / app ship an ONNX client: TorchScript would need libtorch at runtime, which would
-        # make a portable client a lie.
-        if body.format != "onnx":
-            raise HTTPException(400, f"tier '{body.tier}' only supports format 'onnx'")
-        if not body.lang:
-            raise HTTPException(400, f"tier '{body.tier}' requires a lang")
-        valid = DEVKIT_LANGS if body.tier == "devkit" else APP_TARGETS
-        if body.lang not in valid:
-            raise HTTPException(400, f"tier '{body.tier}' requires lang to be one of: {', '.join(valid)}")
+    export_format = find_export_format(body.format)
+    if export_format is None:
+        raise HTTPException(400, f"Unknown export format '{body.format}'")
 
     project = await session.get(Project, run.project_id)
-    row = ModelExport(
-        run_id=run.id,
-        user_id=project.user_id,
-        tier=body.tier,
-        format=body.format,
-        lang=None if body.tier == "model" else body.lang,
-        status="pending",
-    )
+    if not export_format.supports(get_task_descriptor(project.task)):
+        raise HTTPException(400, f"Export format '{body.format}' does not support this project's task")
+
+    row = ModelExport(run_id=run.id, user_id=project.user_id, format=body.format, status="pending")
     session.add(row)
     await session.commit()
     await session.refresh(row)

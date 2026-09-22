@@ -115,7 +115,7 @@ theseus-uploads/
   inference/{inferenceId}/input{ext}         async/batch inference inputs; deleted once the job ends
 
 theseus-models/
-  {runId}/model.{onnx|pt2|safetensors}       raw single-file export artifacts
+  {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for devkit verify scripts
 ```
@@ -123,26 +123,34 @@ theseus-models/
 Dataset pool uploads are deduplicated per-project by sha256: the same file uploaded twice
 (or referenced from two dataset versions) is stored once.
 
-### Export tiers
+### Export formats
 
-Three export tiers exist because "download the ONNX file," "give me code I can drop into my own
-project," and "give me something end users can just open" are different products with different
-constraints:
+"Download the ONNX file," "give me code I can drop into my own project," and "give me something end
+users can just open" are different products with different constraints, so each is its own **export
+format**: one Python class in `ai_service/theseus/export/formats/`. The web app has a single
+"Export format" combobox filled from `GET /api/export-formats`.
 
-| Tier | Format | Contents |
+| Group | Formats (ids) | Contents |
 |---|---|---|
-| `model` | onnx or torchscript | artifact + `preprocessing.json` + `labels.txt` + README |
-| `devkit` | onnx only | model tier + a generated inference client (source only: Python, TypeScript, C#, or Java/Kotlin) + example + a `verify` script |
-| `app` | onnx only | a runnable client app (a Progressive Web App or a Flutter mobile app) doing inference on-device/in-browser |
+| Model | `onnx`, `torch_export` | artifact + `preprocessing.json` + `labels.txt` + README |
+| Devkit | `python_devkit`, `typescript_devkit`, `csharp_devkit`, `java_devkit` | ONNX model + a generated inference client (source only) + example + a `verify` script where supported |
+| App | `pwa_app`, `flutter_app` | a runnable client app (Progressive Web App or Flutter) doing inference on-device/in-browser |
 
-`devkit`/`app` are ONNX-only: TorchScript needs libtorch at runtime, which would make a portable
-client a lie. `app` is never a server: both targets run inference entirely on the end user's own
-device, no backend involved. `devkit` ships **source only**, deliberately with no project/build
+Devkits and apps are ONNX-only: `torch_export` needs PyTorch at runtime, which would make a portable
+client a lie. Apps are never a server: both run inference entirely on the end user's own device.
+Devkits ship **source only**, deliberately with no project/build
 file (no `.csproj`, no Gradle, no `package.json`); the bundle's README documents the exact
 dependencies to add to your own project instead, since a devkit's job is to hand you working
-reference code to integrate, not a standalone scaffold. `app`'s targets are the exception:
+reference code to integrate, not a standalone scaffold. The apps are the exception:
 `pubspec.yaml` (Flutter) and the PWA's `index.html`/manifest are the app's actual required entry
 points, not incidental build tooling, so those do ship.
+
+**Adding a format:** create a module in `theseus/export/formats/` with a subclass of `ExportFormat`
+that sets `id`, `label`, `group` and `artifact` (a key of `export/artifacts.py`'s `ARTIFACTS`, which
+is the actual Ludwig conversion) and implements `assemble(ctx)`. Restart the backend. The
+format shows up in `GET /api/export-formats` and in the web combobox; there is no enum, migration or
+frontend change. Override `supports(task)` to hide a format for some tasks and set `notice` for a
+caveat the UI shows next to it.
 
 Every devkit/app client re-implements Ludwig's pre/postprocessing from a `preprocessing.json`
 extracted server-side from `training_set_metadata.json`. Critically, the class list comes from

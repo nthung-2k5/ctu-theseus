@@ -1,6 +1,6 @@
 """String-literal enums shared by the DB models and the API schemas (ported from server/lib/enums.ts)."""
 
-from typing import Literal, get_args
+from typing import Literal
 
 # fmt: off
 ProjectTask = Literal[
@@ -20,11 +20,6 @@ AnnotationType = Literal[
 ]
 TrainingStatus = Literal["queued", "running", "succeeded", "failed", "canceled"]
 DatasetVersionStatus = Literal["draft", "building", "ready", "failed"]
-ExportFormat = Literal["onnx", "torchscript"]
-ExportTier = Literal["model", "devkit", "app"]
-DevkitLang = Literal["python", "typescript", "csharp", "java"]
-AppTarget = Literal["pwa", "flutter"]
-ExportLang = Literal["python", "typescript", "csharp", "java", "pwa", "flutter"]
 ExportStatus = Literal["pending", "converting", "assembling", "ready", "failed"]
 EvaluationSplit = Literal["train", "test", "validation", "full"]
 EvaluationStatus = Literal["success", "failed"]
@@ -36,5 +31,3 @@ InferenceJobStatus = Literal["pending", "running", "success", "failed"]
 RunEventKind = Literal["status", "metric", "log"]
 
 TERMINAL_RUN_STATUSES: tuple[str, ...] = ("succeeded", "failed", "canceled")
-DEVKIT_LANGS: tuple[str, ...] = get_args(DevkitLang)
-APP_TARGETS: tuple[str, ...] = get_args(AppTarget)

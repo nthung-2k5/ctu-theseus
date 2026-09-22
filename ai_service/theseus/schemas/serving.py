@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from theseus.db.enums import ExportFormat, ExportLang, ExportStatus, ExportTier
+from theseus.db.enums import ExportStatus
 from theseus.schemas.common import ApiModel
 
 
@@ -44,9 +44,8 @@ class InferenceJobListResponse(ApiModel):
 
 
 class CreateExportBody(ApiModel):
-    tier: ExportTier
-    format: ExportFormat
-    lang: ExportLang | None = None
+    # An id from GET /api/export-formats.
+    format: str
 
 
 class ExportAccepted(ApiModel):
@@ -57,9 +56,7 @@ class ExportRow(ApiModel):
     id: uuid.UUID
     run_id: uuid.UUID
     user_id: uuid.UUID
-    tier: ExportTier
-    format: ExportFormat
-    lang: ExportLang | None
+    format: str
     status: ExportStatus
     bundle_key: str | None
     byte_size: int | None
@@ -68,6 +65,20 @@ class ExportRow(ApiModel):
     created_at: datetime
     ready_at: datetime | None
     updated_at: datetime
+
+
+class ExportFormatOut(ApiModel):
+    id: str
+    label: str
+    description: str
+    notice: str
+    group: str
+    # Which converted model this format is built from (e.g. onnx, torch_export).
+    artifact: str
+
+
+class ExportFormatListResponse(ApiModel):
+    formats: list[ExportFormatOut]
 
 
 class ExportListResponse(ApiModel):

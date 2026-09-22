@@ -2,8 +2,10 @@
  * Export tab for a selected training run — was the standalone Models page,
  * which listed one card per succeeded run. The run is now picked in the
  * Training sidebar, so this renders the export controls for exactly one run:
- * pick a tier (model / devkit / app — see server/lib/export/bundle.ts),
- * dispatch the build, and download the resulting zip.
+ * pick an export format, dispatch the build, and download the resulting zip.
+ *
+ * The formats are not hardcoded here: they come from GET /api/export-formats,
+ * where each one is a Python class in ai_service/theseus/export/formats/.
  */
 
 import { Alert, Button, Card, Group, Select, Stack, Text, Title } from '@mantine/core'
@@ -13,36 +15,14 @@ import { EmptyState, StatusBadge } from '@public/components/ui'
 import { apiErrorMessage } from '@public/lib/api/client'
 import {
   getCreateExportMutationOptions,
+  getListExportFormatsQueryOptions,
   getListExportsQueryKey,
   getListExportsQueryOptions,
 } from '@public/lib/api/generated/export/export'
+import type { ExportFormatOut } from '@public/lib/api/generated/models'
 import type { TrainingRunSummary } from '@public/store/types'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-
-type ExportTier = 'model' | 'devkit' | 'app'
-type ExportFormat = 'onnx' | 'torchscript'
-type ExportLang = 'python' | 'typescript' | 'csharp' | 'java' | 'pwa' | 'flutter'
-
-const TIER_OPTIONS = [
-  { value: 'model', label: 'Model only' },
-  { value: 'devkit', label: 'Devkit (client source)' },
-  { value: 'app', label: 'App (PWA or Flutter — no server)' },
-]
-const FORMAT_OPTIONS = [
-  { value: 'onnx', label: 'ONNX' },
-  { value: 'torchscript', label: 'TorchScript' },
-]
-const DEVKIT_LANG_OPTIONS = [
-  { value: 'python', label: 'Python' },
-  { value: 'typescript', label: 'TypeScript' },
-  { value: 'csharp', label: 'C#' },
-  { value: 'java', label: 'Java / Kotlin' },
-]
-const APP_TARGET_OPTIONS = [
-  { value: 'pwa', label: 'Progressive Web App' },
-  { value: 'flutter', label: 'Flutter' },
-]
+import { useMemo, useState } from 'react'
 
 const EXPORT_STATUS_COLORS: Record<string, string> = {
   pending: 'gray',
@@ -52,23 +32,32 @@ const EXPORT_STATUS_COLORS: Record<string, string> = {
   failed: 'red',
 }
 
+/** Mantine grouped-select data, keeping the server's group and item order. */
+function groupFormats(formats: ExportFormatOut[]) {
+  const groups = new Map<string, { value: string; label: string }[]>()
+  for (const f of formats) {
+    const items = groups.get(f.group) ?? []
+    items.push({ value: f.id, label: f.label })
+    groups.set(f.group, items)
+  }
+  return [...groups].map(([group, items]) => ({ group, items }))
+}
+
 function ExportRow({
   modelExport,
+  formatLabel,
 }: {
   modelExport: {
     id: string
-    tier: string
-    format: string
-    lang: string | null
     status: string
     failedMessage: string | null
   }
+  formatLabel: string
 }) {
-  const label = [modelExport.tier, modelExport.format, modelExport.lang].filter(Boolean).join(' · ')
   return (
     <Group justify="space-between" wrap="nowrap">
       <Group gap="xs" wrap="nowrap">
-        <Text size="sm">{label}</Text>
+        <Text size="sm">{formatLabel}</Text>
         <StatusBadge value={modelExport.status} colorMap={EXPORT_STATUS_COLORS} size="xs" />
       </Group>
       {modelExport.status === 'ready' ? (
@@ -96,12 +85,19 @@ function ExportRow({
 }
 
 export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
-  const [tier, setTier] = useState<ExportTier>('model')
-  const [format, setFormat] = useState<ExportFormat>('onnx')
-  const [lang, setLang] = useState<ExportLang>('python')
+  const [selectedFormat, setSelectedFormat] = useState<string | null>(null)
 
   const queryClient = useQueryClient()
   const exportsQueryKey = getListExportsQueryKey(run.id)
+
+  const { data: formatsData } = useQuery({
+    ...getListExportFormatsQueryOptions({ runId: run.id }),
+    enabled: run.status === 'succeeded',
+  })
+  const formats = formatsData?.formats ?? []
+  const formatData = useMemo(() => groupFormats(formats), [formats])
+  // Fall back to the first format until the user picks one (or if the picked one is no longer offered).
+  const format = formats.find((f) => f.id === selectedFormat) ?? formats[0]
 
   const { data } = useQuery({
     ...getListExportsQueryOptions(run.id),
@@ -120,14 +116,16 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
     ...getCreateExportMutationOptions(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: exportsQueryKey })
-      notifications.show({ title: 'Export started', message: `Building the ${tier} bundle…`, color: 'blue' })
+      notifications.show({
+        title: 'Export started',
+        message: `Building the ${format?.label ?? 'export'} bundle…`,
+        color: 'blue',
+      })
     },
     onError: (error) => {
       notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to start export'), color: 'red' })
     },
   })
-
-  const isTiered = tier !== 'model'
 
   if (run.status !== 'succeeded') {
     return (
@@ -153,75 +151,41 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
 
         <Group gap="sm" align="flex-end" wrap="wrap">
           <Select
-            label="Tier"
-            data={TIER_OPTIONS}
-            value={tier}
-            onChange={(v) => {
-              const nextTier = (v as ExportTier) ?? 'model'
-              setTier(nextTier)
-              if (nextTier === 'devkit') setLang('python')
-              else if (nextTier === 'app') setLang('pwa')
-            }}
+            label="Export format"
+            description={format?.description}
+            data={formatData}
+            value={format?.id ?? null}
+            onChange={(v) => setSelectedFormat(v)}
             allowDeselect={false}
-            w={200}
+            searchable
+            placeholder={formats.length === 0 ? 'Loading formats…' : undefined}
+            disabled={formats.length === 0}
+            w={320}
           />
-          <Select
-            label="Format"
-            data={isTiered ? FORMAT_OPTIONS.filter((f) => f.value === 'onnx') : FORMAT_OPTIONS}
-            value={isTiered ? 'onnx' : format}
-            onChange={(v) => setFormat((v as ExportFormat) ?? 'onnx')}
-            disabled={isTiered}
-            allowDeselect={false}
-            w={140}
-          />
-          {tier === 'devkit' && (
-            <Select
-              label="Language"
-              data={DEVKIT_LANG_OPTIONS}
-              value={lang}
-              onChange={(v) => setLang((v as ExportLang) ?? 'python')}
-              allowDeselect={false}
-              w={160}
-            />
-          )}
-          {tier === 'app' && (
-            <Select
-              label="Target"
-              data={APP_TARGET_OPTIONS}
-              value={lang}
-              onChange={(v) => setLang((v as ExportLang) ?? 'pwa')}
-              allowDeselect={false}
-              w={200}
-            />
-          )}
           <Button
             size="sm"
             loading={dispatchExport.isPending}
-            onClick={() =>
-              dispatchExport.mutate({
-                runId: run.id,
-                data: { tier, format: isTiered ? 'onnx' : format, lang: isTiered ? lang : undefined },
-              })
-            }
+            disabled={!format}
+            onClick={() => format && dispatchExport.mutate({ runId: run.id, data: { format: format.id } })}
           >
             Export
           </Button>
         </Group>
 
-        {isTiered && (
+        {format?.notice && (
           <Alert icon={<WarningCircleIcon size={16} />} color="gray" variant="light">
-            {tier === 'devkit'
-              ? 'Devkit bundles ship source only (no project/build files — dependencies are documented in the README) and only support ONNX.'
-              : 'App bundles are a Progressive Web App or Flutter app that runs inference on-device — never a server — and only support ONNX.'}{' '}
-            Preprocessing is currently implemented for image classification only — see the bundle's README for other
-            modalities.
+            {format.notice}
           </Alert>
         )}
 
         {exports.length > 0 && (
           <Stack gap="xs">
             {exports.map((e) => (
-              <ExportRow key={e.id} modelExport={e} />
+              <ExportRow
+                key={e.id}
+                modelExport={e}
+                formatLabel={formats.find((f) => f.id === e.format)?.label ?? e.format}
+              />
             ))}
           </Stack>
         )}

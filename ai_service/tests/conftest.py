@@ -176,7 +176,7 @@ def make_export(db, make_run):
     """Create an export row (and its run), returning (export_id, run_id)."""
     from theseus.db.models import ModelExport, TrainingRun
 
-    async def _make(status: str = "pending", tier: str = "model", fmt: str = "onnx", run_id=None, **fields):
+    async def _make(status: str = "pending", fmt: str = "onnx", run_id=None, **fields):
         import sqlalchemy as sa
 
         rid = run_id or await make_run(status="succeeded")
@@ -185,7 +185,7 @@ def make_export(db, make_run):
             from theseus.db.models import Project
 
             owner = (await s.execute(sa.select(Project.user_id).where(Project.id == user_id))).scalar_one()
-            e = ModelExport(run_id=rid, user_id=owner, tier=tier, format=fmt, status=status, **fields)
+            e = ModelExport(run_id=rid, user_id=owner, format=fmt, status=status, **fields)
             s.add(e)
             await s.commit()
             return e.id, rid

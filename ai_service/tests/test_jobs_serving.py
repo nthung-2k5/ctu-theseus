@@ -219,8 +219,8 @@ def export_env(monkeypatch):
     async def build_bundle(export_id):
         log.bundled.append(export_id)
 
-    def convert(run_id, fmt, dataset_key, export_id):
-        log.converted.append((run_id, fmt, dataset_key))
+    def convert(run_id, artifact, dataset_key, export_id):
+        log.converted.append((run_id, artifact.id, dataset_key))
 
     monkeypatch.setattr(export_job.bundle, "build_bundle", build_bundle)
     monkeypatch.setattr(export_job, "_convert", convert)
@@ -243,11 +243,24 @@ async def test_export_converts_a_missing_artifact_then_assembles(db, export_env,
     assert (await export_row(db, export_id)).status == "assembling"  # build_bundle owns ready / failed
 
 
-async def test_export_skips_conversion_when_another_tier_already_produced_the_artifact(db, export_env, make_export):
+async def test_export_converts_the_artifact_its_format_is_built_from(db, export_env, make_export):
+    export_id, run_id = await make_export(status="converting", attempt=1, fmt="torch_export")
+    await export_job.run_export(export_id)
+    assert [(r, a) for r, a, _ in export_env.converted] == [(str(run_id), "torch_export")]
+
+
+async def test_export_skips_conversion_when_another_format_already_produced_the_artifact(db, export_env, make_export):
     export_env.artifact_exists = True
-    export_id, _ = await make_export(status="converting", attempt=1, tier="devkit", lang="python")
+    export_id, _ = await make_export(status="converting", attempt=1, fmt="python_devkit")
     await export_job.run_export(export_id)
     assert export_env.converted == [] and export_env.bundled == [export_id]
+
+
+async def test_an_export_whose_format_was_uninstalled_raises_so_the_dispatcher_fails_it(db, export_env, make_export):
+    export_id, _ = await make_export(status="converting", attempt=1, fmt="removed_format")
+    with pytest.raises(ValueError, match="'removed_format' is no longer installed"):
+        await export_job.run_export(export_id)
+    assert export_env.converted == [] and export_env.bundled == []
 
 
 async def test_export_does_not_assemble_a_job_that_was_recovered_while_it_converted(db, export_env, make_export):

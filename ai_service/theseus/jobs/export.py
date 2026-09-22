@@ -5,8 +5,8 @@ assembling -> in-memory queue). One job now walks the whole status flow on a sin
 
     pending -> converting -> assembling -> ready | failed
 
-Conversion is skipped when the artifact already exists (an earlier export of another tier or
-language already produced it). The gateway lazy-reconcile-on-GET recovery is unnecessary: there
+Conversion is skipped when the artifact already exists (an earlier export of another format built
+from the same artifact already produced it). The gateway lazy-reconcile-on-GET recovery is unnecessary: there
 is no dropped event to recover from, and a crashed job is re-queued by lease expiry / startup
 recovery, which is safe because both conversion and assembly rewrite the same S3 keys.
 """
@@ -25,6 +25,8 @@ from theseus import constants as C
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import ModelExport, TrainingRun
 from theseus.export import bundle
+from theseus.export.artifacts import Artifact, convert, get_artifact
+from theseus.export.registry import find_export_format
 from theseus.jobs import queue
 from theseus.jobs.executors import export_executor, run_in_executor
 from theseus.services import storage
@@ -104,24 +106,18 @@ def _build_golden_sample(ludwig_model_dir: str, dataset_key: str) -> dict[str, A
         return None
 
 
-def _convert(run_id: str, export_format: str, dataset_key: str, export_id: str) -> None:
+def _convert(run_id: str, artifact: Artifact, dataset_key: str, export_id: str) -> None:
     """Sync: download the trained model, export it, upload the artifact and the golden sample."""
     with _conversion_lock:
         model_dir = storage.find_model_dir(storage.download_model(run_id))
-        export_path = os.path.join(str(get_settings().temp_dir), "exports", export_id, f"model.{export_format}")
-        os.makedirs(os.path.dirname(export_path), exist_ok=True)
+        workdir = os.path.join(str(get_settings().temp_dir), "exports", export_id)
+        os.makedirs(workdir, exist_ok=True)
 
         model = LudwigModel.load(model_dir)
-        if export_format == "torchscript":
-            model.export_model(export_path, format="torch_export")
-        elif export_format == "onnx":
-            model.export_model(export_path, format="onnx")
-        else:
-            raise ValueError(f"Unsupported export format: {export_format}")
+        export_path = convert(model, artifact, workdir)
+        storage.upload_file(C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename), export_path)
 
-        storage.upload_file(C.BUCKET_MODELS, storage.export_key(run_id, export_format), export_path)
-
-        # Best effort, and idempotent (same S3 key), so re-running per format is fine.
+        # Best effort, and idempotent (same S3 key), so re-running per artifact is fine.
         golden = _build_golden_sample(model_dir, dataset_key)
         if golden is not None:
             storage.upload_json(C.BUCKET_MODELS, storage.expected_sample_key(run_id), golden)
@@ -135,12 +131,19 @@ async def run_export(export_id: uuid.UUID) -> None:
         run = await s.get(TrainingRun, row.run_id) if row else None
     if row is None or run is None:
         return
-    run_id, fmt = str(row.run_id), row.format
-    logger.info("Starting export %s for run %s (format %s, tier %s)", export_id, run_id, fmt, row.tier)
+    run_id = str(row.run_id)
+    export_format = find_export_format(row.format)
+    if export_format is None:
+        # The plugin class was removed between enqueue and run; retrying cannot help.
+        raise ValueError(f"Export format {row.format!r} is no longer installed")
+    artifact = get_artifact(export_format.artifact)
+    logger.info("Starting export %s for run %s (format %s, artifact %s)", export_id, run_id, row.format, artifact.id)
 
-    if not await run_in_executor(None, storage.file_exists, C.BUCKET_MODELS, storage.export_key(run_id, fmt)):
+    if not await run_in_executor(
+        None, storage.file_exists, C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename)
+    ):
         dataset_key = storage.snapshot_parquet_key(str(run.dataset_version_id))
-        await run_in_executor(export_executor, _convert, run_id, fmt, dataset_key, str(export_id))
+        await run_in_executor(export_executor, _convert, run_id, artifact, dataset_key, str(export_id))
 
     # Guarded: only a job still in `converting` may advance. Zero rows means it was recovered or
     # failed by someone else in the meantime, so do nothing further.

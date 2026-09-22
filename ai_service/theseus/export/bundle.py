@@ -1,8 +1,9 @@
 """Assemble an export bundle zip and upload it (ported from server/lib/export/bundle.ts).
 
-assemble_files() is pure (bytes in, file list out) so the per-tier, per-language layout can be
-tested exhaustively; build_bundle() is the thin async wrapper that loads the inputs, zips in the
-export executor, uploads, and owns the final `ready` / `failed` transition. It never raises.
+assemble_files() is pure (bytes in, file list out) and delegates the layout to the export format
+class (theseus/export/formats/), so each format's layout can be tested on its own. build_bundle() is
+the thin async wrapper that loads the inputs, zips in the export executor, uploads, and owns the
+final `ready` / `failed` transition. It never raises.
 """
 
 import asyncio
@@ -10,12 +11,8 @@ import hashlib
 import io
 import json
 import logging
-import re
 import uuid
 import zipfile
-from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 import sqlalchemy as sa
@@ -23,58 +20,21 @@ import sqlalchemy as sa
 from theseus import constants as C
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import ModelExport, Project, TrainingRun
+from theseus.export.artifacts import get_artifact
+from theseus.export.common import TEMPLATES, BundleFile, GoldenSample, dart_package_name, dumps, render, template
+from theseus.export.formats.base import BundleContext
 from theseus.export.metadata import extract_preprocessing
-from theseus.export.readme import ReadmeVars, render_readme
+from theseus.export.registry import get_export_format
 from theseus.jobs.executors import export_executor, run_in_executor
 from theseus.services import storage
 from theseus.services.task_registry import get_task_descriptor
 
 logger = logging.getLogger(__name__)
 
-TEMPLATES = Path(__file__).parent / "templates"
-
-DEVKIT_LANGS = ("python", "typescript", "csharp", "java")
-APP_LANGS = ("pwa", "flutter")
-
 # A fixed timestamp keeps a bundle reproducible: the same inputs always produce the same zip bytes.
 ZIP_EPOCH = (2020, 1, 1, 0, 0, 0)
 
-
-@dataclass
-class BundleFile:
-    path: str
-    data: bytes
-    # The model artifact is already compact binary: store it (level 0) instead of deflating.
-    compress: bool = True
-
-
-@dataclass
-class GoldenSample:
-    expected_json: bytes
-    sample_filename: str
-    sample_bytes: bytes
-
-
-@lru_cache
-def template(relative: str) -> str:
-    return (TEMPLATES / relative).read_text(encoding="utf-8")
-
-
-def render(tpl: str, variables: dict[str, str]) -> str:
-    """{{VAR}} substitution for README and manifest-ish files: deliberately a literal replace, not a template engine."""
-    return re.sub(r"\{\{(\w+)\}\}", lambda m: variables.get(m.group(1), ""), tpl)
-
-
-def dumps(value: Any) -> str:
-    return json.dumps(value, indent=2, ensure_ascii=False)
-
-
-def dart_package_name(name: str) -> str:
-    """A valid pubspec `name:`: lowercase_with_underscores, starting with a letter."""
-    snake = re.sub(r"^_+|_+$", "", re.sub(r"[^a-z0-9]+", "_", name.lower()))
-    if not snake:
-        return "theseus_app"
-    return snake if re.match(r"[a-z]", snake) else f"app_{snake}"
+__all__ = ["TEMPLATES", "BundleFile", "GoldenSample", "dart_package_name", "dumps", "render", "template"]
 
 
 def resolve_sample_file(input_value: Any, download) -> tuple[str, bytes] | None:
@@ -117,93 +77,23 @@ def assemble_files(
     *,
     run_name: str,
     task_label: str,
-    tier: str,
-    fmt: str,
-    lang: str | None,
+    format_id: str,
     model_bytes: bytes,
     preprocessing: dict[str, Any],
     golden: GoldenSample | None,
 ) -> list[BundleFile]:
-    files: list[BundleFile] = []
-    labels = next((o["classes"] for o in preprocessing["outputs"] if o.get("classes")), None)
-    pre_json = dumps(preprocessing).encode()
-
-    def add(path: str, data: str | bytes, compress: bool = True) -> None:
-        files.append(BundleFile(path, data.encode() if isinstance(data, str) else data, compress))
-
-    def place_model(prefix: str) -> None:
-        add(f"{prefix}model.{fmt}", model_bytes, compress=False)
-        add(f"{prefix}preprocessing.json", pre_json)
-        if labels:
-            add(f"{prefix}labels.txt", "\n".join(labels))
-
-    def place_golden(prefix: str) -> None:
-        if golden is None:
-            return
-        add(f"{prefix}expected.json", golden.expected_json)
-        add(f"{prefix}sample/{golden.sample_filename}", golden.sample_bytes)
-
-    if tier == "model":
-        place_model("")
-        add("README.md", render_readme(ReadmeVars(run_name, task_label, fmt, tier, False), None))
-        return files
-
-    # devkit / app: the model tier files plus a generated client.
-    allowed = {"devkit": DEVKIT_LANGS, "app": APP_LANGS}.get(tier, ())
-    if lang not in allowed:
-        raise ValueError(f"tier '{tier}' requires a lang in {sorted(allowed)}, got {lang!r}")
-    variables = {"RUN_NAME": run_name, "TASK": task_label}
-    readme = ReadmeVars(run_name, task_label, fmt, tier, golden is not None)
-
-    if lang == "python":
-        place_model("")
-        place_golden("")
-        add("theseus_client.py", template("python/theseus_client.py"))
-        add("example.py", template("python/example.py"))
-        if golden:
-            add("verify.py", template("python/verify.py"))
-    elif lang == "typescript":
-        place_model("")
-        place_golden("")
-        add("client.ts", template("typescript/client.ts.tmpl"))
-        add("example.ts", template("typescript/example.ts.tmpl"))
-        if golden:
-            add("verify.ts", template("typescript/verify.ts.tmpl"))
-    elif lang == "csharp":
-        place_model("")
-        place_golden("")
-        add("TheseusClient.cs", template("csharp/TheseusClient.cs"))
-        add("Program.cs", template("csharp/Program.cs"))
-    elif lang == "java":
-        place_model("")
-        place_golden("")
-        add("TheseusClient.java", template("java/TheseusClient.java"))
-        add("Main.java", template("java/Main.java"))
-    elif lang == "pwa":
-        # Fetched relative to index.html at runtime, so root placement is correct.
-        place_model("")
-        place_golden("")
-        add("index.html", render(template("pwa/index.html.tmpl"), variables))
-        add("app.js", template("pwa/app.js"))
-        add("sw.js", template("pwa/sw.js"))
-        add("manifest.webmanifest", render(template("pwa/manifest.webmanifest.tmpl"), variables))
-        add("icon.svg", template("pwa/icon.svg"))
-        add("style.css", template("pwa/style.css"))
-    elif lang == "flutter":
-        # Flutter only reads files declared as pubspec assets, so the assets/ prefix is required.
-        place_model("assets/")
-        place_golden("assets/")
-        add(
-            "pubspec.yaml",
-            render(template("flutter/pubspec.yaml.tmpl"), {**variables, "PACKAGE_NAME": dart_package_name(run_name)}),
-        )
-        add("lib/main.dart", render(template("flutter/lib/main.dart.tmpl"), variables))
-        add("lib/theseus_client.dart", template("flutter/lib/theseus_client.dart"))
-    else:  # unreachable while DEVKIT_LANGS/APP_LANGS match the branches above
-        raise AssertionError(lang)
-
-    add("README.md", render_readme(readme, lang))
-    return files
+    fmt = get_export_format(format_id)
+    ctx = BundleContext(
+        run_name=run_name,
+        task_label=task_label,
+        format_label=fmt.label,
+        artifact_filename=get_artifact(fmt.artifact).filename,
+        model_bytes=model_bytes,
+        preprocessing=preprocessing,
+        golden=golden if fmt.needs_golden else None,
+    )
+    fmt.assemble(ctx)
+    return ctx.files
 
 
 def make_zip(files: list[BundleFile]) -> bytes:
@@ -248,16 +138,18 @@ async def _assemble(export_id: uuid.UUID) -> tuple[uuid.UUID, list[BundleFile]]:
         if run is None or project is None:
             raise ValueError(f"Run {row.run_id} or its project not found")
         preprocessing = await extract_preprocessing(session, run.id)
-        tier, fmt, lang = row.tier, row.format, row.lang
+        format_id = row.format
         run_id, run_name = run.id, run.name
         task_label = get_task_descriptor(project.task).label
 
+    fmt = get_export_format(format_id)
+    artifact = get_artifact(fmt.artifact)
     model_bytes = await run_in_executor(
-        None, storage.download_bytes, C.BUCKET_MODELS, storage.export_key(str(run_id), fmt)
+        None, storage.download_bytes, C.BUCKET_MODELS, storage.export_key(str(run_id), artifact.filename)
     )
-    golden = await _load_golden(run_id) if tier != "model" else None
+    golden = await _load_golden(run_id) if fmt.needs_golden else None
     files = assemble_files(
-        run_name=run_name, task_label=task_label, tier=tier, fmt=fmt, lang=lang,
+        run_name=run_name, task_label=task_label, format_id=format_id,
         model_bytes=model_bytes, preprocessing=preprocessing, golden=golden,
     )  # fmt: skip
     return run_id, files

@@ -10,6 +10,7 @@ from fastapi.routing import APIRoute
 
 from theseus.deps import verify_origin
 from theseus.errors import install_error_handlers
+from theseus.export.registry import list_export_formats
 from theseus.lifespan import lifespan
 from theseus.routers import (
     api_keys,
@@ -42,6 +43,10 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     install_error_handlers(app)
+    # Import every export format plugin now, so a duplicate id or a broken plugin module stops the
+    # backend at startup instead of failing the first request that needs it. Import only: no DB, S3
+    # or network, so this stays safe for the OpenAPI export script.
+    list_export_formats()
 
     api = APIRouter(prefix="/api")
     api.include_router(auth.router)

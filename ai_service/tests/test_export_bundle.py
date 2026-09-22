@@ -1,4 +1,4 @@
-"""Export bundles: per-tier/language file layout, preprocessing decompilation, zip, and assembly end to end."""
+"""Export bundles: per-format file layout, preprocessing decompilation, zip, and assembly end to end."""
 
 import hashlib
 import io
@@ -11,8 +11,13 @@ import sqlalchemy as sa
 
 from theseus.db.models import LabelClass, ModelExport, TrainingRun
 from theseus.export import bundle as B
+from theseus.export.formats.base import ExportFormat, _registry
+from theseus.export.formats.csharp_devkit import CSharpDevkit
+from theseus.export.formats.pwa_app import PwaApp
+from theseus.export.formats.python_devkit import PythonDevkit
 from theseus.export.metadata import build_manifest, extract_preprocessing
-from theseus.export.readme import ReadmeVars, render_readme
+from theseus.export.readme import ReadmeVars, app_readme, devkit_readme, model_readme
+from theseus.export.registry import get_export_format, list_export_formats
 from theseus.jobs import export as export_job
 from theseus.services import storage
 
@@ -26,9 +31,9 @@ PRE = {
 GOLDEN = B.GoldenSample(b'{"schemaVersion": 1}', "input.png", b"png-bytes")
 
 
-def files(tier="devkit", lang="python", golden=GOLDEN, fmt="onnx", pre=PRE, name="Cats vs Dogs"):
+def files(fmt="python_devkit", golden=GOLDEN, pre=PRE, name="Cats vs Dogs"):
     out = B.assemble_files(
-        run_name=name, task_label="Image Classification", tier=tier, fmt=fmt, lang=lang,
+        run_name=name, task_label="Image Classification", format_id=fmt,
         model_bytes=b"MODEL", preprocessing=pre, golden=golden,
     )  # fmt: skip
     return {f.path: f for f in out}
@@ -80,36 +85,34 @@ def test_golden_expected_json_is_rewritten_to_bundle_local_paths():
     assert "s3://" not in json.dumps(out)  # no internal bucket path leaks into a user-facing bundle
 
 
-# -- Layout per tier and language ------------------------------------------------------------
+# -- Layout per format -----------------------------------------------------------------------
 
 
-def test_model_tier_is_just_the_artifact_metadata_labels_and_readme():
-    assert set(files("model", None)) == {"model.onnx", "preprocessing.json", "labels.txt", "README.md"}
-    assert set(files("model", None, fmt="torchscript")) == {
-        "model.torchscript", "preprocessing.json", "labels.txt", "README.md"
-    }  # fmt: skip
+def test_model_formats_are_just_the_artifact_metadata_labels_and_readme():
+    assert set(files("onnx")) == {"model.onnx", "preprocessing.json", "labels.txt", "README.md"}
+    assert set(files("torch_export")) == {"model.pt2", "preprocessing.json", "labels.txt", "README.md"}
 
 
 def test_labels_txt_is_written_in_ludwig_index_order_and_only_for_classification():
-    assert files("model", None)["labels.txt"].data == b"dog\ncat"
+    assert files("onnx")["labels.txt"].data == b"dog\ncat"
     regression = {**PRE, "outputs": [{"name": "target", "type": "number", "column": "target"}]}
-    assert "labels.txt" not in files("model", None, pre=regression)
+    assert "labels.txt" not in files("onnx", pre=regression)
 
 
 @pytest.mark.parametrize(
-    ("lang", "client_files", "verify"),
+    ("fmt", "client_files", "verify"),
     [
-        ("python", {"theseus_client.py", "example.py"}, "verify.py"),
-        ("typescript", {"client.ts", "example.ts"}, "verify.ts"),
-        ("csharp", {"TheseusClient.cs", "Program.cs"}, None),
-        ("java", {"TheseusClient.java", "Main.java"}, None),
+        ("python_devkit", {"theseus_client.py", "example.py"}, "verify.py"),
+        ("typescript_devkit", {"client.ts", "example.ts"}, "verify.ts"),
+        ("csharp_devkit", {"TheseusClient.cs", "Program.cs"}, None),
+        ("java_devkit", {"TheseusClient.java", "Main.java"}, None),
     ],
 )
-def test_devkit_languages_ship_source_only_with_verify_where_supported(lang, client_files, verify):
-    with_golden = set(files("devkit", lang))
+def test_devkits_ship_source_only_with_verify_where_supported(fmt, client_files, verify):
+    with_golden = set(files(fmt))
     base = {"model.onnx", "preprocessing.json", "labels.txt", "README.md", "expected.json", "sample/input.png"}
     assert with_golden == base | client_files | ({verify} if verify else set())
-    without = set(files("devkit", lang, golden=None))
+    without = set(files(fmt, golden=None))
     assert without == {"model.onnx", "preprocessing.json", "labels.txt", "README.md"} | client_files
     # devkits are deliberately source only: never a build or project file
     assert not any(
@@ -118,7 +121,7 @@ def test_devkit_languages_ship_source_only_with_verify_where_supported(lang, cli
 
 
 def test_pwa_places_everything_at_the_root_and_renders_its_templates():
-    out = files("app", "pwa", golden=GOLDEN)
+    out = files("pwa_app", golden=GOLDEN)
     assert set(out) == {
         "index.html", "app.js", "sw.js", "manifest.webmanifest", "icon.svg", "style.css",
         "model.onnx", "preprocessing.json", "labels.txt", "expected.json", "sample/input.png", "README.md",
@@ -129,7 +132,7 @@ def test_pwa_places_everything_at_the_root_and_renders_its_templates():
 
 
 def test_flutter_puts_model_files_under_assets_and_uses_a_valid_package_name():
-    out = files("app", "flutter", name="Cats vs Dogs")
+    out = files("flutter_app", name="Cats vs Dogs")
     assert {"assets/model.onnx", "assets/preprocessing.json", "assets/labels.txt", "assets/expected.json",
             "assets/sample/input.png", "pubspec.yaml", "lib/main.dart", "lib/theseus_client.dart",
             "README.md"} == set(out)  # fmt: skip
@@ -140,15 +143,18 @@ def test_flutter_puts_model_files_under_assets_and_uses_a_valid_package_name():
 
 
 def test_the_model_artifact_is_stored_uncompressed_and_everything_else_is_deflated():
-    out = files("devkit", "python")
+    out = files("python_devkit")
     assert out["model.onnx"].compress is False
     assert all(f.compress for p, f in out.items() if p != "model.onnx")
 
 
-def test_a_devkit_or_app_without_a_language_is_an_error():
-    for tier, lang in (("devkit", None), ("app", "python"), ("devkit", "pwa")):
-        with pytest.raises(ValueError, match="requires a lang"):
-            files(tier, lang)
+def test_a_model_format_never_embeds_a_golden_sample():
+    assert "expected.json" not in files("onnx", golden=GOLDEN)
+
+
+def test_an_unknown_format_is_a_clear_error():
+    with pytest.raises(KeyError, match="Unknown export format 'nope'"):
+        files("nope")
 
 
 def test_every_shipped_template_exists_and_is_valid_utf8():
@@ -157,22 +163,82 @@ def test_every_shipped_template_exists_and_is_valid_utf8():
     assert len(list(B.TEMPLATES.rglob("*.py"))) == 3 and (B.TEMPLATES / "flutter/lib/theseus_client.dart").exists()
 
 
-def test_readme_reflects_tier_language_and_whether_a_verify_path_exists():
-    base = dict(run_name="R", task_label="T", format="onnx")
-    dev = render_readme(ReadmeVars(**base, tier="devkit", has_verify=True), "python")
+def test_readme_reflects_the_format_and_whether_a_verify_path_exists():
+    def v(verify):
+        return ReadmeVars("R", "T", "Some format", "model.onnx", verify)
+
+    dev = devkit_readme(v(True), PythonDevkit.readme_info)
     assert "pip install onnxruntime" in dev and "python verify.py" in dev and "`expected.json`" in dev
-    assert "python verify.py" not in render_readme(ReadmeVars(**base, tier="devkit", has_verify=False), "python")
-    app = render_readme(ReadmeVars(**base, tier="app", has_verify=True), "pwa")
+    assert "python verify.py" not in devkit_readme(v(False), PythonDevkit.readme_info)
+    app = app_readme(v(True), PwaApp.readme_info)
     assert "Progressive Web App" in app and "self-check" in app
-    assert "no client code" in render_readme(ReadmeVars(**base, tier="model", has_verify=False), None)
-    assert "dotnet add package" in render_readme(ReadmeVars(**base, tier="devkit", has_verify=False), "csharp")
+    assert "no client code" in model_readme(v(False)) and "`model.onnx`" in model_readme(v(False))
+    assert "dotnet add package" in devkit_readme(v(False), CSharpDevkit.readme_info)
+
+
+# -- Plugin discovery ------------------------------------------------------------------------
+
+
+def test_the_shipped_formats_are_discovered_grouped_and_ordered():
+    listed = [(f.group, f.id) for f in list_export_formats()]
+    assert listed == [
+        ("Model", "onnx"), ("Model", "torch_export"),
+        ("Devkit", "python_devkit"), ("Devkit", "typescript_devkit"), ("Devkit", "csharp_devkit"),
+        ("Devkit", "java_devkit"),
+        ("App", "pwa_app"), ("App", "flutter_app"),
+    ]  # fmt: skip
+
+
+def test_a_new_format_class_is_picked_up_with_no_other_change():
+    class ExtraFormat(ExportFormat):
+        id = "test_only_format"
+        label = "Test only"
+        group = "Experimental"
+
+        @classmethod
+        def assemble(cls, ctx):
+            ctx.add("hello.txt", "hi")
+
+    try:
+        assert get_export_format("test_only_format") is ExtraFormat
+        assert list_export_formats()[-1] is ExtraFormat  # unknown groups sort after the built-in ones
+        out = B.assemble_files(
+            run_name="r", task_label="t", format_id="test_only_format", model_bytes=b"m", preprocessing=PRE, golden=None
+        )
+        assert [f.path for f in out] == ["hello.txt"]
+    finally:
+        _registry.unregister("test_only_format")
+
+
+def test_a_duplicate_format_id_fails_loudly_at_import():
+    list_export_formats()  # make sure the shipped formats are loaded before defining a clash
+    with pytest.raises(ValueError, match="Duplicate export format id 'onnx'"):
+
+        class Clash(ExportFormat):
+            id = "onnx"
+            label = "Clash"
+
+            @classmethod
+            def assemble(cls, ctx):
+                pass
+
+
+def test_a_helper_base_without_an_id_is_not_registered():
+    class Helper(ExportFormat):
+        label = "Helper"
+
+        @classmethod
+        def assemble(cls, ctx):
+            pass
+
+    assert Helper not in list_export_formats()
 
 
 # -- Zip -------------------------------------------------------------------------------------
 
 
 def test_zip_stores_the_model_deflates_the_rest_and_is_byte_for_byte_reproducible():
-    listing = list(files("devkit", "python").values())
+    listing = list(files("python_devkit").values())
     first, second = B.make_zip(listing), B.make_zip(listing)
     assert first == second  # a fixed epoch: identical inputs give an identical bundle and checksum
     with zipfile.ZipFile(io.BytesIO(first)) as zf:
@@ -271,8 +337,8 @@ def s3(monkeypatch):
     return store
 
 
-async def prepared_export(db, make_export, s3, *, tier="devkit", lang="python", golden=True, config=True):
-    export_id, run_id = await make_export(status="assembling", attempt=1, tier=tier, lang=lang)
+async def prepared_export(db, make_export, s3, *, fmt="python_devkit", golden=True, config=True):
+    export_id, run_id = await make_export(status="assembling", attempt=1, fmt=fmt)
     async with db() as s:
         run = (await s.execute(sa.select(TrainingRun).where(TrainingRun.id == run_id))).scalar_one()
         run.name = "Cats vs Dogs"
@@ -342,8 +408,8 @@ async def test_a_golden_sample_whose_input_file_vanished_degrades_to_no_verify_i
         assert e.status == "ready" and "verify.py" not in zf.namelist()
 
 
-async def test_the_model_tier_needs_no_golden_sample_or_client(db, make_export, s3):
-    export_id, _ = await prepared_export(db, make_export, s3, tier="model", lang=None)
+async def test_a_model_format_needs_no_golden_sample_or_client(db, make_export, s3):
+    export_id, _ = await prepared_export(db, make_export, s3, fmt="onnx")
     await B.build_bundle(export_id)
     e = await row(db, export_id)
     with zipfile.ZipFile(io.BytesIO(s3[("theseus-models", e.bundle_key)])) as zf:
@@ -380,8 +446,8 @@ async def test_the_whole_export_job_converts_then_assembles_to_ready(db, make_ex
         await sess.execute(sa.update(ModelExport).where(ModelExport.id == export_id).values(status="converting"))
         await sess.commit()
 
-    def fake_convert(run, fmt, dataset_key, export):
-        s3[("theseus-models", storage.export_key(run, fmt))] = b"CONVERTED"
+    def fake_convert(run, artifact, dataset_key, export):
+        s3[("theseus-models", storage.export_key(run, artifact.filename))] = b"CONVERTED"
 
     monkeypatch.setattr(export_job, "_convert", fake_convert)
     await export_job.run_export(export_id)

@@ -2269,6 +2269,57 @@
         }
       }
     },
+    "/api/export-formats": {
+      "get": {
+        "tags": [
+          "export"
+        ],
+        "summary": "List Export Formats",
+        "description": "Installed export formats, grouped and ordered for display.\n\nWith `runId`, only the formats that support that run's project task.",
+        "operationId": "list_export_formats",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportFormatListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/runs/{run_id}/exports": {
       "post": {
         "tags": [
@@ -3547,46 +3598,13 @@
       },
       "CreateExportBody": {
         "properties": {
-          "tier": {
-            "type": "string",
-            "enum": [
-              "model",
-              "devkit",
-              "app"
-            ],
-            "title": "Tier"
-          },
           "format": {
             "type": "string",
-            "enum": [
-              "onnx",
-              "torchscript"
-            ],
             "title": "Format"
-          },
-          "lang": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "python",
-                  "typescript",
-                  "csharp",
-                  "java",
-                  "pwa",
-                  "flutter"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lang"
           }
         },
         "type": "object",
         "required": [
-          "tier",
           "format"
         ],
         "title": "CreateExportBody"
@@ -4349,6 +4367,60 @@
         ],
         "title": "ExportAccepted"
       },
+      "ExportFormatListResponse": {
+        "properties": {
+          "formats": {
+            "items": {
+              "$ref": "#/components/schemas/ExportFormatOut"
+            },
+            "type": "array",
+            "title": "Formats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "formats"
+        ],
+        "title": "ExportFormatListResponse"
+      },
+      "ExportFormatOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "notice": {
+            "type": "string",
+            "title": "Notice"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group"
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "notice",
+          "group",
+          "artifact"
+        ],
+        "title": "ExportFormatOut"
+      },
       "ExportListResponse": {
         "properties": {
           "exports": {
@@ -4394,41 +4466,9 @@
             "format": "uuid",
             "title": "Userid"
           },
-          "tier": {
-            "type": "string",
-            "enum": [
-              "model",
-              "devkit",
-              "app"
-            ],
-            "title": "Tier"
-          },
           "format": {
             "type": "string",
-            "enum": [
-              "onnx",
-              "torchscript"
-            ],
             "title": "Format"
-          },
-          "lang": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "python",
-                  "typescript",
-                  "csharp",
-                  "java",
-                  "pwa",
-                  "flutter"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lang"
           },
           "status": {
             "type": "string",
@@ -4513,9 +4553,7 @@
           "id",
           "runId",
           "userId",
-          "tier",
           "format",
-          "lang",
           "status",
           "bundleKey",
           "byteSize",
