@@ -104,7 +104,6 @@ const web = await builder
     port: 5173,
     isProxied: false,
   })
-  .withReference(api)
   .waitFor(api)
   .withExternalHttpEndpoints()
 
@@ -112,7 +111,8 @@ await builder
   .addYarp('proxy')
   .withConfiguration(async (config) => {
     await config.addCatchAllRoute(web)
-    await config.addRoute('/api/{**catch-all}', api)
+    // A plain container has no service discovery, so route to its endpoint rather than the resource.
+    await config.addRoute('/api/{**catch-all}', await api.getEndpoint('http'))
   })
   .waitFor(api)
   .waitFor(web)
