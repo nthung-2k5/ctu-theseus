@@ -44,6 +44,37 @@ async def ready_version(db, fake_s3, project_id, task="image_classification", st
     return str(vid)
 
 
+# -- Training backends -------------------------------------------------------------------------
+
+
+async def test_all_training_backends_lists_ludwig_available_with_its_supported_tasks(client, new_user):
+    c = await new_user()
+    backends = (await c.get("/api/training-backends")).json()["backends"]
+    ludwig = next(b for b in backends if b["id"] == "ludwig")
+    assert ludwig["available"] is True and ludwig["unavailableReason"] is None
+    assert "image_classification" in ludwig["supportedTasks"]
+    assert "object_detection" not in ludwig["supportedTasks"]  # planned: no backend supports it
+    assert ludwig["models"] == [] and ludwig["params"] == []  # no task in scope, nothing to derive them from
+
+
+async def test_project_training_backends_gives_ludwig_its_task_specific_models_and_params(client, new_user):
+    c = await new_user()
+    p = await project(c, "image_classification")
+    backends = (await c.get(f"/api/projects/{p['id']}/training-backends")).json()["backends"]
+    assert [b["id"] for b in backends] == ["ludwig"]
+    ludwig = backends[0]
+    assert ludwig["models"][0]["id"] == "resnet18"
+    assert ludwig["modelParamName"] == "encoderId"
+    param_names = {p["name"] for p in ludwig["params"]}
+    assert {"epochs", "batchSize", "learningRate", "imageSize", "useClassWeights"} <= param_names
+
+
+async def test_a_stranger_cannot_see_another_users_project_training_backends(client, new_user):
+    owner, stranger = await new_user(), await new_user()
+    p = await project(owner)
+    assert (await stranger.get(f"/api/projects/{p['id']}/training-backends")).status_code == 403
+
+
 # -- Start training --------------------------------------------------------------------------
 
 

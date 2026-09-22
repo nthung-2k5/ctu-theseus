@@ -48,6 +48,7 @@ import {
   deleteProject as deleteProjectRequest,
   getCreateProjectMutationOptions,
 } from '@public/lib/api/generated/projects/projects'
+import { useListTrainingBackends } from '@public/lib/api/generated/training/training'
 import { formatDate } from '@public/lib/format'
 import { invalidateProjectList, useProjects } from '@public/lib/queries'
 import { taskRegistry } from '@public/lib/tasks'
@@ -90,18 +91,36 @@ const MODALITY_META: Record<DatasetModality, ModalityMeta> = {
 }
 
 /**
- * Tasks grouped by modality for selection.
+ * Tasks grouped by modality for selection, enabled iff some installed and available trainer
+ * backend actually supports them right now (GET /training-backends) — see `useTaskOptions`.
  */
-const TASK_OPTIONS = (Object.keys(MODALITY_META) as DatasetModality[]).map((modality) => ({
-  group: MODALITY_META[modality].label,
-  items: Object.values(taskRegistry)
-    .filter((d) => d.modality === modality)
-    .map((d) => ({
-      value: d.id,
-      label: d.backend === 'ludwig' ? d.label : `${d.label} (coming soon)`,
-      disabled: d.backend !== 'ludwig',
-    })),
-}))
+function useTaskOptions() {
+  const { data } = useListTrainingBackends()
+  const trainableTaskIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const backend of data?.backends ?? []) {
+      if (backend.available) for (const taskId of backend.supportedTasks) ids.add(taskId)
+    }
+    return ids
+  }, [data])
+
+  const options = useMemo(
+    () =>
+      (Object.keys(MODALITY_META) as DatasetModality[]).map((modality) => ({
+        group: MODALITY_META[modality].label,
+        items: Object.values(taskRegistry)
+          .filter((d) => d.modality === modality)
+          .map((d) => ({
+            value: d.id,
+            label: trainableTaskIds.has(d.id) ? d.label : `${d.label} (coming soon)`,
+            disabled: !trainableTaskIds.has(d.id),
+          })),
+      })),
+    [trainableTaskIds],
+  )
+
+  return { options, trainableTaskIds }
+}
 
 const QUICK_STARTERS: {
   title: string
@@ -157,6 +176,8 @@ const CreateProjectModal = () => {
 
   const selectedTaskDescriptor = form.values.task ? taskRegistry[form.values.task as ProjectTask] : undefined
   const selectedModality = selectedTaskDescriptor?.modality
+  const { options: taskOptions, trainableTaskIds } = useTaskOptions()
+  const isTrainable = !!selectedTaskDescriptor && trainableTaskIds.has(selectedTaskDescriptor.id)
 
   const createProject = useMutation({
     ...getCreateProjectMutationOptions(),
@@ -248,7 +269,7 @@ const CreateProjectModal = () => {
         <Select
           label="ML Task"
           placeholder="Select ML task"
-          data={TASK_OPTIONS}
+          data={taskOptions}
           searchable
           required
           {...form.getInputProps('task')}
@@ -265,8 +286,8 @@ const CreateProjectModal = () => {
                   {selectedTaskDescriptor.label}
                 </Text>
               </Group>
-              <Badge variant="dot" color={selectedTaskDescriptor.backend === 'ludwig' ? 'green' : 'gray'} size="xs">
-                {selectedTaskDescriptor.backend === 'ludwig' ? 'Ludwig Engine Ready' : 'Planned'}
+              <Badge variant="dot" color={isTrainable ? 'green' : 'gray'} size="xs">
+                {isTrainable ? 'Trainer Ready' : 'Planned'}
               </Badge>
             </Group>
             <Text size="xs" c="dimmed">

@@ -15,9 +15,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from theseus import constants as C
 from theseus.backends.base import ConfigError, HyperparamsBase
 from theseus.backends.ludwig.tasks import LUDWIG_OPTIMIZER_TYPES, LUDWIG_TASKS, EncoderChoice
+from theseus.schemas.common import ParamSpec
 from theseus.services.task_registry import SnapshotContext, TaskDescriptor
 
 LUDWIG_VERSION = "0.17.5"
+
+# Curated choice menus. Ludwig itself doesn't validate these (validation_metric is passed straight
+# through and rejected by Ludwig only if the output type doesn't support it), so they live here as
+# a UI convenience rather than as pydantic Literal fields on LudwigHyperparameters.
+_CLASSIFICATION_METRICS = ["loss", "accuracy"]
+_REGRESSION_METRICS = ["loss", "mean_squared_error", "mean_absolute_error", "r2"]
+_IMAGE_SIZES = ["128", "224", "256"]
 
 
 class LudwigHyperparameters(HyperparamsBase):
@@ -208,3 +216,76 @@ def _apply_class_weights(
         {**f, "loss": {"type": "softmax_cross_entropy", "class_weights": weights}} if f["type"] == "category" else f
         for f in output_features
     ]
+
+
+def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
+    """The create-run/create-sweep form's knobs for this task: the shared trainer knobs (with this
+    task's own defaults and bounds — an `ecd` task and an `llm` task have very different epoch and
+    batch-size defaults) plus optimizer/validation-metric/image-size/class-weights, each offered
+    only where it makes sense for this task. `LudwigHyperparameters`'s generic field introspection
+    can't produce this: knob bounds are per-task, `batchSize` mixes numbers with `"auto"`, and
+    `optimizer`/`validationMetric` are freeform strings with a curated menu rather than a fixed
+    pydantic Literal.
+    """
+    spec = LUDWIG_TASKS.get(task.id)
+    knobs = spec.trainer_knobs if spec is not None else None
+    if knobs is None:
+        return []
+
+    specs = [
+        ParamSpec(
+            name="epochs", label="Epochs", type="int",
+            default=knobs.epochs.default, min=knobs.epochs.min, max=knobs.epochs.max, step=1,
+        ),
+        ParamSpec(
+            name="batchSize", label="Batch Size", type="choice",
+            default=str(knobs.batch_size.default), choices=[str(o) for o in knobs.batch_size.options],
+        ),
+        ParamSpec(
+            name="learningRate", label="Learning Rate", type="float", default=knobs.learning_rate.default,
+            min=knobs.learning_rate.min, max=knobs.learning_rate.max,
+            step=_learning_rate_step(knobs.learning_rate.min, knobs.learning_rate.max),
+        ),
+        ParamSpec(
+            name="earlyStopPatience", label="Early Stop Patience", description="-1 disables early stopping",
+            type="int", default=knobs.early_stop_patience.default, min=knobs.early_stop_patience.min, step=1,
+        ),
+        ParamSpec(
+            name="optimizer", label="Optimizer", type="choice", default=None, choices=list(LUDWIG_OPTIMIZER_TYPES),
+            description="Defaults to Ludwig's per-model-type default (Adam for ECD)",
+        ),
+    ]  # fmt: skip
+
+    # Only non-LLM tasks (category or number output) have a comparable metric menu; experimental
+    # tasks' text/sequence outputs don't.
+    if task.status == "stable":
+        metrics = _CLASSIFICATION_METRICS if task.annotation.requires_label_classes else _REGRESSION_METRICS
+        specs.append(
+            ParamSpec(name="validationMetric", label="Early Stop / Best-Epoch Metric", type="choice",
+                       default=None, choices=metrics)
+        )  # fmt: skip
+
+    if task.modality == "vision":
+        specs.append(
+            ParamSpec(name="imageSize", label="Image Size", type="choice", default=None, choices=_IMAGE_SIZES,
+                       description="Resizes every training image to a square of this size")
+        )  # fmt: skip
+
+    if task.annotation.requires_label_classes:
+        specs.append(
+            ParamSpec(
+                name="useClassWeights",
+                label="Weight classes by inverse frequency",
+                type="bool",
+                default=False,
+                description="Balances the loss so a minority class isn't drowned out by a majority one — "
+                "recommended for imbalanced datasets",
+            )
+        )
+
+    return specs
+
+
+def _learning_rate_step(lo: float | None, hi: float | None) -> float:
+    span = (hi - lo) if lo is not None and hi is not None else 1.0
+    return 0.0001 if span <= 0.01 else 0.001 if span <= 1 else 0.01

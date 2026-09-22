@@ -7334,12 +7334,23 @@
             ],
             "title": "Unavailablereason"
           },
+          "supportedTasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supportedtasks"
+          },
           "models": {
             "items": {
               "$ref": "#/components/schemas/ModelChoiceOut"
             },
             "type": "array",
             "title": "Models"
+          },
+          "modelParamName": {
+            "type": "string",
+            "title": "Modelparamname"
           },
           "params": {
             "items": {
@@ -7355,7 +7366,9 @@
           "label",
           "description",
           "available",
+          "supportedTasks",
           "models",
+          "modelParamName",
           "params"
         ],
         "title": "TrainingBackendOut"

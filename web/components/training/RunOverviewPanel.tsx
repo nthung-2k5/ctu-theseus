@@ -7,6 +7,7 @@
  */
 
 import { Badge, Card, Group, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
+import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
 import { useTrainingRunDetail } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectTask, TrainingRunSummary } from '@public/store/types'
@@ -56,15 +57,26 @@ function InfoStat({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
-export function RunOverviewPanel({ run, task }: { run: TrainingRunSummary; task: ProjectTask }) {
+export function RunOverviewPanel({
+  run,
+  task,
+  projectId,
+}: {
+  run: TrainingRunSummary
+  task: ProjectTask
+  projectId: string
+}) {
   // Not gated on run status — hyperparameters are fixed at queue time.
   const { data, isLoading } = useTrainingRunDetail(run.id, true)
   const hyperparameters = (data?.run.hyperparameters ?? null) as Record<string, unknown> | null
+  // Model choices are per trainer backend now (GET /training-backends), not a static per-task
+  // list — a run's own model id might belong to any of the backends this project could train with.
+  const { data: backendsData } = useListProjectTrainingBackends(projectId)
+  const models = backendsData?.backends.flatMap((b) => b.models) ?? []
 
   const descriptor = getTaskDescriptor(task)
-  const encoders = descriptor.ludwig?.encoders ?? []
   const encoderId = hyperparameters?.encoderId as string | undefined
-  const modelLabel = encoderId ? (encoders.find((e) => e.id === encoderId)?.label ?? encoderId) : descriptor.label
+  const modelLabel = encoderId ? (models.find((m) => m.id === encoderId)?.label ?? encoderId) : descriptor.label
 
   const isActive = run.status === 'running' || run.status === 'queued'
   const startedAt = run.startedAt ? new Date(run.startedAt) : null

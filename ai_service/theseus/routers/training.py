@@ -71,7 +71,9 @@ def _backend_out(info) -> TrainingBackendOut:
         description=info.description,
         available=info.available,
         unavailable_reason=info.unavailable_reason,
+        supported_tasks=info.supported_tasks,
         models=[ModelChoiceOut(**m.model_dump()) for m in info.models],
+        model_param_name=info.model_param_name,
         params=info.params,
     )
 

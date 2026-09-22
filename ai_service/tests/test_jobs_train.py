@@ -113,17 +113,21 @@ class FakeFrame:
         self.written_to = path
 
 
-@pytest.fixture(autouse=True, scope="module")
-def _unregister_fake_backend_after_this_module():
-    """FakeBackend registers itself at class-definition time (module import) via
-    __init_subclass__, like every real backend. Unregister it once this module's tests are done,
-    so it never leaks into another test file's `list_backends()` / `default_backend()`."""
-    yield
-    backend_registry.unregister("fake")
+# FakeBackend registers itself at class-definition time (module import) via __init_subclass__,
+# like every real backend — which, for a class defined in a test module, means at pytest
+# COLLECTION time, before any test in the whole session runs (collection imports every test
+# module up front). Left registered, it would leak into any other file's `list_backends()` /
+# `default_backend()` for as long as this module's tests haven't finished executing, and — worse —
+# collection order is not guaranteed to match execution order (an explicit file list, `-k`, an
+# IDE running one file, a random-order plugin...), so that leak window isn't reliably bounded to
+# "before this file's own tests run". Undo the auto-registration immediately, and have the
+# function-scoped `env` fixture register/unregister it around each test that actually needs it.
+backend_registry.unregister("fake")
 
 
 @pytest.fixture
 async def env(db, monkeypatch, tmp_path, make_run):
+    backend_registry.register(FakeBackend)
     FakeBackend.instances = []
     FakeBackend.epochs, FakeBackend.losses = 3, [0.9, 0.4, 0.6]
     FakeBackend.fail_with, FakeBackend.on_epoch_done = None, None
@@ -155,6 +159,7 @@ async def env(db, monkeypatch, tmp_path, make_run):
     uninstall_run_log_handler(handler)
     set_log_handler(None)
     set_event_writer(None)
+    backend_registry.unregister("fake")
 
 
 async def run_row(db, rid):

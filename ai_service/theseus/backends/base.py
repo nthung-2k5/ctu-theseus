@@ -33,7 +33,9 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from theseus.params import param_specs
 from theseus.plugins import Registry
+from theseus.schemas.common import ParamSpec
 from theseus.services.predict import InferenceOutput
 from theseus.services.task_registry import SnapshotContext, TaskDescriptor
 
@@ -195,6 +197,19 @@ class TrainerBackend(ABC):
     def models(cls, task: TaskDescriptor) -> list[ModelChoice]:
         """Selectable models/architectures for this task. Empty is valid (a backend with one
         fixed model per task, e.g. a classical ML backend with no pretrained-weights choice)."""
+
+    @classmethod
+    def hyperparameter_specs(cls, task: TaskDescriptor) -> list[ParamSpec]:
+        """`ParamSpec`s for this backend's hyperparameters, for the create-run/create-sweep form.
+
+        Default: introspect `Hyperparameters` (see `theseus.params.param_specs`), leniently — a
+        field with no generic representation (a mixed type like `int | Literal["auto"]`) is
+        skipped rather than raising, and `modelId` is always skipped since it's exposed via
+        `models(task)` instead. Override this when defaults or bounds vary by task (Ludwig's
+        epoch/batch-size defaults differ for an `ecd` vs an `llm` task) or when a field deserves a
+        richer spec than generic introspection can produce.
+        """
+        return [p for p in param_specs(cls.Hyperparameters, strict=False) if p.name != "modelId"]
 
     @classmethod
     @abstractmethod

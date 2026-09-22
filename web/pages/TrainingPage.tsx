@@ -169,7 +169,12 @@ export function TrainingPage() {
   })
 
   /* ── Handlers ── */
-  const handleStartTraining = (config: { name: string; datasetVersionId: string; hyperparameters: unknown }) => {
+  const handleStartTraining = (config: {
+    name: string
+    datasetVersionId: string
+    backend: string
+    hyperparameters: unknown
+  }) => {
     startTraining.mutate({ projectId, data: config as TrainBody })
   }
 
@@ -351,7 +356,7 @@ export function TrainingPage() {
           {selectedRun ? (
             <Grid>
               <Grid.Col span={{ base: 12, md: 4 }}>
-                <RunOverviewPanel run={selectedRun} task={project.task} />
+                <RunOverviewPanel run={selectedRun} task={project.task} projectId={projectId} />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 8 }}>
                 <Tabs value={activeTab} onChange={setTab}>

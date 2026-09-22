@@ -24,7 +24,7 @@ import type {
   LabelClassOut,
   ProjectSummary,
   RunSummary,
-  SearchSpace,
+  CreateSweepBodySearchSpace as SearchSpace,
   SweepDetailResponse,
   VersionOut,
 } from './../lib/api/generated/models'

@@ -29,8 +29,10 @@ from theseus.backends.base import (
 )
 from theseus.backends.ludwig.artifacts import ARTIFACTS
 from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
+from theseus.backends.ludwig.compile import hyperparameter_specs as _hyperparameter_specs
 from theseus.backends.ludwig.manifest import METADATA_FILENAME
 from theseus.backends.ludwig.tasks import LUDWIG_TASKS
+from theseus.schemas.common import ParamSpec
 from theseus.services.task_registry import SnapshotContext, TaskDescriptor
 
 
@@ -61,6 +63,10 @@ class LudwigBackend(TrainerBackend):
         if spec is None:
             return []
         return [ModelChoice(id=e.id, label=e.label, pretrained=e.pretrained) for e in spec.encoders]
+
+    @classmethod
+    def hyperparameter_specs(cls, task: TaskDescriptor) -> list[ParamSpec]:
+        return _hyperparameter_specs(task)
 
     @classmethod
     def compile(cls, task: TaskDescriptor, ctx: SnapshotContext, hp: LudwigHyperparameters) -> dict[str, Any]:

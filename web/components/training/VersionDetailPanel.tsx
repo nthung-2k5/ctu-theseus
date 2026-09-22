@@ -86,7 +86,12 @@ export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPane
       }
       return out
     }
-    return finishedMetrics.map((m) => ({ epoch: m.epoch, split: m.split, metricName: m.metricName, value: m.metricValue }))
+    return finishedMetrics.map((m) => ({
+      epoch: m.epoch,
+      split: m.split,
+      metricName: m.metricName,
+      value: m.metricValue,
+    }))
   }, [isActive, live.metricPoints, finishedMetrics])
 
   const metricIndex = useMemo(() => {
@@ -99,14 +104,8 @@ export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPane
     () => Array.from(new Set(flatMetrics.map((f) => f.epoch))).sort((a, b) => a - b),
     [flatMetrics],
   )
-  const splits = useMemo(
-    () => SPLIT_ORDER.filter((s) => flatMetrics.some((f) => f.split === s)),
-    [flatMetrics],
-  )
-  const metricNames = useMemo(
-    () => Array.from(new Set(flatMetrics.map((f) => f.metricName))).sort(),
-    [flatMetrics],
-  )
+  const splits = useMemo(() => SPLIT_ORDER.filter((s) => flatMetrics.some((f) => f.split === s)), [flatMetrics])
+  const metricNames = useMemo(() => Array.from(new Set(flatMetrics.map((f) => f.metricName))).sort(), [flatMetrics])
 
   /* ── Chart selection: one metric, one or more splits, x axis = epoch ── */
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null)
@@ -115,7 +114,7 @@ export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPane
   const effectiveMetric =
     selectedMetric !== null && metricNames.includes(selectedMetric)
       ? selectedMetric
-      : (metricNames.includes('loss') ? 'loss' : metricNames[0]) ?? null
+      : ((metricNames.includes('loss') ? 'loss' : metricNames[0]) ?? null)
 
   const effectiveChartSplits = chartSplits.filter((s) => splits.includes(s))
   const chartSplitsToUse = effectiveChartSplits.length > 0 ? effectiveChartSplits : splits
@@ -132,14 +131,19 @@ export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPane
     })
   }, [epochs, chartSplitsToUse, metricIndex, effectiveMetric])
 
-  const chartSeries = chartSplitsToUse.map((split) => ({ name: split, label: capitalize(split), color: SPLIT_COLORS[split] ?? 'blue.6' }))
+  const chartSeries = chartSplitsToUse.map((split) => ({
+    name: split,
+    label: capitalize(split),
+    color: SPLIT_COLORS[split] ?? 'blue.6',
+  }))
 
   /* ── Table selection: one epoch, one split, all metrics for that cell ── */
   const [selectedEpoch, setSelectedEpoch] = useState<number | null>(null)
   const [selectedSplit, setSelectedSplit] = useState<SplitType | null>(null)
 
-  const effectiveEpoch = selectedEpoch !== null && epochs.includes(selectedEpoch) ? selectedEpoch : epochs.at(-1) ?? null
-  const effectiveSplit = selectedSplit !== null && splits.includes(selectedSplit) ? selectedSplit : splits[0] ?? null
+  const effectiveEpoch =
+    selectedEpoch !== null && epochs.includes(selectedEpoch) ? selectedEpoch : (epochs.at(-1) ?? null)
+  const effectiveSplit = selectedSplit !== null && splits.includes(selectedSplit) ? selectedSplit : (splits[0] ?? null)
 
   const tableRows = useMemo(() => {
     if (effectiveEpoch === null || effectiveSplit === null) return []
@@ -165,7 +169,13 @@ export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPane
               {status}
             </Badge>
             {onStop && isActive && (
-              <Button size="xs" color="red" variant="light" leftSection={<StopIcon weight="fill" size={14} />} onClick={onStop}>
+              <Button
+                size="xs"
+                color="red"
+                variant="light"
+                leftSection={<StopIcon weight="fill" size={14} />}
+                onClick={onStop}
+              >
                 Stop
               </Button>
             )}
@@ -215,7 +225,14 @@ export function VersionDetailPanel({ projectId, run, onStop }: VersionDetailPane
                     </Chip.Group>
                   </div>
                 </Group>
-                <LineChart h={260} data={chartData} dataKey="epoch" series={chartSeries} withLegend curveType="monotone" />
+                <LineChart
+                  h={260}
+                  data={chartData}
+                  dataKey="epoch"
+                  series={chartSeries}
+                  withLegend
+                  curveType="monotone"
+                />
               </Card>
 
               <Card withBorder p="md" radius="sm">

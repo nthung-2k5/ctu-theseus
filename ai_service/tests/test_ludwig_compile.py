@@ -159,6 +159,43 @@ class TestValidationMetricAndOptimizer:
             compile_("image_classification", VISION, optimizer="not_a_real_optimizer")
 
 
+class TestHyperparameterSpecs:
+    def test_vision_classification_task_gets_the_full_knob_set(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        names = {p.name for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
+        assert names == {
+            "epochs", "batchSize", "learningRate", "earlyStopPatience", "optimizer",
+            "validationMetric", "imageSize", "useClassWeights",
+        }  # fmt: skip
+
+    def test_epoch_and_batch_size_defaults_come_from_the_task_not_a_shared_constant(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        ecd = {p.name: p for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
+        llm = {p.name: p for p in hyperparameter_specs(get_task_descriptor("text_generation"))}
+        assert ecd["epochs"].default == 20 and llm["epochs"].default == 3
+        assert ecd["batchSize"].default == "auto" and llm["batchSize"].default == "1"
+
+    def test_regression_task_gets_regression_metrics_and_no_class_weights_or_image_size(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("tabular_regression"))}
+        assert specs["validationMetric"].choices == ["loss", "mean_squared_error", "mean_absolute_error", "r2"]
+        assert "useClassWeights" not in specs and "imageSize" not in specs
+
+    def test_experimental_llm_task_has_no_validation_metric_menu(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("text_generation"))}
+        assert "validationMetric" not in specs
+
+    def test_unsupported_task_gets_no_specs(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        assert hyperparameter_specs(get_task_descriptor("object_detection")) == []
+
+
 class TestTier3Tasks:
     def test_image_captioning_pairs_image_input_with_text_output(self):
         config = compile_("image_captioning", CAPTIONING)

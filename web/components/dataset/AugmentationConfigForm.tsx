@@ -7,8 +7,9 @@
  * class shows up in this form after a backend restart with no frontend change.
  */
 
-import { Checkbox, Group, NumberInput, Select, Slider, Stack, Switch, Text } from '@mantine/core'
-import type { AugmentationConfig, AugmentationInfo, ParamSpec } from '@public/lib/api/generated/models'
+import { Checkbox, Group, NumberInput, Slider, Stack, Text } from '@mantine/core'
+import { ParamField } from '@public/components/ui'
+import type { AugmentationConfig, AugmentationInfo } from '@public/lib/api/generated/models'
 
 export interface AugmentationDraft {
   copiesPerItem: number
@@ -25,57 +26,6 @@ const defaultParams = (op: AugmentationInfo): Record<string, unknown> =>
 export function toAugmentationConfig(draft: AugmentationDraft): AugmentationConfig | undefined {
   const ops = Object.entries(draft.ops).map(([id, o]) => ({ id, probability: o.probability, params: o.params }))
   return ops.length > 0 ? { copiesPerItem: draft.copiesPerItem, ops } : undefined
-}
-
-function ParamInput({
-  spec,
-  value,
-  onChange,
-}: {
-  spec: ParamSpec
-  value: unknown
-  onChange: (value: unknown) => void
-}) {
-  if (spec.type === 'bool') {
-    return (
-      <Switch
-        size="xs"
-        label={spec.label}
-        description={spec.description}
-        checked={Boolean(value)}
-        onChange={(e) => onChange(e.currentTarget.checked)}
-      />
-    )
-  }
-  if (spec.type === 'choice') {
-    return (
-      <Select
-        size="xs"
-        label={spec.label}
-        description={spec.description}
-        data={spec.choices ?? []}
-        value={String(value ?? '')}
-        onChange={(v) => v !== null && onChange(v)}
-        allowDeselect={false}
-      />
-    )
-  }
-  return (
-    <NumberInput
-      size="xs"
-      label={spec.label}
-      description={spec.description}
-      value={typeof value === 'number' ? value : ''}
-      min={spec.min ?? undefined}
-      max={spec.max ?? undefined}
-      step={spec.step ?? undefined}
-      allowDecimal={spec.type === 'float'}
-      decimalScale={spec.type === 'float' ? 3 : 0}
-      clampBehavior="strict"
-      // Ignore the transient empty string while typing: only real numbers reach the request.
-      onChange={(v) => typeof v === 'number' && onChange(v)}
-    />
-  )
 }
 
 export function AugmentationConfigForm({
@@ -147,7 +97,7 @@ export function AugmentationConfigForm({
                   {op.params.length > 0 && (
                     <Group gap="sm" align="flex-end" wrap="wrap">
                       {op.params.map((p) => (
-                        <ParamInput
+                        <ParamField
                           key={p.name}
                           spec={p}
                           value={selected.params[p.name]}

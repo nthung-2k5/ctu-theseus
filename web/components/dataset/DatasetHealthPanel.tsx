@@ -60,8 +60,8 @@ function ClassDistribution({ report }: { report: DatasetHealthReport }) {
       </Stack>
       {report.smallClasses.length > 0 && (
         <Alert icon={<WarningCircleIcon size={16} />} color="yellow" variant="light">
-          {report.smallClasses.map((c) => c.name).join(', ')} — fewer than 3 items each. These classes can't appear
-          in all three splits and will make per-class metrics unreliable.
+          {report.smallClasses.map((c) => c.name).join(', ')} — fewer than 3 items each. These classes can't appear in
+          all three splits and will make per-class metrics unreliable.
         </Alert>
       )}
     </Stack>
@@ -179,8 +179,8 @@ function ModalitySection({ report }: { report: DatasetHealthReport }) {
       <Group gap="xs">
         <TableIcon size={16} />
         <Text size="sm" c="dimmed">
-          {report.tabular.count} tabular item{report.tabular.count === 1 ? '' : 's'} — per-field stats aren't
-          available yet since features are stored as free-form JSON.
+          {report.tabular.count} tabular item{report.tabular.count === 1 ? '' : 's'} — per-field stats aren't available
+          yet since features are stored as free-form JSON.
         </Text>
       </Group>
     )

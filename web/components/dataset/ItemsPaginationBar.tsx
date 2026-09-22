@@ -25,7 +25,15 @@ export function ItemsPaginationBar({
   const totalPages = Math.max(1, Math.ceil(total / perPage))
 
   return (
-    <Paper p="xs" bdrs={0} mx={'-1.25rem'} pos="sticky" bottom={0} withBorder style={{ width: 'calc(100% + 2.5rem)', borderWidth: '1px 0 0 0' }}>
+    <Paper
+      p="xs"
+      bdrs={0}
+      mx={'-1.25rem'}
+      pos="sticky"
+      bottom={0}
+      withBorder
+      style={{ width: 'calc(100% + 2.5rem)', borderWidth: '1px 0 0 0' }}
+    >
       <Group justify="space-between" wrap="wrap" gap="sm">
         <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
           {total} items

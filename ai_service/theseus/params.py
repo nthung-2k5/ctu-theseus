@@ -58,7 +58,25 @@ def _param_spec(name: str, field: FieldInfo) -> ParamSpec:
     raise TypeError(f"Parameter {name!r} has unsupported type {annotation!r}")
 
 
-def param_specs(model: type[BaseModel]) -> list[ParamSpec]:
+def param_specs(model: type[BaseModel], *, strict: bool = True) -> list[ParamSpec]:
     """One `ParamSpec` per field of a pydantic model — an augmentation op's `Params`, or a trainer
-    backend's `Hyperparameters` — skipping fields with no sensible UI representation."""
-    return [_param_spec(name, field) for name, field in model.model_fields.items()]
+    backend's `Hyperparameters`.
+
+    `strict=True` (the default, and always used for augmentation ops) raises `TypeError` on a
+    field with no sensible UI representation: an op's `Params` model is small and fully under its
+    author's control, so a field that doesn't fit is a bug worth surfacing immediately. A trainer
+    backend's `Hyperparameters` is different: it inherits shared fields from `HyperparamsBase`
+    (e.g. `batchSize: int | Literal["auto"]`) that aren't representable as one generic `ParamSpec`,
+    and `modelId` is deliberately exposed via `models(task)` instead of here. Pass `strict=False`
+    (as `TrainerBackend.hyperparameter_specs`'s default implementation does) to skip those rather
+    than fail; a backend whose defaults or bounds vary by task should override
+    `hyperparameter_specs` instead of relying on this generic introspection at all.
+    """
+    specs = []
+    for name, field in model.model_fields.items():
+        try:
+            specs.append(_param_spec(name, field))
+        except TypeError:
+            if strict:
+                raise
+    return specs
