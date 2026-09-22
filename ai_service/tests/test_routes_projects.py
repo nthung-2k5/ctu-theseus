@@ -229,3 +229,19 @@ async def test_api_key_name_is_validated(client, new_user):
     c = await new_user()
     assert (await c.post("/api/keys", json={"name": ""})).status_code == 422
     assert (await c.post("/api/keys", json={"name": "x" * 101})).status_code == 422
+
+
+async def test_versions_lists_snapshots_only_and_the_draft_has_its_own_field(client, new_user):
+    c = await new_user()
+    p = (await c.post("/api/projects", json={"name": "p", "description": None, "task": "text_classification"})).json()[
+        "project"
+    ]
+    dataset = (await c.get(f"/api/projects/{p['id']}")).json()["project"]["dataset"]
+    assert dataset["versions"] == [] and dataset["draft"]["versionTag"] is None
+
+    await c.post(
+        f"/api/projects/{p['id']}/items", json={"items": [{"split": "train", "textFeatures": {"rawText": "x"}}]}
+    )
+    await c.post(f"/api/projects/{p['id']}/versions", json={"versionTag": "v1"})
+    dataset = (await c.get(f"/api/projects/{p['id']}")).json()["project"]["dataset"]
+    assert [v["versionTag"] for v in dataset["versions"]] == ["v1"] and dataset["draft"]["versionTag"] is None

@@ -177,7 +177,9 @@ export function UploadPage() {
 
   const descriptor = getTaskDescriptor(activeProject.task)
   const { data: classesData } = useLabelClasses(descriptor.annotation.requiresLabelClasses ? projectId : undefined)
-  const classes = classesData?.classes ?? []
+  // Tasks that don't label with classes (regression, captioning, ASR, generation) get no class controls at
+  // all, whatever classes the project happens to hold, so no class can be attached to their uploads.
+  const classes = descriptor.annotation.requiresLabelClasses ? (classesData?.classes ?? []) : []
 
   const queue = useUploadQueue()
 

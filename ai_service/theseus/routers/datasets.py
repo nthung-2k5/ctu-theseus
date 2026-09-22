@@ -115,6 +115,12 @@ async def create_version(body: CreateVersionBody, draft: DraftDep, session: Sess
     """
     tag = body.version_tag
 
+    draft_count = (
+        await session.execute(sa.select(sa.func.count()).where(DatasetVersionItem.version_id == draft.draft.id))
+    ).scalar_one()
+    if draft_count == 0:
+        raise HTTPException(400, "The draft is empty; add items before creating a snapshot")
+
     augmentation_config = None
     if body.augmentation is not None:
         try:
@@ -401,6 +407,8 @@ async def create_items(body: CreateItemsBody, draft: DraftDep, session: SessionD
     """Add inline (text/tabular) items to the pool and draft, each with a split assignment."""
     project_id = draft.project.id
     class_ids = {a.class_id for i in body.items for a in (i.annotations or []) if a.class_id is not None}
+    if class_ids and not svc.task_uses_label_classes(draft.project.task):
+        raise HTTPException(400, svc.NO_LABEL_CLASSES)
     for class_id in class_ids:
         if not await svc.class_in_dataset(session, class_id, project_id):
             raise HTTPException(400, f"Unknown label class: {class_id}")
@@ -441,6 +449,8 @@ async def upload_items(
     if split not in svc.SPLITS:
         raise HTTPException(422, f"split must be one of: {', '.join(svc.SPLITS)}")
     project_id = draft.project.id
+    if class_id is not None and not svc.task_uses_label_classes(draft.project.task):
+        raise HTTPException(400, svc.NO_LABEL_CLASSES)
     if class_id is not None and not await svc.class_in_dataset(session, class_id, project_id):
         raise HTTPException(400, "Unknown label class")
     dataset = await session.get(Dataset, project_id)
@@ -574,6 +584,8 @@ async def set_items_split(body: SetSplitBody, draft: DraftDep, session: SessionD
 @router.post("/projects/{project_id}/items/classify", response_model=ClassifyResponse)
 async def classify_items(body: ClassifyBody, project: ProjectDep, session: SessionDep) -> ClassifyResponse:
     """Bulk-assign a label class: creates or updates each item classification annotation."""
+    if not svc.task_uses_label_classes(project.task):
+        raise HTTPException(400, svc.NO_LABEL_CLASSES)
     if not await svc.class_in_dataset(session, body.class_id, project.id):
         raise HTTPException(400, "Unknown label class")
     updated = failed = 0

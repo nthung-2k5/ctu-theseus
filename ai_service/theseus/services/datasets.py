@@ -34,6 +34,7 @@ from theseus.db.models import (
 )
 from theseus.schemas.datasets import ItemIn
 from theseus.services import storage
+from theseus.services.task_registry import get_task_descriptor
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,15 @@ def _int_or_none(v: float | None) -> int | None:
 
 
 # -- Guards ----------------------------------------------------------------------------------
+
+
+NO_LABEL_CLASSES = "This task does not use label classes"
+
+
+def task_uses_label_classes(task: str) -> bool:
+    """Whether a project's task labels items with classes. Regression and free-text tasks (captioning,
+    ASR, generation) do not, so a class must never be attached to their items."""
+    return get_task_descriptor(task).annotation.requires_label_classes
 
 
 async def class_in_dataset(session: AsyncSession, class_id: uuid.UUID, dataset_id: uuid.UUID) -> bool:

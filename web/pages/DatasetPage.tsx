@@ -104,11 +104,13 @@ const CreateVersionModal = ({
 
   // Cheap way to get the draft's total/labeledCount without fetching every
   // row — the aggregate counts are computed server-side regardless of
-  // perPage (see GET /projects/:projectId/items).
-  const { data: draftCounts } = useProjectItems(needsAnnotations ? projectId : undefined, { perPage: 1 })
+  // perPage (see GET /projects/:projectId/items). Always fetched (not just
+  // when needsAnnotations): the empty-draft check below needs `total` too.
+  const { data: draftCounts, isLoading: loadingDraftCounts } = useProjectItems(projectId, { perPage: 1 })
   const total = draftCounts?.total ?? 0
   const labeledCount = draftCounts?.labeledCount ?? 0
   const unlabeledCount = total - labeledCount
+  const isEmpty = !loadingDraftCounts && total === 0
 
   const createVersion = useMutation({
     ...getCreateVersionMutationOptions(),
@@ -132,6 +134,11 @@ const CreateVersionModal = ({
       )}
     >
       <Stack gap="md">
+        {isEmpty && (
+          <Alert icon={<WarningCircleIcon size={16} />} color="red" title="The draft is empty">
+            Add items on the Upload page before creating a snapshot — there is nothing to freeze yet.
+          </Alert>
+        )}
         {needsAnnotations && unlabeledCount > 0 && (
           <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unlabeled items in the draft">
             {unlabeledCount} of {total} items have no label yet — they'll snapshot with a null label column and won't
@@ -165,7 +172,11 @@ const CreateVersionModal = ({
           <Button variant="subtle" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" loading={createVersion.isPending} disabled={augment && !augmentationConfig}>
+          <Button
+            type="submit"
+            loading={createVersion.isPending}
+            disabled={isEmpty || (augment && !augmentationConfig)}
+          >
             Create Snapshot
           </Button>
         </Group>

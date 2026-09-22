@@ -394,12 +394,20 @@ async def test_snapshotting_copies_membership_and_builds_in_the_background(clien
 async def test_snapshot_tags_are_unique_and_validated(client, new_user):
     c = await new_user()
     p = await project(c)
+    await add(c, p["id"], text_item("alpha"))
     url = f"/api/projects/{p['id']}/versions"
     assert (await c.post(url, json={"versionTag": "v1"})).status_code == 202
     dup = await c.post(url, json={"versionTag": "v1"})
     assert dup.status_code == 409 and "already exists" in dup.json()["error"]["message"]
     assert (await c.post(url, json={"versionTag": ""})).status_code == 422
     assert (await c.post(url, json={"versionTag": "x" * 51})).status_code == 422
+
+
+async def test_an_empty_draft_cannot_be_snapshotted(client, new_user):
+    c = await new_user()
+    p = await project(c)
+    r = await c.post(f"/api/projects/{p['id']}/versions", json={"versionTag": "v1"})
+    assert r.status_code == 400 and "draft is empty" in r.json()["error"]["message"]
 
 
 async def test_the_draft_cannot_be_deleted_but_a_snapshot_can_and_its_objects_are_removed(
@@ -420,6 +428,7 @@ async def test_the_draft_cannot_be_deleted_but_a_snapshot_can_and_its_objects_ar
 async def test_version_routes_are_owner_only(client, new_user):
     owner, stranger = await new_user(), await new_user()
     p = await project(owner)
+    await add(owner, p["id"], text_item("alpha"))
     vid = (await owner.post(f"/api/projects/{p['id']}/versions", json={"versionTag": "v1"})).json()["version"]["id"]
     assert (await stranger.get(f"/api/versions/{vid}")).status_code == 403
     assert (await stranger.delete(f"/api/versions/{vid}")).status_code == 403
@@ -501,3 +510,56 @@ async def test_delete_reports_not_found_for_ids_outside_the_project_and_the_sing
     assert (await bulk_delete(stranger, p["id"], [mine])).status_code == 403
     assert (await owner.delete(f"/api/items/{mine}")).status_code == 204
     assert (await bulk_delete(owner, p["id"], [])).status_code == 422
+
+
+# -- Tasks that do not label with classes ----------------------------------------------------
+
+
+async def test_a_class_cannot_be_attached_to_uploads_of_a_task_without_label_classes(client, new_user, db):
+    c = await new_user()
+    p = await project(c, "image_captioning")  # captions, not classes
+    stray = await make_class(c, p["id"])  # nothing stops a class from existing; it must not reach the items
+    upload = f"/api/projects/{p['id']}/upload"
+    files = [("files", ("cat.png", png(8, 8), "image/png"))]
+
+    r = await c.post(upload, data={"split": "train", "classId": stray}, files=files)
+    assert r.status_code == 400 and "does not use label classes" in r.json()["error"]["message"]
+
+    ok = await c.post(upload, data={"split": "train"}, files=files)  # the same upload without a class is fine
+    assert ok.status_code == 200 and ok.json()["results"][0]["status"] == "fulfilled"
+    async with db() as s:
+        assert (await s.execute(sa.select(sa.func.count()).select_from(Annotation))).scalar_one() == 0
+
+
+async def test_class_annotations_and_bulk_classify_are_rejected_for_tasks_without_label_classes(client, new_user):
+    c = await new_user()
+    p = await project(c, "text_generation")
+    stray = await make_class(c, p["id"])
+    r = await c.post(f"/api/projects/{p['id']}/items", json={"items": [text_item("prompt", "train", stray)]})
+    assert r.status_code == 400 and "does not use label classes" in r.json()["error"]["message"]
+
+    r = await c.post(f"/api/projects/{p['id']}/items/classify", json={"itemIds": [str(uuid.uuid4())], "classId": stray})
+    assert r.status_code == 400 and "does not use label classes" in r.json()["error"]["message"]
+
+    plain = await c.post(f"/api/projects/{p['id']}/items", json={"items": [text_item("prompt")]})
+    assert plain.status_code == 200 and plain.json()["failed"] == []
+
+
+async def test_regression_targets_are_still_accepted_because_they_carry_a_value_not_a_class(client, new_user):
+    c = await new_user()
+    p = await project(c, "tabular_regression")
+    item = {
+        "split": "train",
+        "tabularFeatures": {"featuresJson": {"age": 30}},
+        "annotations": [{"annotationType": "classification", "labelStructured": {"value": 1.5}}],
+    }
+    r = await c.post(f"/api/projects/{p['id']}/items", json={"items": [item]})
+    assert r.status_code == 200 and r.json()["failed"] == []
+
+
+async def test_classification_tasks_still_take_classes_on_upload_and_items(client, new_user):
+    c = await new_user()
+    p = await project(c, "text_classification")
+    cat = await make_class(c, p["id"])
+    r = await c.post(f"/api/projects/{p['id']}/items", json={"items": [text_item("meow", "train", cat)]})
+    assert r.status_code == 200 and r.json()["failed"] == []

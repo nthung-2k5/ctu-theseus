@@ -94,7 +94,9 @@ async def get_project(project: ProjectDep, session: SessionDep) -> ProjectDetail
             created_at=dataset.created_at,
             updated_at=dataset.updated_at,
             draft=next((v for v in views if v.version_tag is None), None),
-            versions=views,
+            # Snapshots only: the mutable draft has its own field, and every consumer of `versions`
+            # (the Snapshots page, the sidebar count, the training pickers) means immutable snapshots.
+            versions=[v for v in views if v.version_tag is not None],
             classes=[LabelClassOut.model_validate(c) for c in classes],
         )
 

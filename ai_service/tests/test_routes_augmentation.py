@@ -150,6 +150,18 @@ async def test_augmentation_is_rejected_with_a_clear_message_for_unusable_reques
     r = await c.post(
         f"/api/projects/{empty['id']}/versions", json={"versionTag": "x", "augmentation": aug(("text_word_swap", {}))}
     )
+    assert r.status_code == 400 and "draft is empty" in msg(r)
+
+    # A draft that has items, but none in the train split, hits the augmentation-specific message instead.
+    no_train = await project(c)
+    no_train_cls = (await c.post(f"/api/projects/{no_train['id']}/classes", json={"name": "cat"})).json()["class"][
+        "classId"
+    ]
+    await add_texts(c, no_train["id"], no_train_cls, (TEXT, "validation"))
+    r = await c.post(
+        f"/api/projects/{no_train['id']}/versions",
+        json={"versionTag": "x", "augmentation": aug(("text_word_swap", {}))},
+    )
     assert r.status_code == 400 and "no training items" in msg(r)
 
 
