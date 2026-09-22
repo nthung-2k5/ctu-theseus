@@ -3,12 +3,16 @@
 Kept free of any heavy import (no PIL, numpy or the registry) so schemas can import it.
 """
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import Field
 
 from theseus.db.enums import DatasetModality
-from theseus.schemas.common import ApiModel
+from theseus.schemas.common import ApiModel, ParamSpec
+
+__all__ = [
+    "MAX_AUGMENTED_ITEMS", "MAX_COPIES_PER_ITEM", "MAX_OPS", "AugmentationConfig", "AugmentationInfo", "ParamSpec",
+]  # fmt: skip
 
 # Hard limits on one snapshot's augmentation request.
 MAX_COPIES_PER_ITEM = 10
@@ -32,20 +36,6 @@ class AugmentationConfig(ApiModel):
     ops: list[AugmentationOpConfig] = Field(min_length=1, max_length=MAX_OPS)
     # Filled in by the snapshot build: original items that could not be augmented (e.g. undecodable files).
     skipped_items: int | None = None
-
-
-class ParamSpec(ApiModel):
-    """One tunable parameter of an op, flattened so the web can render a form without knowing the op."""
-
-    name: str
-    label: str
-    description: str | None = None
-    type: Literal["int", "float", "bool", "choice"]
-    default: Any
-    min: float | None = None
-    max: float | None = None
-    step: float | None = None
-    choices: list[str] | None = None
 
 
 class AugmentationInfo(ApiModel):

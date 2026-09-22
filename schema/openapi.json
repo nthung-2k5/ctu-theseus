@@ -1542,6 +1542,72 @@
         }
       }
     },
+    "/api/training-backends": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "List Training Backends",
+        "description": "Every installed trainer backend, whether or not it is currently available (e.g. a missing\noptional dependency) — for a global settings/diagnostics view, not task-scoped model choice.",
+        "operationId": "list_training_backends",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingBackendListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_id}/training-backends": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "List Project Training Backends",
+        "description": "Backends that can train this project's task, with their models and hyperparameters — what\nthe create-run / create-sweep panel renders. Only available backends are included.",
+        "operationId": "list_project_training_backends",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingBackendListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{project_id}/runs": {
       "get": {
         "tags": [
@@ -2334,7 +2400,7 @@
           "export"
         ],
         "summary": "List Export Formats",
-        "description": "Installed export formats, grouped and ordered for display.\n\nWith `runId`, only the formats that support that run's project task.",
+        "description": "Installed export formats, grouped and ordered for display.\n\nWith `runId`, only the formats that support that run's project task AND whose artifact the\nrun's own trainer backend can actually produce.",
         "operationId": "list_export_formats",
         "parameters": [
           {
@@ -3893,8 +3959,25 @@
             "format": "uuid",
             "title": "Datasetversionid"
           },
+          "backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backend"
+          },
           "searchSpace": {
-            "$ref": "#/components/schemas/SearchSpace"
+            "additionalProperties": {
+              "items": {},
+              "type": "array",
+              "minItems": 1
+            },
+            "type": "object",
+            "title": "Searchspace"
           },
           "strategy": {
             "type": "string",
@@ -5560,6 +5643,34 @@
         ],
         "title": "MinMaxAvg"
       },
+      "ModelChoiceOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "pretrained": {
+            "type": "boolean",
+            "title": "Pretrained"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "pretrained"
+        ],
+        "title": "ModelChoiceOut"
+      },
       "ParamSpec": {
         "properties": {
           "name": {
@@ -5650,7 +5761,7 @@
           "default"
         ],
         "title": "ParamSpec",
-        "description": "One tunable parameter of an op, flattened so the web can render a form without knowing the op."
+        "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `theseus.params`."
       },
       "PolledJob": {
         "properties": {
@@ -6571,96 +6682,6 @@
         ],
         "title": "RunVersionDataset"
       },
-      "SearchSpace": {
-        "properties": {
-          "epochs": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Epochs"
-          },
-          "batchSize": {
-            "anyOf": [
-              {
-                "items": {
-                  "anyOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "string",
-                      "const": "auto"
-                    }
-                  ]
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Batchsize"
-          },
-          "learningRate": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "number"
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Learningrate"
-          },
-          "earlyStopPatience": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "integer"
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Earlystoppatience"
-          },
-          "encoderId": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Encoderid"
-          }
-        },
-        "type": "object",
-        "title": "SearchSpace",
-        "description": "One candidate-value list per sweepable trainer knob (camelCase keys, as stored and expanded)."
-      },
       "SetSplitBody": {
         "properties": {
           "itemIds": {
@@ -7237,15 +7258,28 @@
             "format": "uuid",
             "title": "Datasetversionid"
           },
-          "hyperparameters": {
+          "backend": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/TrainerSelections"
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Backend"
+          },
+          "hyperparameters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hyperparameters"
           }
         },
         "type": "object",
@@ -7255,115 +7289,76 @@
         ],
         "title": "TrainBody"
       },
-      "TrainerSelections": {
+      "TrainingBackendListResponse": {
         "properties": {
-          "epochs": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Epochs"
-          },
-          "batchSize": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "string",
-                "const": "auto"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Batchsize"
-          },
-          "learningRate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Learningrate"
-          },
-          "earlyStopPatience": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Earlystoppatience"
-          },
-          "encoderId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Encoderid"
-          },
-          "useClassWeights": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Useclassweights"
-          },
-          "imageSize": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Imagesize"
-          },
-          "validationMetric": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validationmetric"
-          },
-          "optimizer": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Optimizer"
+          "backends": {
+            "items": {
+              "$ref": "#/components/schemas/TrainingBackendOut"
+            },
+            "type": "array",
+            "title": "Backends"
           }
         },
         "type": "object",
-        "title": "TrainerSelections",
-        "description": "User-facing hyperparameter choices (camelCase on the wire, and in runs.hyperparameters)."
+        "required": [
+          "backends"
+        ],
+        "title": "TrainingBackendListResponse"
+      },
+      "TrainingBackendOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailablereason"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelChoiceOut"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ParamSpec"
+            },
+            "type": "array",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "available",
+          "models",
+          "params"
+        ],
+        "title": "TrainingBackendOut"
       },
       "UpdateAnnotationBody": {
         "properties": {

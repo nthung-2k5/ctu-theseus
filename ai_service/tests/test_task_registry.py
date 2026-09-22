@@ -20,11 +20,11 @@ def test_every_project_task_has_a_descriptor_and_no_extras():
     assert set(TASK_REGISTRY) == set(get_args(ProjectTask))
 
 
-def test_thirteen_ludwig_tasks_and_six_planned():
+def test_thirteen_selectable_tasks_and_six_planned():
     assert len(list_selectable_tasks()) == 13
-    planned = [t for t in TASK_REGISTRY.values() if t.backend == "unsupported"]
+    planned = [t for t in TASK_REGISTRY.values() if t.status == "planned"]
     assert len(planned) == 6
-    assert all(t.status == "planned" and t.ludwig is None and t.columns == [] for t in planned)
+    assert all(t.output is None and t.columns == [] for t in planned)
 
 
 def test_classification_helpers():
@@ -55,7 +55,7 @@ class TestInferenceInputSpec:
         assert get_inference_input_spec("question_answering") == {"kind": "text", "fields": ["context", "question"]}
 
     def test_unsupported_task_has_no_spec(self):
-        # planned tasks default to a file payload, but have no Ludwig config to derive text fields from
+        # planned tasks default to a file payload, but have no output kind to derive text fields from
         assert get_inference_input_spec("object_detection")["kind"] == "file"
 
 
@@ -79,16 +79,16 @@ class TestInferenceOutputKind:
             get_inference_output_kind("object_detection")
 
 
-def test_descriptors_are_immutable_data_the_compiler_can_not_corrupt():
+def test_descriptors_are_immutable_data_no_backend_can_corrupt():
     # Compiling deep-copies feature dicts, so the shared registry must be unchanged afterwards.
     before = get_task_descriptor("image_classification").model_dump()
-    from theseus.services.ludwig_config import TrainerSelections, compile_ludwig_config
+    from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
     from theseus.services.task_registry import SnapshotContext
 
     compile_ludwig_config(
         get_task_descriptor("image_classification"),
         SnapshotContext(),
-        TrainerSelections(image_size=64),
+        LudwigHyperparameters(image_size=64),
     )
     assert get_task_descriptor("image_classification").model_dump() == before
 
@@ -101,13 +101,6 @@ def test_registry_json_is_camelcase_json_with_pre_evaluated_inference_values():
     assert qa["inferenceOutputKind"] == "text"
     assert qa["itemSpec"]["payload"] == "inline_text"
     assert qa["annotation"]["requiresLabelClasses"] is False
-    assert qa["ludwig"]["trainerKnobs"]["batchSize"]["default"] == 1
+    assert qa["output"] == {"column": "answer", "kind": "text"}
     assert "inferenceInputSpec" not in data["tasks"]["object_detection"]
-    vision = data["tasks"]["image_classification"]["ludwig"]["encoders"][0]
-    assert vision == {
-        "id": "resnet18",
-        "label": "ResNet-18",
-        "encoderType": "resnet",
-        "pretrained": True,
-        "params": {"model_variant": 18},
-    }
+    assert "output" not in data["tasks"]["object_detection"]

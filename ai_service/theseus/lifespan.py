@@ -63,11 +63,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, storage.ensure_buckets)
 
-    # 1. The single event writer and the contextvar-scoped training log handler.
+    # 1. The single event writer and the contextvar-scoped training log handler. Trainer backend
+    #    packages have no ludwig/torch import at their own module level (see backends/base.py), so
+    #    listing them to collect their logger namespaces is cheap here.
+    from theseus.backends.registry import list_backends
+
     writer = EventWriter(get_event_bus())
     await writer.start()
     set_event_writer(writer)
-    log_handler = install_run_log_handler(writer)
+    backend_namespaces = tuple(ns for backend in list_backends() for ns in backend.log_namespaces)
+    log_handler = install_run_log_handler(writer, backend_namespaces)
     set_log_handler(log_handler)
 
     # 2. Settle whatever a previous process left in flight, BEFORE anything new is claimed.

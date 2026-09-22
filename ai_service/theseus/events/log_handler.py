@@ -6,7 +6,8 @@ access logs, SQLAlchemy and botocore, all of which would be persisted as "traini
 whatever run happened to be active, and a log line emitted while writing a log event would
 recurse.
 
-Instead ONE handler is installed at startup on the `ludwig` and `theseus.jobs` namespaces only,
+Instead ONE handler is installed at startup on the `theseus.jobs` namespace plus every installed
+trainer backend's own logger namespace(s) (`TrainerBackend.log_namespaces`, e.g. Ludwig's `ludwig`),
 and it acts on a record only when the `current_run_id` ContextVar is set. Contextvars propagate
 through asyncio tasks and (via contextvars.copy_context) into the training thread, the same
 mechanism the OpenTelemetry span already relies on. There is no addHandler/removeHandler churn
@@ -24,7 +25,9 @@ from theseus.events.writer import EventWriter
 
 current_run_id: ContextVar[str | None] = ContextVar("current_run_id", default=None)
 
-LOGGER_NAMESPACES = ("ludwig", "theseus.jobs")
+# Always installed. A trainer backend contributes its own additional namespace(s) (see
+# TrainerBackend.log_namespaces) via `install_run_log_handler`'s `extra_namespaces`.
+BASE_LOGGER_NAMESPACES = ("theseus.jobs",)
 
 _LEVELS = {
     logging.DEBUG: "info",
@@ -64,6 +67,9 @@ class RunLogHandler(logging.Handler):
         self._lock = threading.Lock()
         self._files: dict[str, TextIO] = {}
         self._buckets: dict[str, _Bucket] = {}
+        # Set by install_run_log_handler right after construction; kept here so
+        # uninstall_run_log_handler knows what to remove itself from.
+        self.namespaces: tuple[str, ...] = ()
 
     def attach(self, run_id: str, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,9 +110,10 @@ class RunLogHandler(logging.Handler):
             self._writer.log(run_id, level, line)
 
 
-def install_run_log_handler(writer: EventWriter) -> RunLogHandler:
+def install_run_log_handler(writer: EventWriter, extra_namespaces: tuple[str, ...] = ()) -> RunLogHandler:
     handler = RunLogHandler(writer)
-    for name in LOGGER_NAMESPACES:
+    handler.namespaces = BASE_LOGGER_NAMESPACES + extra_namespaces
+    for name in handler.namespaces:
         logger = logging.getLogger(name)
         logger.addHandler(handler)
         if logger.level == logging.NOTSET or logger.level > logging.INFO:
@@ -115,5 +122,5 @@ def install_run_log_handler(writer: EventWriter) -> RunLogHandler:
 
 
 def uninstall_run_log_handler(handler: RunLogHandler) -> None:
-    for name in LOGGER_NAMESPACES:
+    for name in handler.namespaces:
         logging.getLogger(name).removeHandler(handler)

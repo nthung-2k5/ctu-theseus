@@ -2,13 +2,11 @@ import math
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
-from theseus.services.ludwig_config import (
-    ConfigError,
-    TrainerSelections,
-    compile_ludwig_config,
-    serialize_ludwig_config,
-)
+from theseus.backends.base import ConfigError
+from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config, serialize_ludwig_config
+from theseus.backends.ludwig.tasks import LUDWIG_TASKS
 from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 
@@ -33,7 +31,7 @@ TABULAR = SnapshotContext(
 
 
 def compile_(task: str, ctx: SnapshotContext, **sel):
-    return compile_ludwig_config(get_task_descriptor(task), ctx, TrainerSelections(**sel))
+    return compile_ludwig_config(get_task_descriptor(task), ctx, LudwigHyperparameters(**sel))
 
 
 class TestCompile:
@@ -67,13 +65,13 @@ class TestCompile:
         assert compile_("text_generation", SnapshotContext())["trainer"]["epochs"] == 3  # llm knobs
 
     def test_selects_encoder_by_id(self):
-        config = compile_("image_classification", VISION, encoder_id="resnet50")
+        config = compile_("image_classification", VISION, model_id="resnet50")
         assert config["input_features"][0]["encoder"]["type"] == "resnet"
         assert config["input_features"][0]["encoder"]["model_variant"] == 50
 
     def test_unknown_encoder_raises(self):
         with pytest.raises(ConfigError, match="Unknown encoder"):
-            compile_("image_classification", VISION, encoder_id="not-a-real-encoder")
+            compile_("image_classification", VISION, model_id="not-a-real-encoder")
 
     def test_tabular_snapshot_without_scalar_columns_raises(self):
         empty = SnapshotContext(columns=cols(("class", "label"), ("split", "split")), label_class_names=["a", "b"])
@@ -86,7 +84,7 @@ class TestCompile:
 
     def test_registry_is_not_mutated_by_compilation(self):
         compile_("image_classification", VISION, image_size=64)
-        assert "preprocessing" not in get_task_descriptor("image_classification").ludwig.input_features[0]
+        assert "preprocessing" not in LUDWIG_TASKS["image_classification"].input_features[0]
 
 
 class TestClassWeighting:
@@ -129,11 +127,12 @@ class TestResize:
         assert "augmentation" not in f and "preprocessing" not in f
 
     def test_training_config_never_carries_augmentation(self):
-        # Augmentation happens at snapshot creation now; a stale client that still sends the old field
-        # must not switch Ludwig train-time augmentation back on.
-        config = compile_("image_classification", VISION, augmentations=["random_rotate"])
-        assert "augmentation" not in config["input_features"][0]
-        assert "augmentations" not in TrainerSelections.model_fields
+        # Augmentation happens at snapshot creation now, not training: there is no knob for it on
+        # LudwigHyperparameters, and (extra="forbid") a stale client that still sends the old field
+        # is rejected clearly rather than silently switching Ludwig train-time augmentation back on.
+        assert "augmentations" not in LudwigHyperparameters.model_fields
+        with pytest.raises(ValidationError):
+            LudwigHyperparameters(augmentations=["random_rotate"])
 
     def test_resize_is_a_noop_for_non_image_tasks(self):
         config = compile_("tabular_classification", TABULAR, image_size=128)

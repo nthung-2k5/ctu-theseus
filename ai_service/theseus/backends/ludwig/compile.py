@@ -1,8 +1,9 @@
-"""Compile a task descriptor plus snapshot context plus user selections into a Ludwig config.
+"""Compile a task descriptor plus snapshot context plus hyperparameters into a Ludwig config.
 
-Ported from server/lib/ludwig/{compile,schema,serialize}.ts. The compiled config is validated
-here, before a run row is ever committed, so an invalid configuration surfaces as a 400 rather
-than as a worker crash discovered later.
+Ported from server/lib/ludwig/{compile,schema,serialize}.ts, then from services/ludwig_config.py
+when trainer backends became a plugin system. The compiled config is validated here, before a run
+row is ever committed, so an invalid configuration surfaces as a 400 rather than as a worker crash
+discovered later.
 """
 
 import copy
@@ -12,40 +13,32 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseus import constants as C
-from theseus.schemas.common import ApiModel
-from theseus.services.task_registry import (
-    LUDWIG_OPTIMIZER_TYPES,
-    EncoderChoice,
-    SnapshotContext,
-    TaskDescriptor,
-)
+from theseus.backends.base import ConfigError, HyperparamsBase
+from theseus.backends.ludwig.tasks import LUDWIG_OPTIMIZER_TYPES, LUDWIG_TASKS, EncoderChoice
+from theseus.services.task_registry import SnapshotContext, TaskDescriptor
 
 LUDWIG_VERSION = "0.17.5"
 
 
-class ConfigError(ValueError):
-    """A user-correctable problem with the requested training configuration."""
+class LudwigHyperparameters(HyperparamsBase):
+    """User-facing hyperparameter choices (camelCase on the wire, and in training_runs.hyperparameters).
 
+    `model_id` (from HyperparamsBase) is the encoder id from the task's encoder catalog; defaults
+    to the first. Kept as `encoderId` on the wire (the field predates the generic `model_id` name
+    and every existing client already sends it) rather than picking up HyperparamsBase's generated
+    `modelId` alias. There is deliberately no augmentation here: it moved to snapshot creation,
+    where the augmented copies are real, browsable train-split items (see services/augmentation.py).
+    """
 
-class TrainerSelections(ApiModel):
-    """User-facing hyperparameter choices (camelCase on the wire, and in runs.hyperparameters)."""
-
-    epochs: int | None = None
-    batch_size: int | Literal["auto"] | None = None
-    learning_rate: float | None = None
-    early_stop_patience: int | None = None
-    # Encoder id from the task descriptor encoders list. Defaults to the first.
-    encoder_id: str | None = None
+    model_id: str | None = Field(default=None, alias="encoderId")
     # Weight each class loss inversely to its snapshot frequency (category outputs only).
     use_class_weights: bool | None = None
-    # There is deliberately no augmentation here: it moved to snapshot creation, where the augmented
-    # copies are real, browsable train-split items (see services/augmentation.py).
     # Square-resize every image input feature to this many pixels per side. Ignored for non-vision tasks.
     image_size: int | None = None
-    # Metric tracked for early stopping / best epoch instead of Ludwig per-output-type default.
+    # Metric tracked for early stopping / best epoch instead of Ludwig's per-output-type default.
     # Passed straight through: Ludwig itself rejects a name the output feature type does not support.
     validation_metric: str | None = None
-    # Defaults to Ludwig per-model-type default (Adam for ECD) when unset.
+    # Defaults to Ludwig's per-model-type default (Adam for ECD) when unset.
     optimizer: str | None = None
 
 
@@ -104,18 +97,18 @@ class LudwigConfig(BaseModel):
 
 
 def compile_ludwig_config(
-    task: TaskDescriptor, ctx: SnapshotContext, selections: TrainerSelections | None = None
+    task: TaskDescriptor, ctx: SnapshotContext, hp: LudwigHyperparameters | None = None
 ) -> dict[str, Any]:
-    sel = selections or TrainerSelections()
-    if task.ludwig is None:
+    sel = hp or LudwigHyperparameters()
+    spec = LUDWIG_TASKS.get(task.id)
+    if spec is None:
         raise ConfigError(f'Task "{task.id}" has no Ludwig backend (status: {task.status})')
-    ludwig = task.ludwig
-    knobs = ludwig.trainer_knobs
+    knobs = spec.trainer_knobs
 
-    declared = copy.deepcopy(ludwig.input_features)
+    declared = copy.deepcopy(spec.input_features)
     if declared:
         input_features = [
-            _with_image_resize(_with_encoder(f, ludwig.encoders, sel.encoder_id), sel.image_size) for f in declared
+            _with_image_resize(_with_encoder(f, spec.encoders, sel.model_id), sel.image_size) for f in declared
         ]
     else:
         # Tabular tasks do not know their column names statically: derive one number feature
@@ -127,7 +120,7 @@ def compile_ludwig_config(
     if not input_features:
         raise ConfigError(f'Task "{task.id}": no input features could be derived from the snapshot columns')
 
-    output_features = copy.deepcopy(ludwig.output_features)
+    output_features = copy.deepcopy(spec.output_features)
     if sel.use_class_weights:
         output_features = _apply_class_weights(output_features, ctx.class_counts, task.id)
 
@@ -145,7 +138,7 @@ def compile_ludwig_config(
         trainer["optimizer"] = _with_optimizer(sel.optimizer, task.id)
 
     config = {
-        "model_type": ludwig.model_type,
+        "model_type": spec.model_type,
         "input_features": input_features,
         "output_features": output_features,
         # Without this Ludwig re-splits randomly 70/10/20 and ignores the split the user
@@ -163,16 +156,16 @@ def serialize_ludwig_config(config: dict[str, Any]) -> str:
     return yaml.safe_dump(config, sort_keys=False)
 
 
-def _with_encoder(feature: dict[str, Any], encoders: list[EncoderChoice], encoder_id: str | None) -> dict[str, Any]:
+def _with_encoder(feature: dict[str, Any], encoders: list[EncoderChoice], model_id: str | None) -> dict[str, Any]:
     if feature.get("encoder") or not encoders:
         return feature
-    if encoder_id:
-        encoder = next((e for e in encoders if e.id == encoder_id), None)
+    if model_id:
+        encoder = next((e for e in encoders if e.id == model_id), None)
     else:
         encoder = encoders[0]
     if encoder is None:
         available = ", ".join(e.id for e in encoders)
-        raise ConfigError(f'Unknown encoder "{encoder_id}" (available: {available})')
+        raise ConfigError(f'Unknown encoder "{model_id}" (available: {available})')
     return {
         **feature,
         "encoder": {"type": encoder.encoder_type, "use_pretrained": encoder.pretrained, **(encoder.params or {})},

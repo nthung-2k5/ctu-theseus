@@ -1,5 +1,6 @@
 """Lookup over the export format plugins in theseus/export/formats/."""
 
+from theseus.backends.base import TrainerBackend
 from theseus.export.formats.base import ExportFormat, _registry
 from theseus.services.task_registry import TaskDescriptor
 
@@ -13,9 +14,20 @@ def find_export_format(format_id: str) -> type[ExportFormat] | None:
     return _registry.find(format_id)
 
 
-def list_export_formats(task: TaskDescriptor | None = None) -> list[type[ExportFormat]]:
-    """Installed formats, grouped and ordered for display; only those supporting `task` when given."""
-    formats = [f for f in _registry.all() if task is None or f.supports(task)]
+def list_export_formats(
+    task: TaskDescriptor | None = None, backend: type[TrainerBackend] | None = None
+) -> list[type[ExportFormat]]:
+    """Installed formats, grouped and ordered for display.
+
+    With `task`, only formats that support it. With `backend`, additionally only formats built
+    from an artifact that backend actually produces (e.g. a run trained by a backend with no
+    torch_export support is never offered a torch_export-based format).
+    """
+    formats = [
+        f
+        for f in _registry.all()
+        if (task is None or f.supports(task)) and (backend is None or f.artifact in backend.artifacts)
+    ]
     return sorted(formats, key=lambda f: (_group_rank(f.group), f.group, f.order, f.id))
 
 

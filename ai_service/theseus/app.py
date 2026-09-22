@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 
 from theseus.augmentation.registry import list_augmentations
+from theseus.backends.registry import list_backends
 from theseus.deps import verify_origin
 from theseus.errors import install_error_handlers
 from theseus.export.registry import list_export_formats
@@ -44,11 +45,13 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     install_error_handlers(app)
-    # Import every export format and augmentation plugin now, so a duplicate id or a broken plugin module
-    # stops the backend at startup instead of failing the first request that needs it. Import only:
-    # no DB, S3 or network, so this stays safe for the OpenAPI export script.
+    # Import every export format, augmentation and trainer backend plugin now, so a duplicate id or
+    # a broken plugin module stops the backend at startup instead of failing the first request that
+    # needs it. Import only: no DB, S3 or network (a backend's own heavy ML import is lazy, see
+    # backends/base.py), so this stays safe for the OpenAPI export script.
     list_export_formats()
     list_augmentations()
+    list_backends()
 
     api = APIRouter(prefix="/api")
     api.include_router(auth.router)

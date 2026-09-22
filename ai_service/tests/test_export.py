@@ -81,15 +81,10 @@ def test_to_frame_on_a_dataframe_is_the_original_bug():
 # ──────────────────────────────────────────────────────────────────
 
 
-class _FakeFeature:
-    def __init__(self, column: str):
-        self.column = column
-
-
 def test_single_input_feature_keeps_the_scalar_shape():
     row = pd.Series({"image_path": "s3://bucket/cat.jpg", "class": "cat"})
 
-    column, value = _shape_input_value([_FakeFeature("image_path")], row)
+    column, value = _shape_input_value(["image_path"], row)
 
     assert column == "image_path"
     assert value == "s3://bucket/cat.jpg"
@@ -98,7 +93,7 @@ def test_single_input_feature_keeps_the_scalar_shape():
 def test_multiple_input_features_become_a_record_with_no_single_column():
     row = pd.Series({"age": 34.0, "income": 52000.0, "class": "approved"})
 
-    column, value = _shape_input_value([_FakeFeature("age"), _FakeFeature("income")], row)
+    column, value = _shape_input_value(["age", "income"], row)
 
     assert column is None
     assert value == {"age": 34.0, "income": 52000.0}
@@ -112,7 +107,7 @@ def test_numpy_scalars_are_converted_to_plain_python_types():
     # real number).
     row = pd.Series({"age": np.float64(34.0)})
 
-    _, value = _shape_input_value([_FakeFeature("age")], row)
+    _, value = _shape_input_value(["age"], row)
 
     assert isinstance(value, float)
     assert not isinstance(value, np.floating)

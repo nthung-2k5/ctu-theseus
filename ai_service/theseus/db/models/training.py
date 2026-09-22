@@ -37,6 +37,9 @@ class Sweep(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     dataset_version_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("dataset_versions.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(sa.String(255))
+    # A trainer backend plugin id (theseus/backends/), free text like exports.format, never a
+    # Postgres enum: adding a backend is a Python class, not a migration.
+    backend: Mapped[str] = mapped_column(sa.String(64), default="ludwig", server_default="ludwig")
     # Maps each trainer knob to its candidate values, see services/sweep.py.
     search_space: Mapped[Any] = mapped_column(JSONB)
     strategy: Mapped[str] = mapped_column(sweep_strategy_t)
@@ -57,9 +60,12 @@ class TrainingRun(JobColumns, Base):
     # Set only for a run dispatched as one trial of a sweep.
     sweep_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("sweeps.id", ondelete="CASCADE"), index=True)
     trial_index: Mapped[int | None] = mapped_column(sa.Integer)
+    # A trainer backend plugin id (theseus/backends/), free text like exports.format.
+    backend: Mapped[str] = mapped_column(sa.String(64), default="ludwig", server_default="ludwig")
     hyperparameters: Mapped[Any] = mapped_column(JSONB)
-    # The exact compiled Ludwig config, for reproducibility.
-    ludwig_config: Mapped[Any | None] = mapped_column(JSONB)
+    # The exact compiled config this backend produced, for reproducibility. Opaque outside the
+    # backend that wrote it (see TrainerBackend.compile).
+    config: Mapped[Any | None] = mapped_column(JSONB)
     config_key: Mapped[str | None] = mapped_column(sa.Text)
     best_epoch: Mapped[int | None] = mapped_column(sa.Integer)
     # Bumped by the event writer; only used to catch a hung (not crashed) training thread.

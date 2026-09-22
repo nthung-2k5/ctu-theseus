@@ -1,7 +1,8 @@
 """Enqueue training runs and sweeps (ported from queueTraining / queueSweep in lib/microservice.ts).
 
-Enqueueing is just: compile the Ludwig config, put it in S3, insert a `queued` row, nudge the
-train lane. There is no message to publish: the dispatcher claims the row (see jobs/queue.py).
+Enqueueing is just: pick a trainer backend, validate hyperparameters against it, compile its
+config, put it in S3, insert a `queued` row, nudge the train lane. There is no message to publish:
+the dispatcher claims the row (see jobs/queue.py).
 """
 
 import asyncio
@@ -12,20 +13,18 @@ from typing import Any
 
 import sqlalchemy as sa
 import uuid_utils
+import yaml
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from theseus import constants as C
+from theseus.backends.base import ConfigError, TrainerBackend
+from theseus.backends.registry import get_backend, trainable_backends
 from theseus.db.models import DatasetVersion, Sweep, TrainingRun
 from theseus.events import get_event_writer
 from theseus.jobs import abort
 from theseus.jobs.dispatcher import nudge
 from theseus.services import storage
-from theseus.services.ludwig_config import (
-    ConfigError,
-    TrainerSelections,
-    compile_ludwig_config,
-    serialize_ludwig_config,
-)
 from theseus.services.snapshot import read_snapshot_manifest
 from theseus.services.sweep import expand_sweep, validate_search_space
 from theseus.services.task_registry import get_task_descriptor
@@ -44,6 +43,13 @@ def new_uuid7() -> uuid.UUID:
     return uuid.UUID(str(uuid_utils.uuid7()))
 
 
+def default_backend(task: str) -> type[TrainerBackend] | None:
+    """The backend a run/sweep uses when the caller does not name one: the first installed,
+    available backend that supports the task. None if none does."""
+    backends = trainable_backends(get_task_descriptor(task))
+    return backends[0] if backends else None
+
+
 async def queue_training(
     session: AsyncSession,
     *,
@@ -51,7 +57,8 @@ async def queue_training(
     name: str,
     task: str,
     dataset_version_id: uuid.UUID,
-    selections: TrainerSelections | None = None,
+    backend_id: str | None = None,
+    hyperparameters: dict[str, Any] | None = None,
     sweep_id: uuid.UUID | None = None,
     trial_index: int | None = None,
     record_compile_failure: bool = False,
@@ -68,28 +75,46 @@ async def queue_training(
     if version.status != "ready":
         return QueueError(409, f"Dataset version is not ready for training (status: {version.status})")
 
-    sel = selections or TrainerSelections()
-    run_id = new_uuid7()
-    hyperparameters = sel.model_dump(by_alias=True, exclude_none=True)
-    loop = asyncio.get_running_loop()
+    if backend_id is not None:
+        backend = get_backend(backend_id)
+    else:
+        backend = default_backend(task)
+        if backend is None:
+            return QueueError(400, f"No trainer backend is available for task '{task}'")
 
-    try:
-        ctx = await read_snapshot_manifest(dataset_version_id)
-        ludwig_config = compile_ludwig_config(get_task_descriptor(task), ctx, sel)
-        config_yaml = serialize_ludwig_config(ludwig_config)
-    except (ConfigError, ValueError, KeyError) as e:
-        message = f"Failed to compile Ludwig config: {e}"
+    run_id = new_uuid7()
+    loop = asyncio.get_running_loop()
+    # A raw dict until hyperparameter validation succeeds below; what gets stored on a run that
+    # fails before then (record_compile_failure), since there is no validated model to dump.
+    stored_hyperparameters: dict[str, Any] = hyperparameters or {}
+
+    async def _record_failure(code: int, message: str) -> TrainingRun | QueueError:
         if not record_compile_failure:
-            return QueueError(400, message)
+            return QueueError(code, message)
         run = TrainingRun(
-            id=run_id, project_id=project_id, name=name, dataset_version_id=dataset_version_id, sweep_id=sweep_id,
-            trial_index=trial_index, hyperparameters=hyperparameters, status="failed", failed_message=message,
-            completed_at=sa.func.now(),
+            id=run_id, project_id=project_id, name=name, dataset_version_id=dataset_version_id, backend=backend.id,
+            sweep_id=sweep_id, trial_index=trial_index, hyperparameters=stored_hyperparameters, status="failed",
+            failed_message=message, completed_at=sa.func.now(),
         )  # fmt: skip
         session.add(run)
         await session.commit()
         await session.refresh(run)
         return run
+
+    try:
+        sel = backend.Hyperparameters.model_validate(hyperparameters or {})
+    except ValidationError as e:
+        first = e.errors()[0]
+        where = ".".join(str(p) for p in first["loc"])
+        return await _record_failure(422, f"Invalid hyperparameter '{where}': {first['msg']}")
+    stored_hyperparameters = sel.model_dump(by_alias=True, exclude_none=True)
+
+    try:
+        ctx = await read_snapshot_manifest(dataset_version_id)
+        config = backend.compile(get_task_descriptor(task), ctx, sel)
+        config_yaml = yaml.safe_dump(config, sort_keys=False)
+    except (ConfigError, ValueError, KeyError) as e:
+        return await _record_failure(400, f"Failed to compile {backend.label} config: {e}")
 
     config_key = storage.training_config_key(str(run_id))
     await loop.run_in_executor(
@@ -97,9 +122,9 @@ async def queue_training(
     )
 
     run = TrainingRun(
-        id=run_id, project_id=project_id, name=name, dataset_version_id=dataset_version_id, sweep_id=sweep_id,
-        trial_index=trial_index, hyperparameters=hyperparameters, ludwig_config=ludwig_config, config_key=config_key,
-        status="queued",
+        id=run_id, project_id=project_id, name=name, dataset_version_id=dataset_version_id, backend=backend.id,
+        sweep_id=sweep_id, trial_index=trial_index, hyperparameters=stored_hyperparameters, config=config,
+        config_key=config_key, status="queued",
     )  # fmt: skip
     session.add(run)
     await session.commit()
@@ -120,6 +145,7 @@ async def queue_sweep(
     search_space: dict[str, list[Any]],
     strategy: str,
     max_trials: int,
+    backend_id: str | None = None,
 ) -> tuple[Sweep, list[TrainingRun]] | QueueError:
     """Expand a search space into trials and enqueue each through the ordinary training path.
 
@@ -134,10 +160,17 @@ async def queue_sweep(
     if error := validate_search_space(search_space, max_trials):
         return QueueError(400, error)
 
+    if backend_id is not None:
+        backend = get_backend(backend_id)
+    else:
+        backend = default_backend(task)
+        if backend is None:
+            return QueueError(400, f"No trainer backend is available for task '{task}'")
+
     trials_selections = expand_sweep(search_space, strategy, max_trials)  # type: ignore[arg-type]
     sweep = Sweep(
-        project_id=project_id, dataset_version_id=dataset_version_id, name=name, search_space=search_space,
-        strategy=strategy, max_trials=max_trials, status="running",
+        project_id=project_id, dataset_version_id=dataset_version_id, name=name, backend=backend.id,
+        search_space=search_space, strategy=strategy, max_trials=max_trials, status="running",
     )  # fmt: skip
     session.add(sweep)
     await session.commit()
@@ -151,7 +184,8 @@ async def queue_sweep(
             name=f"{name} — trial {index + 1}",
             task=task,
             dataset_version_id=dataset_version_id,
-            selections=TrainerSelections.model_validate(raw),
+            backend_id=backend.id,
+            hyperparameters=raw,
             sweep_id=sweep.id,
             trial_index=index,
             record_compile_failure=True,

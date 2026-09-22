@@ -69,7 +69,7 @@ async def test_starting_a_run_compiles_uploads_the_config_and_queues_it(client, 
     async with db() as s:
         row = (await s.execute(sa.select(TrainingRun))).scalar_one()
         events = (await s.execute(sa.select(RunEvent.payload))).scalars().all()
-    assert row.config_key == f"{run['id']}/config.yaml" and row.ludwig_config["model_type"] == "ecd"
+    assert row.config_key == f"{run['id']}/config.yaml" and row.config["model_type"] == "ecd"
     assert [e["status"] for e in events] == ["queued"]  # the browser is told immediately over SSE
 
 

@@ -1,5 +1,8 @@
 """Run one export job: convert the model artifact if needed, then assemble the bundle.
 
+Framework-neutral since trainer backends became a plugin system: the actual model conversion and
+golden-sample prediction go through the run's own `TrainerBackend`, not Ludwig directly.
+
 Replaces ai_service/tasks/export.py plus the gateway two-phase dance (converting -> event ->
 assembling -> in-memory queue). One job now walks the whole status flow on a single row:
 
@@ -19,24 +22,23 @@ from typing import Any
 
 import pandas as pd
 import sqlalchemy as sa
-from ludwig.api import LudwigModel
 
 from theseus import constants as C
+from theseus.backends.base import TrainerBackend
+from theseus.backends.registry import get_backend
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import ModelExport, TrainingRun
 from theseus.export import bundle
-from theseus.export.artifacts import Artifact, convert, get_artifact
 from theseus.export.registry import find_export_format
 from theseus.jobs import queue
 from theseus.jobs.executors import export_executor, run_in_executor
 from theseus.services import storage
-from theseus.services.predict import parse_prediction_row
 from theseus.settings import get_settings
 
 logger = logging.getLogger("theseus.jobs.export")
 
-# Loading a Ludwig model puts it on the GPU. Assembly (zipping) runs two at a time, but model
-# conversion is serialized: this is the old worker one-task-at-a-time behavior, kept where it matters.
+# Loading a model puts it on the GPU. Assembly (zipping) runs two at a time, but model conversion
+# is serialized: this is the old worker one-task-at-a-time behavior, kept where it matters.
 _conversion_lock = threading.Lock()
 
 
@@ -46,20 +48,20 @@ def _plain(v: Any) -> Any:
     return v.item() if hasattr(v, "item") else v
 
 
-def _shape_input_value(input_features: list[Any], sample_row: "pd.Series") -> tuple[str | None, Any]:
+def _shape_input_value(input_columns: list[str], sample_row: "pd.Series") -> tuple[str | None, Any]:
     """(inputColumn, inputValue) for expected.json.
 
-    A single input feature keeps the original scalar shape (an s3:// URI for file-backed
+    A single input column keeps the original scalar shape (an s3:// URI for file-backed
     modalities, or the inline text/scalar), which bundle assembly turns into sample/input.<ext>.
-    A tabular model (more than one input feature) becomes a {column: value} record written as
+    A tabular model (more than one input column) becomes a {column: value} record written as
     sample/input.json; the devkit client predict() takes that same dict shape.
     """
-    if len(input_features) == 1:
-        return input_features[0].column, _plain(sample_row[input_features[0].column])
-    return None, {f.column: _plain(sample_row[f.column]) for f in input_features}
+    if len(input_columns) == 1:
+        return input_columns[0], _plain(sample_row[input_columns[0]])
+    return None, {c: _plain(sample_row[c]) for c in input_columns}
 
 
-def _build_golden_sample(ludwig_model_dir: str, dataset_key: str) -> dict[str, Any] | None:
+def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_key: str) -> dict[str, Any] | None:
     """Run one real test-split row through the trained model.
 
     Returns the input/output pair the devkit verify script checks its own (re-implemented)
@@ -67,33 +69,24 @@ def _build_golden_sample(ludwig_model_dir: str, dataset_key: str) -> dict[str, A
     missing snapshot should skip the verification artifact rather than fail the export.
     """
     try:
-        model = LudwigModel.load(ludwig_model_dir)
+        model = backend.load(model_dir)
         df = pd.read_parquet(storage.s3fs_path(C.BUCKET_DATASETS, dataset_key))
         rows = df[df[C.SPLIT_COLUMN_NAME] == "test"] if C.SPLIT_COLUMN_NAME in df.columns else df
         if len(rows) == 0:
             rows = df
         sample = rows.iloc[[0]]
 
-        input_features = model.config_obj.input_features
-        output_feature = model.config_obj.output_features[0]
-
-        predictions, _ = model.predict(dataset=sample)
-        assert isinstance(predictions, pd.DataFrame)
-
-        idx2str = None
-        if output_feature.type == "category" and model.training_set_metadata:
-            idx2str = model.training_set_metadata.get(output_feature.name, {}).get("idx2str")
-
+        predictions = model.predict(sample)
         # threshold=0.0: this is a reference fixture, not a filtered result. The verify script
         # wants the full distribution to compare.
-        predicted = parse_prediction_row(output_feature.name, output_feature.type, predictions, idx2str, threshold=0.0)
-        input_column, input_value = _shape_input_value(input_features, sample.iloc[0])
+        predicted = model.golden_prediction(predictions, threshold=0.0)
+        input_column, input_value = _shape_input_value(model.input_columns, sample.iloc[0])
         return {
             "schemaVersion": 1,
             "inputColumn": input_column,
             "inputValue": input_value,
-            "outputColumn": output_feature.name,
-            "outputType": output_feature.type,
+            "outputColumn": model.output.name,
+            "outputType": model.output.kind,
             "predictions": predicted,
         }
     except (AttributeError, TypeError, KeyError, IndexError, NameError):
@@ -106,19 +99,20 @@ def _build_golden_sample(ludwig_model_dir: str, dataset_key: str) -> dict[str, A
         return None
 
 
-def _convert(run_id: str, artifact: Artifact, dataset_key: str, export_id: str) -> None:
+def _convert(run_id: str, backend: type[TrainerBackend], artifact_id: str, dataset_key: str, export_id: str) -> None:
     """Sync: download the trained model, export it, upload the artifact and the golden sample."""
     with _conversion_lock:
         model_dir = storage.find_model_dir(storage.download_model(run_id))
         workdir = os.path.join(str(get_settings().temp_dir), "exports", export_id)
         os.makedirs(workdir, exist_ok=True)
 
-        model = LudwigModel.load(model_dir)
-        export_path = convert(model, artifact, workdir)
+        model = backend.load(model_dir)
+        artifact = backend.artifacts[artifact_id]
+        export_path = backend.convert(model, artifact_id, workdir)
         storage.upload_file(C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename), export_path)
 
         # Best effort, and idempotent (same S3 key), so re-running per artifact is fine.
-        golden = _build_golden_sample(model_dir, dataset_key)
+        golden = _build_golden_sample(backend, model_dir, dataset_key)
         if golden is not None:
             storage.upload_json(C.BUCKET_MODELS, storage.expected_sample_key(run_id), golden)
         storage.cleanup_temp("exports", export_id)
@@ -136,14 +130,20 @@ async def run_export(export_id: uuid.UUID) -> None:
     if export_format is None:
         # The plugin class was removed between enqueue and run; retrying cannot help.
         raise ValueError(f"Export format {row.format!r} is no longer installed")
-    artifact = get_artifact(export_format.artifact)
-    logger.info("Starting export %s for run %s (format %s, artifact %s)", export_id, run_id, row.format, artifact.id)
+    backend = get_backend(run.backend)
+    artifact = backend.artifacts[export_format.artifact]
+    logger.info(
+        "Starting export %s for run %s (format %s, backend %s, artifact %s)",
+        export_id, run_id, row.format, backend.id, artifact.id,
+    )  # fmt: skip
 
     if not await run_in_executor(
         None, storage.file_exists, C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename)
     ):
         dataset_key = storage.snapshot_parquet_key(str(run.dataset_version_id))
-        await run_in_executor(export_executor, _convert, run_id, artifact, dataset_key, str(export_id))
+        await run_in_executor(
+            export_executor, _convert, run_id, backend, export_format.artifact, dataset_key, str(export_id)
+        )
 
     # Guarded: only a job still in `converting` may advance. Zero rows means it was recovered or
     # failed by someone else in the meantime, so do nothing further.

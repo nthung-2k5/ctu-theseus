@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any
 
 from pydantic import Field
 
@@ -16,8 +16,29 @@ from theseus.db.enums import (
     SweepStrategy,
     TrainingStatus,
 )
-from theseus.schemas.common import ApiModel
-from theseus.services.ludwig_config import TrainerSelections
+from theseus.schemas.common import ApiModel, ParamSpec
+
+
+class ModelChoiceOut(ApiModel):
+    id: str
+    label: str
+    description: str
+    pretrained: bool
+
+
+class TrainingBackendOut(ApiModel):
+    id: str
+    label: str
+    description: str
+    available: bool
+    unavailable_reason: str | None = None
+    # Selectable models/architectures for the task in scope; empty when listed with no task.
+    models: list[ModelChoiceOut]
+    params: list[ParamSpec]
+
+
+class TrainingBackendListResponse(ApiModel):
+    backends: list[TrainingBackendOut]
 
 
 class EvaluationBrief(ApiModel):
@@ -113,7 +134,13 @@ class RunDetailResponse(ApiModel):
 class TrainBody(ApiModel):
     name: str = Field(min_length=1, max_length=255)
     dataset_version_id: uuid.UUID
-    hyperparameters: TrainerSelections | None = None
+    # A trainer backend plugin id (theseus/backends/); defaults to the project task's sole or
+    # first available backend when omitted.
+    backend: str | None = None
+    # Raw camelCase hyperparameters, validated server-side against the chosen backend's own
+    # Hyperparameters model (see services/training.py) rather than one fixed schema here — a
+    # different backend accepts different knobs.
+    hyperparameters: dict[str, Any] | None = None
 
 
 class RunStatusResponse(ApiModel):
@@ -163,20 +190,15 @@ class EvaluationErrorsResponse(ApiModel):
 # -- Sweeps ----------------------------------------------------------------------------------
 
 
-class SearchSpace(ApiModel):
-    """One candidate-value list per sweepable trainer knob (camelCase keys, as stored and expanded)."""
-
-    epochs: list[int] | None = Field(default=None, min_length=1)
-    batch_size: list[int | Literal["auto"]] | None = Field(default=None, min_length=1)
-    learning_rate: list[float] | None = Field(default=None, min_length=1)
-    early_stop_patience: list[int] | None = Field(default=None, min_length=1)
-    encoder_id: list[str] | None = Field(default=None, min_length=1)
-
-
 class CreateSweepBody(ApiModel):
     name: str = Field(min_length=1, max_length=255)
     dataset_version_id: uuid.UUID
-    search_space: SearchSpace
+    backend: str | None = None
+    # One candidate-value list per sweepable hyperparameter of the chosen backend (camelCase
+    # keys, as stored and expanded — see services/sweep.py). Backend-agnostic, so this is a plain
+    # dict rather than one fixed schema; each backend's own Hyperparameters model validates a
+    # trial's picks when it is compiled.
+    search_space: dict[str, Annotated[list[Any], Field(min_length=1)]]
     strategy: SweepStrategy
     max_trials: int = Field(ge=1, le=50)
 

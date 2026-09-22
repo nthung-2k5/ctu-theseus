@@ -16,22 +16,22 @@ from theseus.settings import get_settings
 
 
 class FakeModel:
-    """Enough of LudwigModel for the job mechanics; the prediction shaping is tested in test_predict."""
+    """Enough of a LoadedModel for the job mechanics; the prediction shaping itself is tested in
+    test_ludwig_model.py (and, for a specific backend, wherever that backend's LoadedModel lives)."""
 
     predict_calls: list[pd.DataFrame] = []
     delay = 0.0
 
-    def __init__(self, columns=("text",), out=("class", "category")):
-        self.config_obj = SimpleNamespace(
-            input_features=[SimpleNamespace(column=c) for c in columns],
-            output_features=[SimpleNamespace(name=out[0], type=out[1])],
-        )
-        self.training_set_metadata = {}
+    def __init__(self, columns=("text",)):
+        self.input_columns = list(columns)
 
-    def predict(self, dataset):
-        FakeModel.predict_calls.append(dataset)
+    def predict(self, frame):
+        FakeModel.predict_calls.append(frame)
         time.sleep(FakeModel.delay)
-        return pd.DataFrame({"class_predictions": ["cat"] * len(dataset)}), None
+        return pd.DataFrame({"class_predictions": ["cat"] * len(frame)})
+
+    def to_output(self, predictions, *, top_k=100, input_tokens=None):
+        return {"kind": "classification", "feature": "class", "classes": []}
 
 
 @pytest.fixture
@@ -46,9 +46,6 @@ def serving(monkeypatch, tmp_path):
             return log.model
 
     monkeypatch.setattr(inf, "_model_cache", lambda: Cache())
-    monkeypatch.setattr(
-        inf, "build_inference_output", lambda *a, **k: {"kind": "classification", "feature": "class", "classes": []}
-    )
     monkeypatch.setattr(inf, "build_batch_result_frame", lambda frame, preds: frame.assign(prediction="cat"))
     monkeypatch.setattr(get_settings(), "temp_dir", tmp_path)
 
@@ -219,8 +216,8 @@ def export_env(monkeypatch):
     async def build_bundle(export_id):
         log.bundled.append(export_id)
 
-    def convert(run_id, artifact, dataset_key, export_id):
-        log.converted.append((run_id, artifact.id, dataset_key))
+    def convert(run_id, backend, artifact_id, dataset_key, export_id):
+        log.converted.append((run_id, artifact_id, dataset_key))
 
     monkeypatch.setattr(export_job.bundle, "build_bundle", build_bundle)
     monkeypatch.setattr(export_job, "_convert", convert)

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from theseus import constants as C
+from theseus.backends.registry import describe, list_backends
 from theseus.db.models import (
     Dataset,
     DatasetItem,
@@ -33,6 +34,7 @@ from theseus.schemas.training import (
     EvaluationOut,
     EvaluationResponse,
     MetricRow,
+    ModelChoiceOut,
     RunCreatedResponse,
     RunDetail,
     RunDetailResponse,
@@ -43,9 +45,12 @@ from theseus.schemas.training import (
     RunVersion,
     RunVersionDataset,
     TrainBody,
+    TrainingBackendListResponse,
+    TrainingBackendOut,
 )
 from theseus.services import storage
 from theseus.services.cleanup import cleanup_run_storage
+from theseus.services.task_registry import get_task_descriptor
 from theseus.services.training import QueueError, queue_training
 
 router = APIRouter(tags=["training"])
@@ -57,6 +62,37 @@ def _brief(evaluation: RunEvaluation | None) -> EvaluationBrief | None:
     if evaluation is None:
         return None
     return EvaluationBrief(status=evaluation.status, accuracy=evaluation.accuracy, macro_f1=evaluation.macro_f1)
+
+
+def _backend_out(info) -> TrainingBackendOut:
+    return TrainingBackendOut(
+        id=info.id,
+        label=info.label,
+        description=info.description,
+        available=info.available,
+        unavailable_reason=info.unavailable_reason,
+        models=[ModelChoiceOut(**m.model_dump()) for m in info.models],
+        params=info.params,
+    )
+
+
+@router.get("/training-backends", response_model=TrainingBackendListResponse)
+async def list_training_backends() -> TrainingBackendListResponse:
+    """Every installed trainer backend, whether or not it is currently available (e.g. a missing
+    optional dependency) — for a global settings/diagnostics view, not task-scoped model choice."""
+    return TrainingBackendListResponse(backends=[_backend_out(describe(b)) for b in list_backends()])
+
+
+@router.get("/projects/{project_id}/training-backends", response_model=TrainingBackendListResponse)
+async def list_project_training_backends(project: ProjectDep) -> TrainingBackendListResponse:
+    """Backends that can train this project's task, with their models and hyperparameters — what
+    the create-run / create-sweep panel renders. Only available backends are included."""
+    task = get_task_descriptor(project.task)
+    return TrainingBackendListResponse(
+        backends=[
+            _backend_out(describe(b, task)) for b in list_backends() if b.available() is None and b.supports(task)
+        ]
+    )
 
 
 @router.get("/projects/{project_id}/runs", response_model=RunListResponse)
@@ -124,7 +160,8 @@ async def start_training(body: TrainBody, project: ProjectDep, session: SessionD
         name=body.name,
         task=project.task,
         dataset_version_id=body.dataset_version_id,
-        selections=body.hyperparameters,
+        backend_id=body.backend,
+        hyperparameters=body.hyperparameters,
     )
     if isinstance(result, QueueError):
         raise HTTPException(result.code, result.message)

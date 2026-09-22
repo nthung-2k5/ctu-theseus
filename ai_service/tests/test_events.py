@@ -289,7 +289,9 @@ class FakeWriter:
 @pytest.fixture
 def handler():
     fw = FakeWriter()
-    h = install_run_log_handler(fw)  # type: ignore[arg-type]
+    # "ludwig" stands in for a trainer backend's log_namespaces (lifespan.py installs these for
+    # every installed backend; this fixture predates backends being pluggable).
+    h = install_run_log_handler(fw, ("ludwig",))  # type: ignore[arg-type]
     yield h, fw
     uninstall_run_log_handler(h)
 

@@ -4,7 +4,6 @@
       "id": "image_classification",
       "label": "Image Classification",
       "modality": "vision",
-      "backend": "ludwig",
       "status": "stable",
       "itemSpec": {
         "payload": "file",
@@ -31,105 +30,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "image_path",
-            "type": "image",
-            "column": "image_path"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "class",
-            "type": "category",
-            "column": "class"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "resnet18",
-            "label": "ResNet-18",
-            "encoderType": "resnet",
-            "pretrained": true,
-            "params": {
-              "model_variant": 18
-            }
-          },
-          {
-            "id": "resnet50",
-            "label": "ResNet-50",
-            "encoderType": "resnet",
-            "pretrained": true,
-            "params": {
-              "model_variant": 50
-            }
-          },
-          {
-            "id": "vit_base",
-            "label": "ViT-Base/16",
-            "encoderType": "vit",
-            "pretrained": true,
-            "params": {
-              "model_variant": "base_patch16_224"
-            }
-          },
-          {
-            "id": "convnext_tiny",
-            "label": "ConvNeXt-Tiny",
-            "encoderType": "convnext",
-            "pretrained": true,
-            "params": {
-              "model_variant": "tiny"
-            }
-          },
-          {
-            "id": "efficientnet_b0",
-            "label": "EfficientNet-B0",
-            "encoderType": "efficientnet",
-            "pretrained": true,
-            "params": {
-              "model_variant": "b0"
-            }
-          },
-          {
-            "id": "mobilenet_v3_small",
-            "label": "MobileNetV3-Small",
-            "encoderType": "mobilenetv3",
-            "pretrained": true,
-            "params": {
-              "model_variant": "small"
-            }
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "class",
+        "kind": "classification"
       },
       "inferenceInputSpec": {
         "kind": "file",
@@ -144,7 +48,6 @@
       "id": "text_classification",
       "label": "Text Classification",
       "modality": "text",
-      "backend": "ludwig",
       "status": "stable",
       "itemSpec": {
         "payload": "inline_text"
@@ -167,75 +70,12 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "text",
-            "type": "text",
-            "column": "text"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "class",
-            "type": "category",
-            "column": "class"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "bert",
-            "label": "BERT",
-            "encoderType": "bert",
-            "pretrained": true
-          },
-          {
-            "id": "distilbert",
-            "label": "DistilBERT",
-            "encoderType": "distilbert",
-            "pretrained": true
-          },
-          {
-            "id": "roberta",
-            "label": "RoBERTa",
-            "encoderType": "roberta",
-            "pretrained": true
-          },
-          {
-            "id": "stacked_cnn",
-            "label": "Stacked CNN (train from scratch)",
-            "encoderType": "stacked_cnn",
-            "pretrained": false
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [
+        "text"
+      ],
+      "output": {
+        "column": "class",
+        "kind": "classification"
       },
       "inferenceInputSpec": {
         "kind": "text",
@@ -249,7 +89,6 @@
       "id": "tabular_classification",
       "label": "Tabular Classification",
       "modality": "tabular",
-      "backend": "ludwig",
       "status": "stable",
       "itemSpec": {
         "payload": "record"
@@ -268,44 +107,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [],
-        "outputFeatures": [
-          {
-            "name": "class",
-            "type": "category",
-            "column": "class"
-          }
-        ],
-        "encoders": [],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "class",
+        "kind": "classification"
       },
       "inferenceInputSpec": {
         "kind": "record"
@@ -316,7 +121,6 @@
       "id": "tabular_regression",
       "label": "Tabular Regression",
       "modality": "tabular",
-      "backend": "ludwig",
       "status": "stable",
       "itemSpec": {
         "payload": "record"
@@ -335,44 +139,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [],
-        "outputFeatures": [
-          {
-            "name": "target",
-            "type": "number",
-            "column": "target"
-          }
-        ],
-        "encoders": [],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "target",
+        "kind": "regression"
       },
       "inferenceInputSpec": {
         "kind": "record"
@@ -383,7 +153,6 @@
       "id": "audio_classification",
       "label": "Audio Classification",
       "modality": "audio",
-      "backend": "ludwig",
       "status": "stable",
       "itemSpec": {
         "payload": "file",
@@ -412,69 +181,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "audio_path",
-            "type": "audio",
-            "column": "audio_path"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "class",
-            "type": "category",
-            "column": "class"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "stacked_cnn",
-            "label": "Stacked CNN",
-            "encoderType": "stacked_cnn",
-            "pretrained": false
-          },
-          {
-            "id": "rnn",
-            "label": "RNN",
-            "encoderType": "rnn",
-            "pretrained": false
-          },
-          {
-            "id": "cnnrnn",
-            "label": "CNN + RNN",
-            "encoderType": "cnnrnn",
-            "pretrained": false
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "class",
+        "kind": "classification"
       },
       "inferenceInputSpec": {
         "kind": "file",
@@ -491,7 +201,6 @@
       "id": "token_classification",
       "label": "Token Classification",
       "modality": "text",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "inline_text"
@@ -514,75 +223,12 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "text",
-            "type": "sequence",
-            "column": "text"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "tags",
-            "type": "sequence",
-            "column": "tags"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "bert",
-            "label": "BERT",
-            "encoderType": "bert",
-            "pretrained": true
-          },
-          {
-            "id": "distilbert",
-            "label": "DistilBERT",
-            "encoderType": "distilbert",
-            "pretrained": true
-          },
-          {
-            "id": "roberta",
-            "label": "RoBERTa",
-            "encoderType": "roberta",
-            "pretrained": true
-          },
-          {
-            "id": "stacked_cnn",
-            "label": "Stacked CNN (train from scratch)",
-            "encoderType": "stacked_cnn",
-            "pretrained": false
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [
+        "text"
+      ],
+      "output": {
+        "column": "tags",
+        "kind": "tokens"
       },
       "inferenceInputSpec": {
         "kind": "text",
@@ -596,7 +242,6 @@
       "id": "text_generation",
       "label": "Text Generation",
       "modality": "text",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "inline_text"
@@ -619,49 +264,12 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "llm",
-        "inputFeatures": [
-          {
-            "name": "prompt",
-            "type": "text",
-            "column": "prompt"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "completion",
-            "type": "text",
-            "column": "completion"
-          }
-        ],
-        "encoders": [],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 3,
-            "min": 1,
-            "max": 50
-          },
-          "batchSize": {
-            "default": 1,
-            "options": [
-              1,
-              2,
-              4,
-              8,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.0001,
-            "min": 1e-06,
-            "max": 0.01
-          },
-          "earlyStopPatience": {
-            "default": 3,
-            "min": -1
-          }
-        }
+      "inputFields": [
+        "prompt"
+      ],
+      "output": {
+        "column": "completion",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "text",
@@ -675,7 +283,6 @@
       "id": "summarization",
       "label": "Summarization",
       "modality": "text",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "inline_text"
@@ -698,49 +305,12 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "llm",
-        "inputFeatures": [
-          {
-            "name": "document",
-            "type": "text",
-            "column": "document"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "summary",
-            "type": "text",
-            "column": "summary"
-          }
-        ],
-        "encoders": [],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 3,
-            "min": 1,
-            "max": 50
-          },
-          "batchSize": {
-            "default": 1,
-            "options": [
-              1,
-              2,
-              4,
-              8,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.0001,
-            "min": 1e-06,
-            "max": 0.01
-          },
-          "earlyStopPatience": {
-            "default": 3,
-            "min": -1
-          }
-        }
+      "inputFields": [
+        "document"
+      ],
+      "output": {
+        "column": "summary",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "text",
@@ -754,7 +324,6 @@
       "id": "sequence_to_sequence",
       "label": "Sequence to Sequence",
       "modality": "text",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "inline_text"
@@ -777,49 +346,12 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "llm",
-        "inputFeatures": [
-          {
-            "name": "source",
-            "type": "text",
-            "column": "source"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "target",
-            "type": "text",
-            "column": "target"
-          }
-        ],
-        "encoders": [],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 3,
-            "min": 1,
-            "max": 50
-          },
-          "batchSize": {
-            "default": 1,
-            "options": [
-              1,
-              2,
-              4,
-              8,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.0001,
-            "min": 1e-06,
-            "max": 0.01
-          },
-          "earlyStopPatience": {
-            "default": 3,
-            "min": -1
-          }
-        }
+      "inputFields": [
+        "source"
+      ],
+      "output": {
+        "column": "target",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "text",
@@ -833,7 +365,6 @@
       "id": "question_answering",
       "label": "Question Answering",
       "modality": "text",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "inline_text"
@@ -860,54 +391,13 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "llm",
-        "inputFeatures": [
-          {
-            "name": "context",
-            "type": "text",
-            "column": "context"
-          },
-          {
-            "name": "question",
-            "type": "text",
-            "column": "question"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "answer",
-            "type": "text",
-            "column": "answer"
-          }
-        ],
-        "encoders": [],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 3,
-            "min": 1,
-            "max": 50
-          },
-          "batchSize": {
-            "default": 1,
-            "options": [
-              1,
-              2,
-              4,
-              8,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.0001,
-            "min": 1e-06,
-            "max": 0.01
-          },
-          "earlyStopPatience": {
-            "default": 3,
-            "min": -1
-          }
-        }
+      "inputFields": [
+        "context",
+        "question"
+      ],
+      "output": {
+        "column": "answer",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "text",
@@ -922,7 +412,6 @@
       "id": "image_captioning",
       "label": "Image Captioning",
       "modality": "vision",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "file",
@@ -949,105 +438,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "image_path",
-            "type": "image",
-            "column": "image_path"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "caption",
-            "type": "text",
-            "column": "caption"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "resnet18",
-            "label": "ResNet-18",
-            "encoderType": "resnet",
-            "pretrained": true,
-            "params": {
-              "model_variant": 18
-            }
-          },
-          {
-            "id": "resnet50",
-            "label": "ResNet-50",
-            "encoderType": "resnet",
-            "pretrained": true,
-            "params": {
-              "model_variant": 50
-            }
-          },
-          {
-            "id": "vit_base",
-            "label": "ViT-Base/16",
-            "encoderType": "vit",
-            "pretrained": true,
-            "params": {
-              "model_variant": "base_patch16_224"
-            }
-          },
-          {
-            "id": "convnext_tiny",
-            "label": "ConvNeXt-Tiny",
-            "encoderType": "convnext",
-            "pretrained": true,
-            "params": {
-              "model_variant": "tiny"
-            }
-          },
-          {
-            "id": "efficientnet_b0",
-            "label": "EfficientNet-B0",
-            "encoderType": "efficientnet",
-            "pretrained": true,
-            "params": {
-              "model_variant": "b0"
-            }
-          },
-          {
-            "id": "mobilenet_v3_small",
-            "label": "MobileNetV3-Small",
-            "encoderType": "mobilenetv3",
-            "pretrained": true,
-            "params": {
-              "model_variant": "small"
-            }
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "caption",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "file",
@@ -1062,7 +456,6 @@
       "id": "audio_captioning",
       "label": "Audio Captioning",
       "modality": "audio",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "file",
@@ -1091,69 +484,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "audio_path",
-            "type": "audio",
-            "column": "audio_path"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "caption",
-            "type": "text",
-            "column": "caption"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "stacked_cnn",
-            "label": "Stacked CNN",
-            "encoderType": "stacked_cnn",
-            "pretrained": false
-          },
-          {
-            "id": "rnn",
-            "label": "RNN",
-            "encoderType": "rnn",
-            "pretrained": false
-          },
-          {
-            "id": "cnnrnn",
-            "label": "CNN + RNN",
-            "encoderType": "cnnrnn",
-            "pretrained": false
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "caption",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "file",
@@ -1170,7 +504,6 @@
       "id": "automatic_speech_recognition",
       "label": "Automatic Speech Recognition",
       "modality": "audio",
-      "backend": "ludwig",
       "status": "experimental",
       "itemSpec": {
         "payload": "file",
@@ -1199,69 +532,10 @@
           "kind": "split"
         }
       ],
-      "ludwig": {
-        "modelType": "ecd",
-        "inputFeatures": [
-          {
-            "name": "audio_path",
-            "type": "audio",
-            "column": "audio_path"
-          }
-        ],
-        "outputFeatures": [
-          {
-            "name": "transcript",
-            "type": "text",
-            "column": "transcript"
-          }
-        ],
-        "encoders": [
-          {
-            "id": "stacked_cnn",
-            "label": "Stacked CNN",
-            "encoderType": "stacked_cnn",
-            "pretrained": false
-          },
-          {
-            "id": "rnn",
-            "label": "RNN",
-            "encoderType": "rnn",
-            "pretrained": false
-          },
-          {
-            "id": "cnnrnn",
-            "label": "CNN + RNN",
-            "encoderType": "cnnrnn",
-            "pretrained": false
-          }
-        ],
-        "trainerKnobs": {
-          "epochs": {
-            "default": 20,
-            "min": 1,
-            "max": 500
-          },
-          "batchSize": {
-            "default": "auto",
-            "options": [
-              16,
-              32,
-              64,
-              128,
-              256,
-              "auto"
-            ]
-          },
-          "learningRate": {
-            "default": 0.001,
-            "min": 1e-05,
-            "max": 1.0
-          },
-          "earlyStopPatience": {
-            "default": 5,
-            "min": -1
-          }
-        }
+      "inputFields": [],
+      "output": {
+        "column": "transcript",
+        "kind": "text"
       },
       "inferenceInputSpec": {
         "kind": "file",
@@ -1278,7 +552,6 @@
       "id": "object_detection",
       "label": "Object Detection",
       "modality": "vision",
-      "backend": "unsupported",
       "status": "planned",
       "itemSpec": {
         "payload": "file"
@@ -1287,13 +560,13 @@
         "type": "bounding_box",
         "requiresLabelClasses": true
       },
-      "columns": []
+      "columns": [],
+      "inputFields": []
     },
     "image_segmentation": {
       "id": "image_segmentation",
       "label": "Image Segmentation",
       "modality": "vision",
-      "backend": "unsupported",
       "status": "planned",
       "itemSpec": {
         "payload": "file"
@@ -1302,13 +575,13 @@
         "type": "segmentation_mask",
         "requiresLabelClasses": true
       },
-      "columns": []
+      "columns": [],
+      "inputFields": []
     },
     "audio_segmentation": {
       "id": "audio_segmentation",
       "label": "Audio Segmentation",
       "modality": "audio",
-      "backend": "unsupported",
       "status": "planned",
       "itemSpec": {
         "payload": "file"
@@ -1317,13 +590,13 @@
         "type": "segmentation_mask",
         "requiresLabelClasses": true
       },
-      "columns": []
+      "columns": [],
+      "inputFields": []
     },
     "tabular_clustering": {
       "id": "tabular_clustering",
       "label": "Tabular Clustering",
       "modality": "tabular",
-      "backend": "unsupported",
       "status": "planned",
       "itemSpec": {
         "payload": "file"
@@ -1332,13 +605,13 @@
         "type": "classification",
         "requiresLabelClasses": false
       },
-      "columns": []
+      "columns": [],
+      "inputFields": []
     },
     "tabular_anomaly_detection": {
       "id": "tabular_anomaly_detection",
       "label": "Tabular Anomaly Detection",
       "modality": "tabular",
-      "backend": "unsupported",
       "status": "planned",
       "itemSpec": {
         "payload": "file"
@@ -1347,13 +620,13 @@
         "type": "classification",
         "requiresLabelClasses": false
       },
-      "columns": []
+      "columns": [],
+      "inputFields": []
     },
     "text_embedding": {
       "id": "text_embedding",
       "label": "Text Embedding",
       "modality": "text",
-      "backend": "unsupported",
       "status": "planned",
       "itemSpec": {
         "payload": "file"
@@ -1362,7 +635,8 @@
         "type": "classification",
         "requiresLabelClasses": false
       },
-      "columns": []
+      "columns": [],
+      "inputFields": []
     }
   }
 }

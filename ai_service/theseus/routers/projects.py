@@ -3,6 +3,7 @@
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException
 
+from theseus.backends.registry import trainable_backends
 from theseus.db.models import Dataset, DatasetVersion, DatasetVersionItem, LabelClass, Project, TrainingRun
 from theseus.deps import ProjectDep, SessionDep, UserId
 from theseus.events import get_event_writer
@@ -112,7 +113,7 @@ async def get_project(project: ProjectDep, session: SessionDep) -> ProjectDetail
 @router.post("", response_model=ProjectResponse)
 async def create_project(body: CreateProjectBody, user_id: UserId, session: SessionDep) -> ProjectResponse:
     descriptor = get_task_descriptor(body.task)
-    if descriptor.backend != "ludwig":
+    if not trainable_backends(descriptor):
         raise HTTPException(422, f'Task "{body.task}" is not yet trainable ({descriptor.status}).')
 
     # All three rows commit together: a project with no dataset (or a dataset with no draft

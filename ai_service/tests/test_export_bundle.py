@@ -9,13 +9,14 @@ import zipfile
 import pytest
 import sqlalchemy as sa
 
+from theseus.backends.ludwig.manifest import build_preprocessing_manifest as build_manifest
 from theseus.db.models import LabelClass, ModelExport, TrainingRun
 from theseus.export import bundle as B
 from theseus.export.formats.base import ExportFormat, _registry
 from theseus.export.formats.csharp_devkit import CSharpDevkit
 from theseus.export.formats.pwa_app import PwaApp
 from theseus.export.formats.python_devkit import PythonDevkit
-from theseus.export.metadata import build_manifest, extract_preprocessing
+from theseus.export.metadata import extract_preprocessing
 from theseus.export.readme import ReadmeVars, app_readme, devkit_readme, model_readme
 from theseus.export.registry import get_export_format, list_export_formats
 from theseus.jobs import export as export_job
@@ -308,7 +309,7 @@ async def test_extract_preprocessing_ignores_the_label_classes_table_entirely(db
     rid = await make_run(status="succeeded")
     async with db() as s:
         run = (await s.execute(sa.select(TrainingRun).where(TrainingRun.id == rid))).scalar_one()
-        run.ludwig_config = {
+        run.config = {
             "input_features": [{"name": "text", "type": "text", "column": "text"}],
             "output_features": [{"name": "class", "type": "category", "column": "class"}],
         }
@@ -343,7 +344,7 @@ async def prepared_export(db, make_export, s3, *, fmt="python_devkit", golden=Tr
         run = (await s.execute(sa.select(TrainingRun).where(TrainingRun.id == run_id))).scalar_one()
         run.name = "Cats vs Dogs"
         if config:
-            run.ludwig_config = {
+            run.config = {
                 "input_features": [{"name": "image_path", "type": "image", "column": "image_path"}],
                 "output_features": [{"name": "class", "type": "category", "column": "class"}],
             }
@@ -446,7 +447,8 @@ async def test_the_whole_export_job_converts_then_assembles_to_ready(db, make_ex
         await sess.execute(sa.update(ModelExport).where(ModelExport.id == export_id).values(status="converting"))
         await sess.commit()
 
-    def fake_convert(run, artifact, dataset_key, export):
+    def fake_convert(run, backend, artifact_id, dataset_key, export):
+        artifact = backend.artifacts[artifact_id]
         s3[("theseus-models", storage.export_key(run, artifact.filename))] = b"CONVERTED"
 
     monkeypatch.setattr(export_job, "_convert", fake_convert)

@@ -57,7 +57,7 @@ class Augmentation(ABC):
         masks, token tags) aligned, and generative tasks have no per-item label to copy, so those
         tasks get no augmentation unless an op opts in by overriding this.
         """
-        return task.modality == cls.modality and task.backend == "ludwig" and task.annotation.type == "classification"
+        return task.modality == cls.modality and task.status != "planned" and task.annotation.type == "classification"
 
     @classmethod
     def prepare(cls, samples: Sequence[Any]) -> Any:

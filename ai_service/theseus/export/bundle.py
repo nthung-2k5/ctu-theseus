@@ -18,9 +18,9 @@ from typing import Any
 import sqlalchemy as sa
 
 from theseus import constants as C
+from theseus.backends.base import ARTIFACT_FILENAMES
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import ModelExport, Project, TrainingRun
-from theseus.export.artifacts import get_artifact
 from theseus.export.common import TEMPLATES, BundleFile, GoldenSample, dart_package_name, dumps, render, template
 from theseus.export.formats.base import BundleContext
 from theseus.export.metadata import extract_preprocessing
@@ -87,7 +87,7 @@ def assemble_files(
         run_name=run_name,
         task_label=task_label,
         format_label=fmt.label,
-        artifact_filename=get_artifact(fmt.artifact).filename,
+        artifact_filename=ARTIFACT_FILENAMES[fmt.artifact],
         model_bytes=model_bytes,
         preprocessing=preprocessing,
         golden=golden if fmt.needs_golden else None,
@@ -143,9 +143,8 @@ async def _assemble(export_id: uuid.UUID) -> tuple[uuid.UUID, list[BundleFile]]:
         task_label = get_task_descriptor(project.task).label
 
     fmt = get_export_format(format_id)
-    artifact = get_artifact(fmt.artifact)
     model_bytes = await run_in_executor(
-        None, storage.download_bytes, C.BUCKET_MODELS, storage.export_key(str(run_id), artifact.filename)
+        None, storage.download_bytes, C.BUCKET_MODELS, storage.export_key(str(run_id), ARTIFACT_FILENAMES[fmt.artifact])
     )
     golden = await _load_golden(run_id) if fmt.needs_golden else None
     files = assemble_files(

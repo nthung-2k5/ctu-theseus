@@ -52,7 +52,9 @@ theseus/
   auth/                 password (argon2id), JWT, refresh tokens, API keys, rate limiter
   routers/              one module per area; /api/v1 is the public API-key surface
   schemas/              pydantic request/response models (these are the OpenAPI contract)
-  services/             domain logic: task_registry, ludwig_config, snapshot (parquet), sweep,
+  backends/             trainer backend plugins (base.py + registry.py, ludwig/); see "Writing a
+                        backend" below
+  services/             domain logic: task_registry (framework-neutral), snapshot (parquet), sweep,
                         datasets, training, inference, storage, evaluate, predict, model_cache, ...
   jobs/                 queue (claim/lease/CAS), dispatcher + lanes, train, export, inference,
                         abort, recovery, reapers
@@ -69,22 +71,23 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
   and the caller does nothing. Follow this for any new job kind or transition. Handlers must be
   idempotent for the same reason (startup recovery can re-queue a job whose first attempt already
   wrote something).
-- **`training_set_metadata.json` is the source of truth for label indices.** Ludwig writes it
-  under `theseus-training/{runId}/results/**/model/`; its `idx2str` array is the only correct
-  mapping from a model's output index to a class name. Live inference and export bundle assembly
-  (`theseus/export/metadata.py`) both read it. Never substitute the `label_classes` table:
-  Postgres doesn't know the index Ludwig assigned, and getting this wrong yields a bundle that
-  runs, predicts confidently, and mislabels everything.
+- **A trained model's own metadata is the source of truth for label indices**, never the
+  `label_classes` Postgres table (it has no idea what index order a run assigned each class). For
+  Ludwig this is `training_set_metadata.json`'s `idx2str` array, written under
+  `theseus-training/{runId}/results/**/model/` and read by `LudwigLoadedModel` (live inference)
+  and `backends/ludwig/manifest.py` (export bundle assembly, via `theseus/export/metadata.py`).
+  Every `TrainerBackend.load()` must honor this the same way.
 - **Only one thing inserts into `run_events`.** `events/writer.py` is the single writer, because a
   `BIGSERIAL` is not commit-ordered. Emitters (the training thread, request handlers, reapers)
   enqueue; the writer inserts and applies the projection in the same transaction.
 - **Cancellation** is `cancel_requested_at` (durable) plus a `threading.Event` (fast path). Training
   raises `TrainingAborted(Exception)`, never `KeyboardInterrupt`.
-- **`predict.py`'s two functions serve different consumers, deliberately.** `parse_prediction_row`
-  yields the sorted `{label: confidence}` dict used only for the `expected.json` golden sample that
-  every generated devkit/app client verifies itself against. `build_inference_output` is the live
-  inference response: a tagged union (`classification`/`regression`/`text`/`tokens`). Don't merge
-  them: changing `parse_prediction_row`'s shape breaks every previously exported bundle's verify step.
+- **A `LoadedModel`'s two prediction methods serve different consumers, deliberately.**
+  `golden_prediction` yields the sorted `{label: confidence}` dict used only for the
+  `expected.json` golden sample that every generated devkit/app client verifies itself against.
+  `to_output` is the live inference response: a tagged union
+  (`classification`/`regression`/`text`/`tokens`). Don't merge them: changing
+  `golden_prediction`'s shape breaks every previously exported bundle's verify step.
 - **Export golden sample.** After conversion the export job runs one real test-split row through the
   trained model and uploads it as `expected.json`; the bundle's verify script checks against it.
 - **Inference.** Sync predict (`/api/v1/predict/{runId}/sync`) awaits a shielded job with a bounded
@@ -97,6 +100,46 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
 - **Postgres generic plans.** After a prepared statement has run five times, Postgres may switch to
   a generic plan in which a bind parameter in an `ON CONFLICT ... WHERE` cannot match a partial
   unique index. The classify path therefore writes that predicate as a literal; keep it that way.
+
+## Writing a trainer backend
+
+A trainer backend is a package under `theseus/backends/` with one `TrainerBackend` subclass
+(`theseus/backends/base.py`); `backends/ludwig/` is the reference implementation. Restart the
+process and it shows up everywhere: `theseus.backends.registry.trainable_backends(task)` (which
+tasks it can train), `GET /api/projects/{id}/training-backends` (its models and hyperparameters,
+for the create-run/sweep UI), and every run trained with it (`training_runs.backend`) flows
+through the rest of the pipeline — `jobs/train.py`, `services/model_cache.py`,
+`jobs/inference.py`, `jobs/export.py` — with no backend-specific code outside the package itself.
+
+What to implement, roughly in the order a run touches them:
+
+1. `Hyperparameters`: a pydantic model (subclass `backends.base.HyperparamsBase`) for the knobs
+   your models accept. Unknown keys are rejected, so a client that sends a knob you don't have
+   gets a clear 422, not a silently ignored field.
+2. `supports(task)` / `models(task)`: which tasks you can train, and (per task) the selectable
+   models/architectures — what used to be a fixed encoder list.
+3. `compile(task, ctx, hp)`: turn a task descriptor, snapshot context and validated
+   hyperparameters into your own config dict. It's stored verbatim on the run
+   (`training_runs.config`) and never interpreted outside your package.
+4. `train(run)`: train synchronously against `run.dataset_uri` / `run.output_uri` (s3fs paths),
+   calling `run.report(epoch, split, metrics)` as you go and `run.check_abort()` wherever it's
+   safe to stop. Report a `validation`-split `loss` if you have one — it drives the run's
+   `best_epoch`. Return the trained model already loaded (see `load` below).
+5. `load(model_dir)`: load a trained model from a downloaded directory into a `LoadedModel`
+   (`predict`, `to_output`, `golden_prediction`, `close`) — the interface `model_cache.py`,
+   `jobs/inference.py` and `jobs/export.py` actually talk to.
+6. `evaluate(model, df, split_column, item_id_column)` (optional) and `convert(model, artifact_id,
+   workdir)` / `artifacts` (optional): the evaluation report and export conversions, if you want
+   either. Both default to "not supported" so a minimal backend can skip them.
+
+**Import discipline matters more here than almost anywhere else in the codebase.** Listing
+installed backends (`trainable_backends`, the `training-backends` endpoint, even `create_app()`
+via `scripts/export_schema.py`) must not require your ML framework to be importable — the process
+that only serves the API and the one that trains on a GPU are the same process. Your package's own
+`__init__.py` and any module it imports at top level must therefore be free of `import torch` /
+`import ludwig` / etc.; do those imports inside the classmethod bodies that need them (`train`,
+`load`, `evaluate`, `convert`), the way `backends/ludwig/__init__.py` does. `available()` should
+try the import and return a user-facing reason on failure, for an optional-dependency backend.
 
 ## Testing
 

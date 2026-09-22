@@ -96,8 +96,8 @@ def _arrow_type(col: ColumnSpec, task: TaskDescriptor) -> pa.DataType:
     if col.kind == "split_index":
         return pa.int32()
     # A label column normally holds a class name, but a regression target holds a number.
-    if col.kind == "label" and task.ludwig is not None:
-        if any(f["column"] == col.name and f["type"] == "number" for f in task.ludwig.output_features):
+    if col.kind == "label" and task.output is not None and task.output.column == col.name:
+        if task.output.kind == "regression":
             return pa.float64()
     return pa.string()
 

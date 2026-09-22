@@ -6,8 +6,8 @@ of the cancel and recovery machinery an ordinary run already gets. Instead a swe
 ordinary training runs: this module turns a search space into that list of N selections, which
 the sweeps router then enqueues one after another through the normal training path.
 
-Keys are the camelCase names of TrainerSelections (learningRate, batchSize, encoderId, ...),
-exactly as they arrive in the API and are stored in sweeps.search_space.
+Keys are the camelCase names of the chosen trainer backend's Hyperparameters model (learningRate,
+batchSize, encoderId, ...), exactly as they arrive in the API and are stored in sweeps.search_space.
 """
 
 import itertools

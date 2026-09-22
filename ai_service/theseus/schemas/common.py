@@ -1,3 +1,5 @@
+from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -15,3 +17,18 @@ class ErrorBody(ApiModel):
 
 class ErrorResponse(ApiModel):
     error: ErrorBody
+
+
+class ParamSpec(ApiModel):
+    """One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,
+    ...), flattened so the web can render a form without knowing the plugin. See `theseus.params`."""
+
+    name: str
+    label: str
+    description: str | None = None
+    type: Literal["int", "float", "bool", "choice"]
+    default: Any
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    choices: list[str] | None = None

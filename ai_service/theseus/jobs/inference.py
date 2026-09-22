@@ -30,7 +30,7 @@ from theseus.db.models import InferenceJob
 from theseus.jobs import queue
 from theseus.jobs.executors import run_in_executor
 from theseus.services import storage
-from theseus.services.predict import InferenceOutput, build_batch_result_frame, build_inference_output
+from theseus.services.predict import InferenceOutput, build_batch_result_frame
 from theseus.settings import get_settings
 
 logger = logging.getLogger("theseus.jobs.inference")
@@ -106,49 +106,36 @@ async def _resolve_file_input(job: InferenceJob, temp_dir: str) -> str:
 
 async def _run_single(job: InferenceJob, temp_dir: str) -> InferenceOutput:
     model = await _model_cache().get(str(job.run_id))
-    input_features = model.config_obj.input_features
-    output_feature = model.config_obj.output_features[0]
+    input_columns = model.input_columns
     payload = job.payload
     # Only meaningful for a single-input sequence task (token_classification): the tokens the
     # predicted tags align against.
     input_tokens: list[str] | None = None
 
     if payload["kind"] == "file":
-        resolved: dict[str, Any] = {input_features[0].column: await _resolve_file_input(job, temp_dir)}
+        resolved: dict[str, Any] = {input_columns[0]: await _resolve_file_input(job, temp_dir)}
     elif payload["kind"] == "text":
         fields = payload["fields"]
-        missing = [f.column for f in input_features if f.column not in fields]
+        missing = [c for c in input_columns if c not in fields]
         if missing:
             raise ValueError(f"Missing required field(s): {', '.join(missing)}")
-        resolved = {f.column: fields[f.column] for f in input_features}
-        if len(input_features) == 1:
-            input_tokens = str(resolved[input_features[0].column]).split()
+        resolved = {c: fields[c] for c in input_columns}
+        if len(input_columns) == 1:
+            input_tokens = str(resolved[input_columns[0]]).split()
     else:  # "record": tabular tasks have dataset-defined input features, not fixed ones
         resolved = dict(payload["record"])
 
-    def _predict():
+    def _predict() -> InferenceOutput:
         with tracer.start_as_current_span("inference.predict"):
             frame = pd.DataFrame({col: [val] for col, val in resolved.items()})
-            predictions, _ = model.predict(dataset=frame)
-            assert isinstance(predictions, pd.DataFrame)
-            idx2str = None
-            if output_feature.type == "category" and model.training_set_metadata:
-                idx2str = model.training_set_metadata.get(output_feature.name, {}).get("idx2str")
-            return predictions, idx2str
+            predictions = model.predict(frame)
+            return model.to_output(predictions, top_k=job.top_k or 100, input_tokens=input_tokens)
 
-    predictions, idx2str = await run_in_executor(None, _predict)
-    return build_inference_output(
-        output_feature.name,
-        output_feature.type,
-        predictions,
-        idx2str,
-        top_k=job.top_k or 100,
-        input_tokens=input_tokens,
-    )
+    return await run_in_executor(None, _predict)
 
 
 async def _run_batch(job: InferenceJob, temp_dir: str) -> tuple[str, int]:
-    """Score every row of an uploaded CSV in one model.predict call. Returns (result path, rows)."""
+    """Score every row of an uploaded CSV in one predict call. Returns (result path, rows)."""
     model = await _model_cache().get(str(job.run_id))
     upload_path = await _resolve_file_input(job, temp_dir)
 
@@ -159,8 +146,7 @@ async def _run_batch(job: InferenceJob, temp_dir: str) -> tuple[str, int]:
                 raise ValueError("Uploaded batch file has no rows")
             if len(frame) > MAX_BATCH_ROWS:
                 raise ValueError(f"Batch file has {len(frame)} rows, exceeding the {MAX_BATCH_ROWS}-row limit")
-            predictions, _ = model.predict(dataset=frame)
-            assert isinstance(predictions, pd.DataFrame)
+            predictions = model.predict(frame)
             result = build_batch_result_frame(frame, predictions)
             path = str(Path(temp_dir) / "batch_result.csv")
             result.to_csv(path, index=False)

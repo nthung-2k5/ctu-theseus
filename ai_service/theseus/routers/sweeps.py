@@ -41,7 +41,8 @@ async def create_sweep(body: CreateSweepBody, project: ProjectDep, session: Sess
         name=body.name,
         task=project.task,
         dataset_version_id=body.dataset_version_id,
-        search_space=body.search_space.model_dump(by_alias=True, exclude_none=True),
+        backend_id=body.backend,
+        search_space=body.search_space,
         strategy=body.strategy,
         max_trials=body.max_trials,
     )

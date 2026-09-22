@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from theseus import constants as C
+from theseus.backends.registry import get_backend
 from theseus.db.models import ModelExport, Project
 from theseus.deps import ExportDep, RunDep, SessionDep, UserId, owned_run
 from theseus.export.registry import find_export_format
@@ -41,13 +42,16 @@ async def list_export_formats(
 ) -> ExportFormatListResponse:
     """Installed export formats, grouped and ordered for display.
 
-    With `runId`, only the formats that support that run's project task.
+    With `runId`, only the formats that support that run's project task AND whose artifact the
+    run's own trainer backend can actually produce.
     """
     task = None
+    backend = None
     if run_id is not None:
         run = await owned_run(run_id, user_id, session)
         project = await session.get(Project, run.project_id)
         task = get_task_descriptor(project.task)
+        backend = get_backend(run.backend)
     return ExportFormatListResponse(
         formats=[
             ExportFormatOut(
@@ -58,7 +62,7 @@ async def list_export_formats(
                 group=f.group,
                 artifact=f.artifact,
             )
-            for f in installed_export_formats(task)
+            for f in installed_export_formats(task, backend)
         ]
     )
 
@@ -75,6 +79,9 @@ async def create_export(body: CreateExportBody, run: RunDep, session: SessionDep
     project = await session.get(Project, run.project_id)
     if not export_format.supports(get_task_descriptor(project.task)):
         raise HTTPException(400, f"Export format '{body.format}' does not support this project's task")
+    backend = get_backend(run.backend)
+    if export_format.artifact not in backend.artifacts:
+        raise HTTPException(400, f"Export format '{body.format}' is not available for a run trained by '{backend.id}'")
 
     row = ModelExport(run_id=run.id, user_id=project.user_id, format=body.format, status="pending")
     session.add(row)
