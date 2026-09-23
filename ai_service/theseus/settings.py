@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     database_uri: str = Field(default=_DEV_DB, validation_alias="CTU_THESEUS_DB_URI")
 
     s3_endpoint: str = Field(default="http://localhost:9000", validation_alias="S3_ENDPOINT")
+    # Where the BROWSER can reach the object store, used only to sign the download URLs handed to
+    # clients (`storage.get_download_url`). Unset means "same as s3_endpoint", which is right whenever
+    # the API can reach S3 at an address the browser can too. It is NOT when the API runs in a container
+    # and S3_ENDPOINT is a container-network hostname (Aspire injects http://rustfs.dev.internal:9000):
+    # a presigned URL embeds that host, and the browser cannot resolve it.
+    s3_public_endpoint: str | None = Field(default=None, validation_alias="S3_PUBLIC_ENDPOINT")
     s3_access_key: str = Field(default="ctu-theseus", validation_alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(default="ctu-theseus-secret", validation_alias="S3_SECRET_KEY")
 

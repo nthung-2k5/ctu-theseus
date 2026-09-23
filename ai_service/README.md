@@ -26,6 +26,7 @@ Environment (Aspire injects all of these; `theseus/settings.py` is the reference
 |---|---|
 | `CTU_THESEUS_DB_URI` | Postgres connection string (`postgres://` is converted to `postgresql+asyncpg://`) |
 | `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | object store |
+| `S3_PUBLIC_ENDPOINT` | where the *browser* reaches the object store, used only to sign download URLs; defaults to `S3_ENDPOINT`. Needed when the API runs in a container (Aspire), where `S3_ENDPOINT` is a container-network hostname a browser cannot resolve |
 | `JWT_SECRET` | signs access tokens |
 | `ALLOWED_ORIGINS` | extra origins allowed to make cookie-authenticated writes |
 | `ENVIRONMENT` | `production` requires the values above explicitly and makes cookies Secure |

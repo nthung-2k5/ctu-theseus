@@ -31,10 +31,17 @@ const s3SecretKey = await builder.addParameter('s3-secret-key', {
   value: process.env.S3_SECRET_KEY ?? 'ctu-theseus-secret',
 })
 
+// The API runs in a container, so the S3 endpoint Aspire injects into it (S3_ENDPOINT) is a container-network
+// hostname. The browser loads images and downloads straight from S3 through presigned URLs, and can only reach
+// the host-mapped port. Pin that port so the API can be told the browser-facing address up front
+// (S3_PUBLIC_ENDPOINT). Override with S3_HOST_PORT if 9000 is taken on your machine.
+const s3HostPort = Number(process.env.S3_HOST_PORT ?? 9000)
+
 const rustfs = await builder
   .addRustFs('rustfs', {
     accessKey: s3AccessKey,
     secretKey: s3SecretKey,
+    port: s3HostPort,
   })
   .withDataVolume({
     name: 'ctu-theseus-rustfs',
@@ -87,6 +94,7 @@ const api = await builder
   })
   .withReference(db)
   .withEnvironment('S3_ENDPOINT', s3Endpoint)
+  .withEnvironment('S3_PUBLIC_ENDPOINT', `http://localhost:${s3HostPort}`)
   .withEnvironment('S3_ACCESS_KEY', s3AccessKey)
   .withEnvironment('S3_SECRET_KEY', s3SecretKey)
   .withEnvironment('JWT_SECRET', jwtSecret)

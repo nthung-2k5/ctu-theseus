@@ -33,6 +33,7 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from theseus import constants as C
@@ -47,15 +48,18 @@ BUCKETS = (C.BUCKET_DATASETS, C.BUCKET_TRAINING, C.BUCKET_MODELS, C.BUCKET_UPLOA
 
 
 @lru_cache
-def s3() -> "S3Client":
+def s3(endpoint_url: str | None = None) -> "S3Client":
     """Created lazily so importing the app never needs S3 to be reachable."""
     s = get_settings()
     return boto3.client(
         "s3",
-        endpoint_url=s.s3_endpoint,
+        endpoint_url=endpoint_url or s.s3_endpoint,
         aws_access_key_id=s.s3_access_key,
         aws_secret_access_key=s.s3_secret_key,
         region_name="us-east-1",
+        # Explicit SigV4. Against a custom endpoint boto3 signs presigned URLs the legacy SigV2 way
+        # (AWSAccessKeyId/Signature/Expires), which RustFS rejects with 403 SignatureDoesNotMatch.
+        config=Config(signature_version="s3v4"),
     )
 
 
@@ -152,7 +156,15 @@ def s3fs_path(bucket: str, key: str) -> str:
 
 
 def get_download_url(bucket: str, key: str, expires_in: int = 3600) -> str:
-    return s3().generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires_in)
+    """A time-limited URL for the BROWSER (dataset thumbnails, export/log/batch downloads).
+
+    Signed against `s3_public_endpoint`, not the endpoint this process uses for its own S3 calls: the
+    signature covers the Host header and the URL embeds the host, so a URL signed for a container-network
+    hostname is useless to a browser on the host. Every other operation here keeps using `s3_endpoint`.
+    """
+    s = get_settings()
+    client = s3(s.s3_public_endpoint)  # None falls back to s3_endpoint
+    return client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires_in)
 
 
 def upload_bytes(bucket: str, key: str, data: bytes, content_type: str | None = None) -> None:
