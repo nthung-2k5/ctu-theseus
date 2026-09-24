@@ -4,7 +4,7 @@ import { notifications } from '@mantine/notifications'
 import { EnvelopeSimpleIcon, LockIcon } from '@phosphor-icons/react'
 import { apiErrorMessage } from '@public/lib/api/client'
 import { login } from '@public/lib/api/generated/auth/auth'
-import { sessionQueryOptions } from '@public/lib/auth'
+import { type SessionUser, sessionQueryOptions } from '@public/lib/auth'
 import { useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 
@@ -24,7 +24,7 @@ export function LoginPage() {
   })
 
   const handleSubmit = async (values: typeof form.values) => {
-    let user: { name: string }
+    let user: SessionUser
     try {
       user = (await login(values)).user
     } catch (error) {
@@ -32,7 +32,8 @@ export function LoginPage() {
       return
     }
     notifications.show({ title: 'Welcome back', message: `Signed in as ${user.name}`, color: 'green' })
-    await queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
+    // Seed the cache: the route guards read it via ensureQueryData, which would otherwise return the stale signed-out `null`.
+    queryClient.setQueryData(sessionQueryOptions.queryKey, user)
     navigate({ to: redirect ?? '/' })
   }
 

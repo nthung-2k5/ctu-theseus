@@ -4,7 +4,7 @@ import { notifications } from '@mantine/notifications'
 import { EnvelopeSimpleIcon, LockIcon, UserCircleIcon } from '@phosphor-icons/react'
 import { apiErrorMessage } from '@public/lib/api/client'
 import { register } from '@public/lib/api/generated/auth/auth'
-import { sessionQueryOptions } from '@public/lib/auth'
+import { type SessionUser, sessionQueryOptions } from '@public/lib/auth'
 import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 
@@ -23,7 +23,7 @@ export function RegisterPage() {
   })
 
   const handleSubmit = async (values: typeof form.values) => {
-    let user: { name: string }
+    let user: SessionUser
     try {
       user = (await register({ email: values.email, password: values.password, name: values.name })).user
     } catch (error) {
@@ -35,7 +35,7 @@ export function RegisterPage() {
       return
     }
     notifications.show({ title: 'Account created', message: `Welcome, ${user.name}`, color: 'green' })
-    await queryClient.invalidateQueries({ queryKey: sessionQueryOptions.queryKey })
+    queryClient.setQueryData(sessionQueryOptions.queryKey, user)
     navigate({ to: '/' })
   }
 
