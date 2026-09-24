@@ -41,6 +41,9 @@ dependencies = [
   'torchmetrics',
   'ludwig',
   'pandas',
+  # ONNX export: torch.onnx.export needs both
+  'onnx',
+  'onnxscript',
 
   # Telemetry
   "opentelemetry-sdk>=1.44.0",
