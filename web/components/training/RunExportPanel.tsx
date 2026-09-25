@@ -9,7 +9,7 @@
  * where each one is a Python class in ai_service/theseus/export/formats/.
  */
 
-import { Badge, Button, Card, Group, Stack, Text, Title } from '@mantine/core'
+import { Badge, Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ArrowClockwiseIcon, DownloadSimpleIcon, HammerIcon, PackageIcon } from '@phosphor-icons/react'
 import { EmptyState } from '@public/components/ui'
@@ -23,7 +23,6 @@ import {
 import type { ExportFormatOut, ExportRow } from '@public/lib/api/generated/models'
 import type { TrainingRunSummary } from '@public/store/types'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo } from 'react'
 
 const IN_PROGRESS = ['pending', 'converting', 'assembling']
 
@@ -53,13 +52,6 @@ function stateOf(modelExport: ExportRow | undefined): FormatState {
   return 'building'
 }
 
-/** Group formats by their `group`, keeping the server's group and item order. */
-function groupFormats(formats: ExportFormatOut[]) {
-  const groups = new Map<string, ExportFormatOut[]>()
-  for (const f of formats) groups.set(f.group, [...(groups.get(f.group) ?? []), f])
-  return [...groups]
-}
-
 function ExportOptionRow({
   format,
   modelExport,
@@ -79,25 +71,25 @@ function ExportOptionRow({
     state === 'building' && modelExport && modelExport.status !== 'pending' ? `${modelExport.status}…` : badge.label
 
   return (
-    <Stack gap={4}>
-      <Group justify="space-between" wrap="nowrap" align="center">
-        <div style={{ minWidth: 0 }}>
-          <Group gap="xs" wrap="nowrap">
-            <Text size="sm" fw={500}>
+    <Paper p="md" style={state === 'ready' ? { borderColor: 'var(--mantine-color-cyan-5)' } : undefined}>
+      <Stack gap="xs" h="100%" justify="space-between">
+        <div>
+          <Group gap="xs" wrap="nowrap" justify="space-between">
+            <Text size="sm" fw={600}>
               {format.label}
             </Text>
-            <Badge size="xs" variant="light" color={badge.color}>
-              {badgeLabel}
-            </Badge>
+            <Badge color={badge.color}>{badgeLabel}</Badge>
           </Group>
-          <Text size="xs" c="dimmed">
+          <Badge variant="outline" color="gray" mt={4}>
+            {format.group}
+          </Badge>
+          <Text size="xs" c="dimmed" mt={6}>
             {format.description}
           </Text>
         </div>
 
         {state === 'ready' && modelExport ? (
           <Button
-            size="xs"
             variant="light"
             color="teal"
             component="a"
@@ -107,12 +99,11 @@ function ExportOptionRow({
             Download
           </Button>
         ) : state === 'building' ? (
-          <Button size="xs" variant="light" loading disabled>
+          <Button variant="light" loading disabled>
             Building
           </Button>
         ) : (
           <Button
-            size="xs"
             variant={state === 'failed' ? 'light' : 'filled'}
             color={state === 'failed' ? 'red' : undefined}
             leftSection={state === 'failed' ? <ArrowClockwiseIcon size={14} /> : <HammerIcon size={14} />}
@@ -121,13 +112,13 @@ function ExportOptionRow({
             {state === 'failed' ? 'Retry build' : 'Build'}
           </Button>
         )}
-      </Group>
-      {state === 'failed' && (
-        <Text size="xs" c="red">
-          {modelExport?.failedMessage ?? 'Export failed'}
-        </Text>
-      )}
-    </Stack>
+        {state === 'failed' && (
+          <Text size="xs" c="red">
+            {modelExport?.failedMessage ?? 'Export failed'}
+          </Text>
+        )}
+      </Stack>
+    </Paper>
   )
 }
 
@@ -140,7 +131,6 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
     enabled: run.status === 'succeeded',
   })
   const formats = formatsData?.formats ?? []
-  const groups = useMemo(() => groupFormats(formats), [formats])
 
   const { data } = useQuery({
     ...getListExportsQueryOptions(run.id),
@@ -168,49 +158,37 @@ export function RunExportPanel({ run }: { run: TrainingRunSummary }) {
 
   if (run.status !== 'succeeded') {
     return (
-      <Card withBorder p="lg" radius="md">
-        <EmptyState
-          icon={PackageIcon}
-          title="Nothing to export yet"
-          description="This run has to finish successfully before it can be exported."
-        />
-      </Card>
+      <EmptyState
+        icon={PackageIcon}
+        title="Nothing to export yet"
+        description="This run has to finish successfully before it can be exported."
+      />
     )
   }
 
   return (
-    <Card withBorder p="lg" radius="md">
-      <Stack gap="md">
-        <div>
-          <Title order={5}>Export</Title>
-          <Text size="xs" c="dimmed">
-            Package {run.name} as a downloadable bundle. Build a format once, then download it any time.
-          </Text>
-        </div>
+    <Stack gap="sm">
+      <Text size="xs" c="dimmed">
+        Package {run.name} as a downloadable bundle. Build a format once, then download it any time.
+      </Text>
 
-        {formats.length === 0 && (
-          <Text size="sm" c="dimmed">
-            Loading export options…
-          </Text>
-        )}
+      {formats.length === 0 && (
+        <Text size="sm" c="dimmed">
+          Loading export options…
+        </Text>
+      )}
 
-        {groups.map(([group, groupItems]) => (
-          <Stack key={group} gap="sm">
-            <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-              {group}
-            </Text>
-            {groupItems.map((f) => (
-              <ExportOptionRow
-                key={f.id}
-                format={f}
-                modelExport={representativeExport(exports.filter((e) => e.format === f.id))}
-                building={buildingFormat === f.id}
-                onBuild={() => dispatchExport.mutate({ runId: run.id, data: { format: f.id } })}
-              />
-            ))}
-          </Stack>
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+        {formats.map((f) => (
+          <ExportOptionRow
+            key={f.id}
+            format={f}
+            modelExport={representativeExport(exports.filter((e) => e.format === f.id))}
+            building={buildingFormat === f.id}
+            onBuild={() => dispatchExport.mutate({ runId: run.id, data: { format: f.id } })}
+          />
         ))}
-      </Stack>
-    </Card>
+      </SimpleGrid>
+    </Stack>
   )
 }

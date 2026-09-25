@@ -1,28 +1,21 @@
 /**
- * Inference tab for a selected training run — was the standalone Inference
- * page, which carried its own "pick a trained model" dropdown. The run now
- * comes from the Training sidebar, so this only handles the input -> dispatch
- * -> poll -> render-result loop for that one run.
+ * Playground input and result for one training run: pick an input, send it, and show the parsed
+ * prediction. The prediction runs inside the request and its result is the response, so there is
+ * nothing to poll and nothing saved on the server.
  */
 
 import {
   ActionIcon,
   Alert,
-  Badge,
   Box,
   Button,
   Card,
-  Code,
-  CopyButton,
-  Divider,
   Grid,
   Group,
   JsonInput,
   Loader,
   Overlay,
   Paper,
-  Progress,
-  Slider,
   Stack,
   Text,
   Textarea,
@@ -36,82 +29,42 @@ import { notifications } from '@mantine/notifications'
 import {
   ArrowCounterClockwiseIcon,
   CheckCircleIcon,
-  CheckIcon,
-  ClockCounterClockwiseIcon,
   CloudArrowUpIcon,
-  CopyIcon,
-  CrosshairIcon,
   LightningIcon,
-  WarningCircleIcon,
   XCircleIcon,
 } from '@phosphor-icons/react'
 import { EmptyState } from '@public/components/ui'
-import { apiErrorMessage } from '@public/lib/api/client'
-import {
-  getInferenceJob,
-  listInferenceJobs,
-  runBatchInference,
-  runInference,
-  warmInferenceModel,
-} from '@public/lib/api/generated/inference/inference'
+import { apiErrorMessage, axios } from '@public/lib/api/client'
+import { runInference, warmInferenceModel } from '@public/lib/api/generated/inference/inference'
 import { projectDetailQueryOptions } from '@public/lib/queries'
-import { getInferenceInputSpec, getInferenceOutputKind, getTaskDescriptor } from '@public/lib/tasks'
+import { getInferenceInputSpec, getTaskDescriptor } from '@public/lib/tasks'
 import type { TrainingRunSummary } from '@public/store/types'
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useMutation, useSuspenseQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { type InferenceOutput, InferenceResultStats } from './InferenceResultStats'
 
-/* ------------------------------------------------------------------ */
-/*  Types — mirrors InferenceOutputSchema in server/lib/schema.ts.     */
-/*  Hand-maintained rather than Eden-derived, same as web/store/types  */
-/*  (see README.md's note on the server/web Elysia nominal-typing gap). */
-/* ------------------------------------------------------------------ */
+/** What the last request produced. A batch result is a scored CSV held in the browser, never on the server. */
+type Result = { kind: 'single'; output: InferenceOutput } | { kind: 'batch'; rowCount: number; url: string }
 
-type InferenceOutput =
-  | { kind: 'classification'; feature: string; classes: { label: string; confidence: number }[] }
-  | { kind: 'regression'; feature: string; value: number }
-  | { kind: 'text'; feature: string; text: string }
-  | { kind: 'tokens'; feature: string; tokens: { token: string; tag: string }[] }
-
-/**
- * The poll route's response — `pending` is synthesized by the gateway when
- * no terminal result has been published yet for the job, so unlike the
- * dispatch-time payload this genuinely has three states, not two. `batch`
- * carries no inline output (see server/routes/inference.ts) — only a row
- * count; the actual CSV is fetched via the download route.
- */
-type InferenceJobStatus =
-  | { status: 'pending' }
-  | { status: 'success'; output: InferenceOutput }
-  | { status: 'batch'; rowCount: number }
-  | { status: 'failed'; error: string }
-
-/** One row of GET /inference/:runId/jobs — mirrors the inferenceJobs table (server/db/schema.ts). */
-interface InferenceJobHistoryItem {
-  id: string
-  runId: string
-  status: 'pending' | 'success' | 'failed'
-  output: (InferenceOutput | { kind: 'batch'; resultKey: string; rowCount: number }) | null
-  error: string | null
-  createdAt: string | Date
-  completedAt: string | Date | null
-}
-
-/** How long to keep polling a job with no result before assuming something's stuck (e.g. no worker running at all). */
-const POLL_GIVE_UP_MS = 5 * 60 * 1000
-const POLL_INTERVAL_MS = 1500
-
-function describeOutput(output: InferenceOutput | { kind: 'batch'; resultKey: string; rowCount: number }): string {
-  switch (output.kind) {
-    case 'classification':
-      return `${output.classes.length} result(s)`
-    case 'regression':
-      return `Predicted ${output.feature}: ${output.value}`
-    case 'text':
-      return 'Generated response ready'
-    case 'tokens':
-      return `${output.tokens.length} token(s) tagged`
-    case 'batch':
-      return `${output.rowCount} row(s) scored`
+/** Score a CSV. The response is the scored file itself; its row count is in a header. */
+async function scoreBatch(runId: string, file: File): Promise<{ rowCount: number; url: string }> {
+  const body = new FormData()
+  body.append('file', file)
+  try {
+    const res = await axios.post<Blob>(`/api/inference/${runId}/batch`, body, { responseType: 'blob' })
+    return { rowCount: Number(res.headers['x-row-count'] ?? 0), url: URL.createObjectURL(res.data) }
+  } catch (error) {
+    // Error bodies arrive as a Blob too (responseType applies to every response): read the JSON message out of it.
+    const blob = (error as { response?: { data?: unknown } }).response?.data
+    if (blob instanceof Blob) {
+      try {
+        const message = JSON.parse(await blob.text())?.error?.message
+        if (typeof message === 'string') throw new Error(message)
+      } catch (parsed) {
+        if (parsed instanceof Error && !(parsed instanceof SyntaxError)) throw parsed
+      }
+    }
+    throw new Error(apiErrorMessage(error, 'Could not run inference'))
   }
 }
 
@@ -124,23 +77,10 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
     data: { project: activeProject },
   } = useSuspenseQuery(projectDetailQueryOptions(projectId))
   const inputSpec = getInferenceInputSpec(activeProject.task)
-  const outputKind = getInferenceOutputKind(activeProject.task)
   const isAudio = getTaskDescriptor(activeProject.task).modality === 'audio'
 
   const runId = run.id
   const isReady = run.status === 'succeeded'
-  const queryClient = useQueryClient()
-
-  /* ── Inference history — persisted server-side the moment a result arrives, not just while polling ── */
-  const historyQueryKey = ['inference-jobs', runId]
-  const historyQuery = useQuery({
-    queryKey: historyQueryKey,
-    queryFn: async (): Promise<InferenceJobHistoryItem[]> => {
-      return (await listInferenceJobs(runId)).jobs as InferenceJobHistoryItem[]
-    },
-    enabled: isReady,
-  })
-  const history = historyQuery.data ?? []
 
   // File input (vision/audio tasks)
   const [inputFile, setInputFile] = useState<File | null>(null)
@@ -151,10 +91,8 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   // Record input (tabular tasks) — JSON-encoded, one value per feature column
   const [recordJson, setRecordJson] = useState('')
 
-  // The currently-dispatched job, if any — set once POST /inference/:runId
-  // returns 202 { inferenceId }, cleared by handleClear or a fresh dispatch.
-  const [inferenceId, setInferenceId] = useState<string | null>(null)
-  const [gaveUp, setGaveUp] = useState(false)
+  // The last request's result, cleared by handleClear or a fresh input.
+  const [result, setResult] = useState<Result | null>(null)
 
   // Confidence threshold — only meaningful for classification outputs; the
   // server returns the full (top-K) distribution unfiltered, so moving
@@ -189,91 +127,50 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
     warmInferenceModel(runId).catch(() => {})
   }, [runId, isReady])
 
-  // Switching runs in the sidebar keeps this panel mounted — drop any job
-  // state belonging to the run we just navigated away from.
+  // Switching runs keeps this panel mounted — drop the result belonging to the run we just left.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset-on-change, runId isn't read in the body
   useEffect(() => {
-    setInferenceId(null)
-    setGaveUp(false)
+    setResult(null)
   }, [runId])
 
-  /* ── Dispatch ──────────────────────────────────────────────────── */
+  // A batch result is an object URL: free it when replaced or unmounted.
+  const batchUrl = result?.kind === 'batch' ? result.url : null
+  useEffect(() => {
+    if (!batchUrl) return
+    return () => URL.revokeObjectURL(batchUrl)
+  }, [batchUrl])
+
+  /* ── Run ───────────────────────────────────────────────────────── */
+  // The prediction happens inside this request: the response is the result. Nothing is queued or saved.
   const dispatchMutation = useMutation({
-    mutationFn: async (): Promise<string> => {
+    mutationFn: async (): Promise<Result> => {
       try {
-        const accepted = batchMode
-          ? await runBatchInference(runId, { file: batchFile as File })
-          : await runInference(
-              runId,
-              isFileTask
-                ? { file: inputFile as File }
-                : isTextTask
-                  ? { fields: JSON.stringify(textFields) }
-                  : { fields: recordJson },
-            )
-        return accepted.inferenceId
+        if (batchMode) return { kind: 'batch', ...(await scoreBatch(runId, batchFile as File)) }
+        const { output } = await runInference(
+          runId,
+          isFileTask
+            ? { file: inputFile as File }
+            : isTextTask
+              ? { fields: JSON.stringify(textFields) }
+              : { fields: recordJson },
+        )
+        return { kind: 'single', output: output as InferenceOutput }
       } catch (error) {
-        throw new Error(apiErrorMessage(error, 'Could not start inference'))
+        throw new Error(apiErrorMessage(error, 'Could not run inference'))
       }
     },
-    onSuccess: (id) => {
-      setInferenceId(id)
-      setGaveUp(false)
+    onSuccess: (next) => {
+      setResult(next)
+      if (next.kind === 'batch') {
+        notifications.show({
+          title: 'Batch complete',
+          message: `${next.rowCount} row(s) scored: download the results below`,
+          color: 'teal',
+          icon: <CheckCircleIcon size={18} />,
+        })
+      }
     },
   })
-
-  /* ── Poll ──────────────────────────────────────────────────────── */
-  const jobQuery = useQuery({
-    queryKey: ['inference-job', runId, inferenceId],
-    queryFn: async (): Promise<InferenceJobStatus> => {
-      return (await getInferenceJob(runId, inferenceId as string)) as InferenceJobStatus
-    },
-    enabled: !!inferenceId,
-    refetchInterval: (query) => (query.state.data?.status === 'pending' && !gaveUp ? POLL_INTERVAL_MS : false),
-  })
-
-  const job = jobQuery.data
-
-  // Give up auto-polling after a while rather than spinning forever if a
-  // job's message never reaches a worker at all (the one failure mode the
-  // worker's own retry/DLQ machinery can't resolve into a terminal result).
-  useEffect(() => {
-    if (!inferenceId || job?.status !== 'pending') return
-    const timer = setTimeout(() => setGaveUp(true), POLL_GIVE_UP_MS)
-    return () => clearTimeout(timer)
-  }, [inferenceId, job?.status])
-
-  // Notify once per terminal result — `job` only gets a new object identity
-  // when its content actually changes, and refetchInterval stops once a
-  // job reaches success/failed, so this can't re-fire for the same result.
-  const notifiedFor = useRef<string | null>(null)
-  useEffect(() => {
-    if (!inferenceId || !job || job.status === 'pending' || notifiedFor.current === inferenceId) return
-    notifiedFor.current = inferenceId
-    queryClient.invalidateQueries({ queryKey: ['inference-jobs', runId] })
-    if (job.status === 'success') {
-      notifications.show({
-        title: 'Inference Complete',
-        message: describeOutput(job.output),
-        color: 'teal',
-        icon: <CheckCircleIcon size={18} />,
-      })
-    } else if (job.status === 'batch') {
-      notifications.show({
-        title: 'Batch Complete',
-        message: `${job.rowCount} row(s) scored — download the results below`,
-        color: 'teal',
-        icon: <CheckCircleIcon size={18} />,
-      })
-    } else {
-      notifications.show({
-        title: 'Inference Failed',
-        message: job.error,
-        color: 'red',
-        icon: <XCircleIcon size={18} />,
-      })
-    }
-  }, [inferenceId, job, runId, queryClient])
 
   /* ── Handlers ──────────────────────────────────────────────────── */
   // Object URLs are not garbage-collected with the File they wrap — without
@@ -289,7 +186,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
     const file = files[0]
     setInputFile(file)
     setInputFileUrl(URL.createObjectURL(file))
-    setInferenceId(null)
+    setResult(null)
   }
 
   const handleReject = (rejections: FileRejection[]) => {
@@ -300,7 +197,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   const handleBatchDrop = (files: File[]) => {
     if (files.length === 0) return
     setBatchFile(files[0])
-    setInferenceId(null)
+    setResult(null)
   }
 
   const handleClear = () => {
@@ -309,28 +206,16 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
     setTextFields({})
     setRecordJson('')
     setBatchFile(null)
-    setInferenceId(null)
-    setGaveUp(false)
+    setResult(null)
     dispatchMutation.reset()
   }
 
-  const isRunning = dispatchMutation.isPending || (!!inferenceId && job?.status === 'pending' && !gaveUp)
-  const output = job?.status === 'success' ? job.output : null
-  const batchRowCount = job?.status === 'batch' ? job.rowCount : null
-
-  // Classification results only: client-side threshold filter + sort. The
-  // server already sorts descending, so filtering preserves order.
-  const filteredClasses =
-    output?.kind === 'classification' ? output.classes.filter((c) => c.confidence >= threshold) : null
+  const isRunning = dispatchMutation.isPending
+  const output = result?.kind === 'single' ? result.output : null
+  const batchRowCount = result?.kind === 'batch' ? result.rowCount : null
 
   const dispatchError = dispatchMutation.error as Error | null
-  const displayError = dispatchError
-    ? { title: 'Could not start inference', message: dispatchError.message }
-    : job?.status === 'failed'
-      ? { title: 'Inference failed', message: job.error }
-      : null
-
-  const showThreshold = outputKind === 'classification' && !batchMode
+  const displayError = dispatchError ? { title: 'Inference failed', message: dispatchError.message } : null
 
   /* ── Render ────────────────────────────────────────────────────── */
   if (!isReady) {
@@ -347,8 +232,8 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
 
   return (
     <Grid gap="md">
-      {/* ── Input & Results ── */}
-      <Grid.Col span={{ base: 12, md: showThreshold ? 8 : 12 }}>
+      {/* ── Input ── */}
+      <Grid.Col span={{ base: 12, md: 6 }}>
         <Stack gap="md">
           {/* Input */}
           <Card withBorder padding="lg" radius="md">
@@ -479,7 +364,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                     value={textFields[field] ?? ''}
                     onChange={(e) => {
                       setTextFields((prev) => ({ ...prev, [field]: e.currentTarget.value }))
-                      setInferenceId(null)
+                      setResult(null)
                     }}
                   />
                 ))}
@@ -502,7 +387,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                   value={recordJson}
                   onChange={(v) => {
                     setRecordJson(v)
-                    setInferenceId(null)
+                    setResult(null)
                   }}
                 />
                 {isRunning && (
@@ -531,25 +416,6 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
             )}
           </Card>
 
-          {/* Stuck-job warning */}
-          {gaveUp && job?.status === 'pending' && (
-            <Alert
-              color="yellow"
-              icon={<WarningCircleIcon size={18} />}
-              title="Still waiting"
-              withCloseButton
-              onClose={handleClear}
-            >
-              This is taking much longer than usual — the worker may be unavailable right now. You can keep waiting or
-              clear and try again.
-              <Group mt="xs">
-                <Button size="xs" variant="light" onClick={() => setGaveUp(false)}>
-                  Keep waiting
-                </Button>
-              </Group>
-            </Alert>
-          )}
-
           {/* Error */}
           {displayError && (
             <Alert
@@ -561,6 +427,19 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
             >
               {displayError.message}
             </Alert>
+          )}
+        </Stack>
+      </Grid.Col>
+
+      {/* ── Results ── */}
+      <Grid.Col span={{ base: 12, md: 6 }}>
+        <Stack gap="md">
+          {!output && batchRowCount === null && !isRunning && !displayError && (
+            <Paper p="xl" ta="center">
+              <Text size="sm" c="dimmed">
+                Results appear here once you run a prediction.
+              </Text>
+            </Paper>
           )}
 
           {/* Batch result — a downloadable file, not an inline InferenceOutput */}
@@ -579,13 +458,8 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                       </Text>
                     </div>
                   </Group>
-                  {inferenceId && (
-                    <Button
-                      component="a"
-                      href={`/api/inference/${runId}/jobs/${inferenceId}/download`}
-                      variant="light"
-                      color="teal"
-                    >
+                  {result?.kind === 'batch' && (
+                    <Button component="a" href={result.url} download="predictions.csv" variant="light" color="teal">
                       Download Results
                     </Button>
                   )}
@@ -594,180 +468,18 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
             )}
           </Transition>
 
-          {/* Results */}
+          {/* Parsed result: prediction, confidence bars and per-kind statistics (no raw JSON) */}
           <Transition mounted={!!output} transition="slide-up" duration={300}>
             {(styles) => (
-              <Card withBorder padding="lg" radius="md" style={styles}>
-                <Group justify="space-between" mb="md">
-                  <Group gap="sm">
-                    <ThemeIcon variant="light" color="teal" size="sm">
-                      <CrosshairIcon size={14} />
-                    </ThemeIcon>
-                    <Title order={5}>Results</Title>
-                  </Group>
-                  {output?.kind === 'classification' && (
-                    <Badge variant="light" color="teal" size="lg">
-                      {filteredClasses?.length ?? 0} result(s)
-                    </Badge>
-                  )}
-                </Group>
-
-                {output?.kind === 'classification' &&
-                  (filteredClasses && filteredClasses.length > 0 ? (
-                    <Stack gap="xs">
-                      {filteredClasses.map((c) => (
-                        <Paper key={c.label} p="sm" radius="sm" withBorder>
-                          <Group justify="space-between">
-                            <Badge variant="filled" color="primary" size="sm">
-                              {c.label}
-                            </Badge>
-                            <Group gap="xs">
-                              <Progress
-                                value={c.confidence * 100}
-                                color={c.confidence > 0.8 ? 'teal' : c.confidence > 0.5 ? 'yellow' : 'red'}
-                                size="sm"
-                                w={80}
-                              />
-                              <Text size="xs" fw={600} w={45} ta="right">
-                                {(c.confidence * 100).toFixed(1)}%
-                              </Text>
-                            </Group>
-                          </Group>
-                        </Paper>
-                      ))}
-                      <Divider my="xs" />
-                      <Code block style={{ maxHeight: 200, overflow: 'auto' }}>
-                        {JSON.stringify(output.classes, null, 2)}
-                      </Code>
-                    </Stack>
-                  ) : (
-                    <Text size="sm" c="dimmed" ta="center" py="md">
-                      No results above the confidence threshold
-                    </Text>
-                  ))}
-
-                {output?.kind === 'regression' && (
-                  <Paper p="lg" radius="sm" withBorder ta="center">
-                    <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                      {output.feature}
-                    </Text>
-                    <Text size="xl" fw={700}>
-                      {output.value}
-                    </Text>
-                  </Paper>
+              <div style={styles}>
+                {output && (
+                  <InferenceResultStats output={output} threshold={threshold} onThresholdChange={setThreshold} />
                 )}
-
-                {output?.kind === 'text' && (
-                  <Paper p="md" radius="sm" withBorder pos="relative">
-                    <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-                      {output.text}
-                    </Text>
-                    <CopyButton value={output.text}>
-                      {({ copied, copy }) => (
-                        <ActionIcon
-                          variant="subtle"
-                          color={copied ? 'teal' : 'gray'}
-                          onClick={copy}
-                          pos="absolute"
-                          top={8}
-                          right={8}
-                        >
-                          {copied ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
-                        </ActionIcon>
-                      )}
-                    </CopyButton>
-                  </Paper>
-                )}
-
-                {output?.kind === 'tokens' && (
-                  <Group gap="xs">
-                    {output.tokens.map((t, i) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: token/tag pairs have no stable identity
-                      <Tooltip key={i} label={t.tag}>
-                        <Badge variant="light" color={t.tag === 'O' ? 'gray' : 'primary'} size="lg">
-                          {t.token || '·'}
-                        </Badge>
-                      </Tooltip>
-                    ))}
-                  </Group>
-                )}
-              </Card>
+              </div>
             )}
           </Transition>
-
-          {/* Recent jobs — persisted server-side the instant a result arrives, so past results are still viewable */}
-          {history.length > 0 && (
-            <Card withBorder padding="lg" radius="md">
-              <Group gap="sm" mb="sm">
-                <ClockCounterClockwiseIcon size={18} />
-                <Title order={5}>Recent Jobs</Title>
-              </Group>
-              <Stack gap={4}>
-                {history.map((item) => (
-                  <Group
-                    key={item.id}
-                    justify="space-between"
-                    p="xs"
-                    style={{ cursor: 'pointer', borderRadius: 6 }}
-                    onClick={() => setInferenceId(item.id)}
-                  >
-                    <Group gap="sm">
-                      {item.status === 'success' ? (
-                        <CheckCircleIcon size={16} color="var(--mantine-color-teal-6)" />
-                      ) : item.status === 'failed' ? (
-                        <XCircleIcon size={16} color="var(--mantine-color-red-6)" />
-                      ) : (
-                        <Loader size={14} />
-                      )}
-                      <Text size="xs" c="dimmed">
-                        {new Date(item.createdAt).toLocaleString()}
-                      </Text>
-                    </Group>
-                    <Text size="xs" c="dimmed" truncate maw={220}>
-                      {item.status === 'success' && item.output
-                        ? describeOutput(item.output)
-                        : item.status === 'failed'
-                          ? (item.error ?? 'Failed')
-                          : 'Pending'}
-                    </Text>
-                  </Group>
-                ))}
-              </Stack>
-            </Card>
-          )}
         </Stack>
       </Grid.Col>
-
-      {/* ── Confidence threshold — only meaningful for classification outputs ── */}
-      {showThreshold && (
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <Card withBorder padding="lg" radius="md">
-            <Title order={5} mb="md">
-              Confidence Threshold
-            </Title>
-            <Text size="sm" c="dimmed" mb="sm">
-              Filter out results below this confidence score
-            </Text>
-            <Slider
-              value={threshold}
-              onChange={setThreshold}
-              min={0}
-              max={1}
-              step={0.01}
-              label={(v) => `${(v * 100).toFixed(0)}%`}
-              marks={[
-                { value: 0.25, label: '25%' },
-                { value: 0.5, label: '50%' },
-                { value: 0.75, label: '75%' },
-              ]}
-              color="primary"
-            />
-            <Text size="xs" ta="center" c="dimmed" mt="md">
-              Current: {(threshold * 100).toFixed(0)}%
-            </Text>
-          </Card>
-        </Grid.Col>
-      )}
     </Grid>
   )
 }
