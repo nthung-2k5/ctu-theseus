@@ -84,3 +84,17 @@ def test_a_backend_that_only_implements_the_required_methods_still_works():
             raise AssertionError("expected NotImplementedError")
     finally:
         backend_registry.unregister("test_only_minimal_backend")
+
+
+def test_param_specs_read_the_section_from_json_schema_extra():
+    from pydantic import BaseModel, Field
+
+    from theseus.params import param_specs
+
+    class Params(BaseModel):
+        lr: float = Field(0.1, ge=0, le=1, json_schema_extra={"group": "Optimisation", "step": 0.05})
+        plain: int = 3
+
+    specs = {p.name: p for p in param_specs(Params)}
+    assert specs["lr"].group == "Optimisation" and specs["lr"].step == 0.05
+    assert specs["plain"].group is None  # ungrouped parameters stay ungrouped

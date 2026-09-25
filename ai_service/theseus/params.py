@@ -45,14 +45,20 @@ def _humanize(name: str) -> str:
 def _param_spec(name: str, field: FieldInfo) -> ParamSpec:
     annotation = _unwrap_optional(field.annotation)
     label = field.title or _humanize(name)
-    common = {"name": to_camel(name), "label": label, "description": field.description, "default": field.default}
+    extra = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
+    common = {
+        "name": to_camel(name),
+        "label": label,
+        "description": field.description,
+        "default": field.default,
+        "group": extra.get("group"),
+    }
     if annotation is bool:
         return ParamSpec(type="bool", **common)
     if get_origin(annotation) is Literal:
         return ParamSpec(type="choice", choices=[str(c) for c in get_args(annotation)], **common)
     if annotation in (int, float):
         lo, hi = _bound(field, "ge", "gt"), _bound(field, "le", "lt")
-        extra = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
         step = extra.get("step") or (1.0 if annotation is int else _default_step(lo, hi))
         return ParamSpec(type="int" if annotation is int else "float", min=lo, max=hi, step=step, **common)
     raise TypeError(f"Parameter {name!r} has unsupported type {annotation!r}")

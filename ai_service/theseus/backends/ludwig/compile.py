@@ -27,6 +27,12 @@ _CLASSIFICATION_METRICS = ["loss", "accuracy"]
 _REGRESSION_METRICS = ["loss", "mean_squared_error", "mean_absolute_error", "r2"]
 _IMAGE_SIZES = ["128", "224", "256"]
 
+# Section headings of the create-run form (ParamSpec.group), in the order they appear.
+_OPTIMISATION = "Optimisation"
+_STOPPING = "Batching & stopping"
+_HEAD = "Backbone & head"
+_DATA = "Data & loss"
+
 
 class LudwigHyperparameters(HyperparamsBase):
     """User-facing hyperparameter choices (camelCase on the wire, and in training_runs.hyperparameters).
@@ -48,6 +54,14 @@ class LudwigHyperparameters(HyperparamsBase):
     validation_metric: str | None = None
     # Defaults to Ludwig's per-model-type default (Adam for ECD) when unset.
     optimizer: str | None = None
+    # Train only the head: the encoder's pretrained weights stay fixed. Pretrained encoders only.
+    freeze_backbone: bool | None = None
+    # The head is the combiner's fully-connected stack (ECD tasks). 0 layers is a plain linear head.
+    head_layers: int | None = Field(default=None, ge=0, le=4)
+    head_width: int | None = Field(default=None, ge=8, le=2048)
+    head_dropout: float | None = Field(default=None, ge=0, le=0.9)
+    # Truncate text/sequence inputs to this many tokens. Ignored for other input types.
+    max_sequence_length: int | None = Field(default=None, ge=8, le=4096)
 
 
 # -- Validation schema (replaces the zod schema) ---------------------------------------------
@@ -61,6 +75,11 @@ class _Feature(BaseModel):
 
 
 class _Typed(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    type: str
+
+
+class _Combiner(BaseModel):
     model_config = ConfigDict(extra="allow")
     type: str
 
@@ -96,6 +115,7 @@ class LudwigConfig(BaseModel):
     model_type: Literal["ecd", "llm"]
     input_features: list[_InputFeature] = Field(min_length=1)
     output_features: list[_OutputFeature] = Field(min_length=1)
+    combiner: _Combiner | None = None
     preprocessing: _Preprocessing
     trainer: _Trainer
     ludwig_version: str
@@ -113,10 +133,18 @@ def compile_ludwig_config(
         raise ConfigError(f'Task "{task.id}" has no Ludwig backend (status: {task.status})')
     knobs = spec.trainer_knobs
 
+    if sel.freeze_backbone and not any(e.pretrained for e in spec.encoders):
+        raise ConfigError(f'Task "{task.id}" has no pretrained backbone to freeze')
+    combiner = _head_combiner(sel, task.id, spec.model_type)
+
     declared = copy.deepcopy(spec.input_features)
     if declared:
         input_features = [
-            _with_image_resize(_with_encoder(f, spec.encoders, sel.model_id), sel.image_size) for f in declared
+            _with_sequence_length(
+                _with_image_resize(_with_encoder(f, spec.encoders, sel.model_id, sel.freeze_backbone), sel.image_size),
+                sel.max_sequence_length,
+            )
+            for f in declared
         ]
     else:
         # Tabular tasks do not know their column names statically: derive one number feature
@@ -149,6 +177,7 @@ def compile_ludwig_config(
         "model_type": spec.model_type,
         "input_features": input_features,
         "output_features": output_features,
+        **({"combiner": combiner} if combiner else {}),
         # Without this Ludwig re-splits randomly 70/10/20 and ignores the split the user
         # assigned. It must be the synthetic integer column, not the human-readable one
         # (see services/snapshot.py).
@@ -164,7 +193,9 @@ def serialize_ludwig_config(config: dict[str, Any]) -> str:
     return yaml.safe_dump(config, sort_keys=False)
 
 
-def _with_encoder(feature: dict[str, Any], encoders: list[EncoderChoice], model_id: str | None) -> dict[str, Any]:
+def _with_encoder(
+    feature: dict[str, Any], encoders: list[EncoderChoice], model_id: str | None, freeze: bool | None = None
+) -> dict[str, Any]:
     if feature.get("encoder") or not encoders:
         return feature
     if model_id:
@@ -174,9 +205,16 @@ def _with_encoder(feature: dict[str, Any], encoders: list[EncoderChoice], model_
     if encoder is None:
         available = ", ".join(e.id for e in encoders)
         raise ConfigError(f'Unknown encoder "{model_id}" (available: {available})')
+    if freeze and not encoder.pretrained:
+        raise ConfigError(f'"{encoder.label}" is trained from scratch, so there are no pretrained weights to freeze')
     return {
         **feature,
-        "encoder": {"type": encoder.encoder_type, "use_pretrained": encoder.pretrained, **(encoder.params or {})},
+        "encoder": {
+            "type": encoder.encoder_type,
+            "use_pretrained": encoder.pretrained,
+            **(encoder.params or {}),
+            **({"trainable": False} if freeze else {}),
+        },
     }
 
 
@@ -185,6 +223,32 @@ def _with_image_resize(feature: dict[str, Any], size: int | None) -> dict[str, A
     if not size or feature["type"] != "image":
         return feature
     return {**feature, "preprocessing": {**feature.get("preprocessing", {}), "height": size, "width": size}}
+
+
+def _with_sequence_length(feature: dict[str, Any], length: int | None) -> dict[str, Any]:
+    """Truncate a text/sequence input feature to `length` tokens. A no-op for every other feature type."""
+    if not length or feature["type"] not in ("text", "sequence"):
+        return feature
+    return {**feature, "preprocessing": {**feature.get("preprocessing", {}), "max_sequence_length": length}}
+
+
+def _head_combiner(sel: LudwigHyperparameters, task_id: str, model_type: str) -> dict[str, Any] | None:
+    """The combiner section for the requested head, or None when the head was left at Ludwig's default.
+
+    The combiner joins every input feature's encoder output and feeds the output decoders; its
+    fully-connected stack is what the UI calls the head (0 layers = a plain linear head).
+    """
+    requested = {
+        "num_fc_layers": sel.head_layers,
+        "output_size": sel.head_width,
+        "dropout": sel.head_dropout,
+    }
+    requested = {k: v for k, v in requested.items() if v is not None}
+    if not requested:
+        return None
+    if model_type != "ecd":
+        raise ConfigError(f'Task "{task_id}" has no configurable head (it fine-tunes a language model directly)')
+    return {"type": "concat", **requested}
 
 
 def _with_optimizer(optimizer: str, task_id: str) -> dict[str, str]:
@@ -232,27 +296,32 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
     if knobs is None:
         return []
 
-    specs = [
+    optimisation = [
         ParamSpec(
-            name="epochs", label="Epochs", type="int",
-            default=knobs.epochs.default, min=knobs.epochs.min, max=knobs.epochs.max, step=1,
-        ),
-        ParamSpec(
-            name="batchSize", label="Batch Size", type="choice",
-            default=str(knobs.batch_size.default), choices=[str(o) for o in knobs.batch_size.options],
-        ),
-        ParamSpec(
-            name="learningRate", label="Learning Rate", type="float", default=knobs.learning_rate.default,
-            min=knobs.learning_rate.min, max=knobs.learning_rate.max,
+            name="learningRate", label="Learning Rate", type="float", group=_OPTIMISATION,
+            default=knobs.learning_rate.default, min=knobs.learning_rate.min, max=knobs.learning_rate.max,
             step=_learning_rate_step(knobs.learning_rate.min, knobs.learning_rate.max),
         ),
         ParamSpec(
-            name="earlyStopPatience", label="Early Stop Patience", description="-1 disables early stopping",
-            type="int", default=knobs.early_stop_patience.default, min=knobs.early_stop_patience.min, step=1,
+            name="optimizer", label="Optimizer", type="choice", group=_OPTIMISATION, default=None,
+            choices=list(LUDWIG_OPTIMIZER_TYPES),
+            description="Defaults to Ludwig's per-model-type default (Adam for ECD)",
+        ),
+    ]  # fmt: skip
+
+    stopping = [
+        ParamSpec(
+            name="epochs", label="Epochs", type="int", group=_STOPPING,
+            default=knobs.epochs.default, min=knobs.epochs.min, max=knobs.epochs.max, step=1,
         ),
         ParamSpec(
-            name="optimizer", label="Optimizer", type="choice", default=None, choices=list(LUDWIG_OPTIMIZER_TYPES),
-            description="Defaults to Ludwig's per-model-type default (Adam for ECD)",
+            name="batchSize", label="Batch Size", type="choice", group=_STOPPING,
+            default=str(knobs.batch_size.default), choices=[str(o) for o in knobs.batch_size.options],
+        ),
+        ParamSpec(
+            name="earlyStopPatience", label="Early Stop Patience", description="-1 disables early stopping",
+            type="int", group=_STOPPING, default=knobs.early_stop_patience.default,
+            min=knobs.early_stop_patience.min, step=1,
         ),
     ]  # fmt: skip
 
@@ -260,30 +329,69 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
     # tasks' text/sequence outputs don't.
     if task.status == "stable":
         metrics = _CLASSIFICATION_METRICS if task.annotation.requires_label_classes else _REGRESSION_METRICS
-        specs.append(
-            ParamSpec(name="validationMetric", label="Early Stop / Best-Epoch Metric", type="choice",
-                       default=None, choices=metrics)
+        stopping.append(
+            ParamSpec(
+                name="validationMetric", label="Early Stop / Best-Epoch Metric", type="choice", group=_STOPPING,
+                default=None, choices=metrics,
+            )
         )  # fmt: skip
 
+    # The head and the freeze switch only exist for ECD tasks (an LLM is fine-tuned as a whole).
+    head: list[ParamSpec] = []
+    if spec.model_type == "ecd":
+        if any(e.pretrained for e in spec.encoders):
+            head.append(
+                ParamSpec(
+                    name="freezeBackbone", label="Freeze backbone", type="bool", group=_HEAD, default=False,
+                    description="Trains only the head and keeps the pretrained weights fixed",
+                )
+            )  # fmt: skip
+        head += [
+            ParamSpec(
+                name="headLayers", label="Head layers", type="int", group=_HEAD, default=0, min=0, max=4, step=1,
+                description="Hidden layers between the backbone and the output. 0 is a plain linear head.",
+            ),
+            ParamSpec(
+                name="headWidth", label="Head width", type="choice", group=_HEAD, default="256",
+                choices=["64", "128", "256", "512"], description="Units per hidden layer of the head.",
+            ),
+            ParamSpec(
+                name="headDropout", label="Head dropout", type="float", group=_HEAD, default=0.0, min=0.0, max=0.9,
+                step=0.05, description="Dropout applied inside the head's hidden layers.",
+            ),
+        ]  # fmt: skip
+
+    data: list[ParamSpec] = []
+    if task.modality == "text" and spec.model_type == "ecd":
+        data.append(
+            ParamSpec(
+                name="maxSequenceLength", label="Max sequence length", type="choice", group=_DATA, default=None,
+                choices=["64", "128", "256", "512"], description="Truncates each text to this many tokens",
+            )
+        )  # fmt: skip
     if task.modality == "vision":
-        specs.append(
-            ParamSpec(name="imageSize", label="Image Size", type="choice", default=None, choices=_IMAGE_SIZES,
-                       description="Resizes every training image to a square of this size")
+        data.append(
+            ParamSpec(
+                name="imageSize", label="Image Size", type="choice", group=_DATA, default=None,
+                choices=_IMAGE_SIZES, description="Resizes every training image to a square of this size",
+            )
         )  # fmt: skip
 
     if task.annotation.requires_label_classes:
-        specs.append(
+        data.append(
             ParamSpec(
                 name="useClassWeights",
                 label="Weight classes by inverse frequency",
                 type="bool",
+                group=_DATA,
                 default=False,
                 description="Balances the loss so a minority class isn't drowned out by a majority one — "
                 "recommended for imbalanced datasets",
             )
         )
 
-    return specs
+    # Section order of the form: optimisation, batching and stopping, backbone and head, data and loss.
+    return [*optimisation, *stopping, *head, *data]
 
 
 def _learning_rate_step(lo: float | None, hi: float | None) -> float:

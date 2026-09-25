@@ -144,6 +144,86 @@ class TestResize:
         assert f["preprocessing"]["height"] == 128 and f["preprocessing"]["width"] == 128
 
 
+class TestBackboneAndHead:
+    def test_untouched_by_default(self):
+        config = compile_("image_classification", VISION)
+        assert "combiner" not in config
+        assert "trainable" not in config["input_features"][0]["encoder"]
+
+    def test_head_settings_become_a_concat_combiner_with_only_what_was_set(self):
+        config = compile_("image_classification", VISION, head_layers=2, head_width=128)
+        assert config["combiner"] == {"type": "concat", "num_fc_layers": 2, "output_size": 128}
+        assert compile_("image_classification", VISION, head_dropout=0.2)["combiner"] == {
+            "type": "concat",
+            "dropout": 0.2,
+        }
+
+    def test_the_head_applies_to_tabular_tasks_too(self):
+        config = compile_("tabular_classification", TABULAR, head_layers=1)
+        assert config["combiner"]["num_fc_layers"] == 1
+
+    def test_an_llm_task_has_no_head(self):
+        with pytest.raises(ConfigError, match="no configurable head"):
+            compile_("text_generation", SnapshotContext(), head_layers=1)
+
+    def test_head_bounds_are_enforced(self):
+        for bad in ({"head_layers": 5}, {"head_layers": -1}, {"head_dropout": 0.95}, {"head_width": 1}):
+            with pytest.raises(ValidationError):
+                LudwigHyperparameters(**bad)
+
+    def test_freezing_marks_a_pretrained_encoder_not_trainable(self):
+        f = compile_("image_classification", VISION, freeze_backbone=True)["input_features"][0]
+        assert f["encoder"]["trainable"] is False and f["encoder"]["use_pretrained"] is True
+        assert (
+            "trainable"
+            not in compile_("image_classification", VISION, freeze_backbone=False)["input_features"][0]["encoder"]
+        )
+
+    def test_freezing_a_from_scratch_encoder_is_rejected(self):
+        with pytest.raises(ConfigError, match="trained from scratch"):
+            compile_("text_classification", SnapshotContext(), model_id="stacked_cnn", freeze_backbone=True)
+
+    def test_freezing_needs_a_pretrained_backbone_to_exist(self):
+        with pytest.raises(ConfigError, match="no pretrained backbone"):
+            compile_("tabular_classification", TABULAR, freeze_backbone=True)
+
+    def test_max_sequence_length_truncates_text_inputs_only(self):
+        f = compile_("text_classification", SnapshotContext(), max_sequence_length=128)["input_features"][0]
+        assert f["preprocessing"]["max_sequence_length"] == 128
+        image = compile_("image_classification", VISION, max_sequence_length=128)["input_features"][0]
+        assert "preprocessing" not in image
+
+    def test_max_sequence_length_is_offered_for_text_tasks_only(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        def names(task):
+            return {p.name for p in hyperparameter_specs(get_task_descriptor(task))}
+
+        assert "maxSequenceLength" in names("text_classification")
+        assert "maxSequenceLength" not in names("image_classification")
+        assert "freezeBackbone" not in names("tabular_classification")  # nothing pretrained to freeze
+        assert not {"headLayers", "freezeBackbone"} & names("text_generation")
+
+    def test_ludwigs_own_schema_accepts_every_compiled_combination(self):
+        pytest.importorskip("ludwig")
+        from ludwig.schema.model_types.base import ModelConfig
+
+        cases = [
+            ("image_classification", VISION, {"freeze_backbone": True, "head_layers": 2, "head_width": 128}),
+            (
+                "text_classification",
+                SnapshotContext(),
+                {"head_layers": 1, "head_dropout": 0.3, "max_sequence_length": 64},
+            ),
+            ("tabular_classification", TABULAR, {"head_layers": 2, "head_width": 64}),
+        ]
+        for task, ctx, sel in cases:
+            config = compile_(task, ctx, **sel)
+            # ludwig_version is metadata for us, and the split column is added by the data layer.
+            config = {k: v for k, v in config.items() if k not in ("ludwig_version", "preprocessing")}
+            ModelConfig.from_dict(config)  # raises on any option Ludwig does not know
+
+
 class TestValidationMetricAndOptimizer:
     def test_validation_metric_passes_through_or_is_omitted(self):
         assert (
@@ -167,7 +247,27 @@ class TestHyperparameterSpecs:
         assert names == {
             "epochs", "batchSize", "learningRate", "earlyStopPatience", "optimizer",
             "validationMetric", "imageSize", "useClassWeights",
+            "freezeBackbone", "headLayers", "headWidth", "headDropout",
         }  # fmt: skip
+
+    def test_every_knob_is_filed_under_a_section_and_sections_appear_in_form_order(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        for task_id in ("image_classification", "tabular_regression", "text_generation"):
+            specs = hyperparameter_specs(get_task_descriptor(task_id))
+            assert all(p.group for p in specs), task_id
+            sections = list(dict.fromkeys(p.group for p in specs))  # first-appearance order is the form order
+            expected = ["Optimisation", "Batching & stopping", "Backbone & head", "Data & loss"]
+            assert sections == [g for g in expected if g in sections], task_id
+            assert sections[:2] == expected[:2]
+            assert ("Backbone & head" in sections) == (task_id != "text_generation")  # an LLM has no head to edit
+
+    def test_a_section_only_exists_when_the_task_has_knobs_for_it(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        regression = {p.group for p in hyperparameter_specs(get_task_descriptor("tabular_regression"))}
+        vision = {p.group for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
+        assert "Data & loss" not in regression and "Data & loss" in vision
 
     def test_epoch_and_batch_size_defaults_come_from_the_task_not_a_shared_constant(self):
         from theseus.backends.ludwig.compile import hyperparameter_specs

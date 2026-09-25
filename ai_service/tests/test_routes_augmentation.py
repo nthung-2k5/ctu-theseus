@@ -93,7 +93,7 @@ async def test_augmentation_options_are_the_installed_ops_that_support_the_proje
     swap = next(a for a in body if a["id"] == "text_word_swap")
     assert swap["params"] == [
         {"name": "swaps", "label": "Swaps", "description": "Number of random word pairs exchanged.", "type": "int",
-         "default": 2, "min": 1.0, "max": 10.0, "step": 1.0, "choices": None},
+         "default": 2, "min": 1.0, "max": 10.0, "step": 1.0, "choices": None, "group": None},
     ]  # fmt: skip
 
     vision = await project(c, "image_classification")

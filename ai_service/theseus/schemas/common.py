@@ -32,3 +32,6 @@ class ParamSpec(ApiModel):
     max: float | None = None
     step: float | None = None
     choices: list[str] | None = None
+    # Section heading the form files this parameter under (e.g. "Optimisation"); parameters without
+    # one are shown together under a generic heading. Order of first appearance is the section order.
+    group: str | None = None
