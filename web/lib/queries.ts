@@ -7,6 +7,7 @@ import {
   getListItemsQueryKey,
   getListItemsQueryOptions,
 } from './api/generated/datasets/datasets'
+import type { ProjectDetail } from './api/generated/models'
 import {
   getGetProjectQueryKey,
   getGetProjectQueryOptions,
@@ -32,7 +33,19 @@ function defined<T extends { queryFn?: unknown }>(options: T) {
 
 export const projectsQueryOptions = () => defined(getListProjectsQueryOptions())
 
-export const projectDetailQueryOptions = (projectId: string) => defined(getGetProjectQueryOptions(projectId))
+/**
+ * Snapshot builds are async: a new snapshot (or the draft) sits in `building` until its parquet is written.
+ * Poll while any is building so `ready` shows up on its own — the sidebar's Training link and the
+ * training pickers key off it, and nothing else would refetch project detail once the build finishes.
+ */
+export const projectDetailQueryOptions = (projectId: string) => ({
+  ...defined(getGetProjectQueryOptions(projectId)),
+  refetchInterval: (query: { state: { data?: { project: ProjectDetail } } }) => {
+    const dataset = query.state.data?.project.dataset
+    const building = dataset?.draft?.status === 'building' || dataset?.versions?.some((v) => v.status === 'building')
+    return building ? 3000 : false
+  },
+})
 
 export const labelClassesQueryOptions = (projectId: string) => defined(getListClassesQueryOptions(projectId))
 

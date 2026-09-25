@@ -6,23 +6,7 @@
  * the draft.
  */
 
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  Checkbox,
-  Group,
-  Menu,
-  Modal,
-  NumberInput,
-  Stack,
-  Switch,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core'
-import { useForm } from '@mantine/form'
+import { Button, Card, Group, Menu, Modal, Paper, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import {
@@ -34,28 +18,19 @@ import {
   ShuffleIcon,
   TagIcon,
   TrashIcon,
-  WarningCircleIcon,
   XIcon,
 } from '@phosphor-icons/react'
-import {
-  AugmentationConfigForm,
-  emptyAugmentationDraft,
-  toAugmentationConfig,
-} from '@public/components/dataset/AugmentationConfigForm'
+import { AutoSplitForm } from '@public/components/dataset/AutoSplitForm'
 import { DatasetHealthPanel } from '@public/components/dataset/DatasetHealthPanel'
 import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
-import { SPLIT_TYPES, SplitProgressBar } from '@public/components/dataset/VersionBrowsing'
-import { confirmDelete, EmptyState, PageHeader } from '@public/components/ui'
-import { apiErrorMessage } from '@public/lib/api/client'
+import { SPLIT_TYPES, SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
+import { confirmDelete, EmptyState, LinkButton, PageHeader } from '@public/components/ui'
 import {
-  autoSplitItems,
   classifyItems,
   createAnnotation,
   deleteItems,
-  getCreateVersionMutationOptions,
-  getListAugmentationOptionsQueryOptions,
   setItemsSplit,
   updateAnnotation,
 } from '@public/lib/api/generated/datasets/datasets'
@@ -67,216 +42,11 @@ import {
   useProjectItems,
 } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 
 const routeApi = getRouteApi('/_app/project/$projectId/dataset')
-
-/* ── Create Version Modal ── */
-const CreateVersionModal = ({
-  projectId,
-  needsAnnotations,
-  onClose,
-}: {
-  projectId: string
-  needsAnnotations: boolean
-  onClose: () => void
-}) => {
-  const form = useForm({
-    initialValues: { versionTag: '' },
-    validate: {
-      versionTag: (v) => (v.trim().length > 0 ? null : 'Version tag is required'),
-    },
-  })
-
-  const queryClient = useQueryClient()
-
-  // Augmentation is chosen here, at snapshot creation: the augmented copies become real train-split
-  // items of the snapshot (viewable and filterable on the Snapshots page), not a training-time option.
-  const { data: augmentationOptions } = useQuery(getListAugmentationOptionsQueryOptions(projectId))
-  const augmentations = augmentationOptions?.augmentations ?? []
-  const [augment, setAugment] = useState(false)
-  const [augmentationDraft, setAugmentationDraft] = useState(emptyAugmentationDraft)
-  const { data: trainItems } = useProjectItems(augment ? projectId : undefined, { perPage: 1, split: 'train' })
-  const trainCount = trainItems?.total ?? 0
-  const augmentationConfig = augment ? toAugmentationConfig(augmentationDraft) : undefined
-
-  // Cheap way to get the draft's total/labeledCount without fetching every
-  // row — the aggregate counts are computed server-side regardless of
-  // perPage (see GET /projects/:projectId/items). Always fetched (not just
-  // when needsAnnotations): the empty-draft check below needs `total` too.
-  const { data: draftCounts, isLoading: loadingDraftCounts } = useProjectItems(projectId, { perPage: 1 })
-  const total = draftCounts?.total ?? 0
-  const labeledCount = draftCounts?.labeledCount ?? 0
-  const unlabeledCount = total - labeledCount
-  const isEmpty = !loadingDraftCounts && total === 0
-
-  const createVersion = useMutation({
-    ...getCreateVersionMutationOptions(),
-    onSuccess: () => {
-      invalidateProjectScope(queryClient, projectId)
-      notifications.show({ title: 'Version created', message: 'New snapshot version created', color: 'green' })
-      form.reset()
-      setAugment(false)
-      setAugmentationDraft(emptyAugmentationDraft())
-      onClose()
-    },
-    onError: (error) => {
-      notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to create version'), color: 'red' })
-    },
-  })
-
-  return (
-    <form
-      onSubmit={form.onSubmit((values) =>
-        createVersion.mutate({ projectId, data: { versionTag: values.versionTag, augmentation: augmentationConfig } }),
-      )}
-    >
-      <Stack gap="md">
-        {isEmpty && (
-          <Alert icon={<WarningCircleIcon size={16} />} color="red" title="The draft is empty">
-            Add items on the Upload page before creating a snapshot — there is nothing to freeze yet.
-          </Alert>
-        )}
-        {needsAnnotations && unlabeledCount > 0 && (
-          <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unlabeled items in the draft">
-            {unlabeledCount} of {total} items have no label yet — they'll snapshot with a null label column and won't
-            contribute a usable training signal. Label them below before snapshotting, or continue anyway.
-          </Alert>
-        )}
-        <TextInput
-          label="Version tag"
-          placeholder="e.g. v1.0, snapshot-2024-01"
-          {...form.getInputProps('versionTag')}
-        />
-        {augmentations.length > 0 && (
-          <Stack gap="sm">
-            <Switch
-              label="Augment the training split"
-              description="Add extra, randomly perturbed copies of every training item to this snapshot. You can browse and filter them on the Snapshots page."
-              checked={augment}
-              onChange={(e) => setAugment(e.currentTarget.checked)}
-            />
-            {augment && (
-              <AugmentationConfigForm
-                options={augmentations}
-                draft={augmentationDraft}
-                onChange={setAugmentationDraft}
-                trainCount={trainCount}
-              />
-            )}
-          </Stack>
-        )}
-        <Group justify="flex-end">
-          <Button variant="subtle" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            loading={createVersion.isPending}
-            disabled={isEmpty || (augment && !augmentationConfig)}
-          >
-            Create Snapshot
-          </Button>
-        </Group>
-      </Stack>
-    </form>
-  )
-}
-
-/* ── Auto-split Modal ── */
-const AutoSplitModal = ({
-  projectId,
-  requiresLabelClasses,
-  onClose,
-}: {
-  projectId: string
-  requiresLabelClasses: boolean
-  onClose: () => void
-}) => {
-  const [ratios, setRatios] = useState({ train: 80, validation: 10, test: 10 })
-  const [stratify, setStratify] = useState(true)
-  const queryClient = useQueryClient()
-  const total = ratios.train + ratios.validation + ratios.test
-
-  const autoSplit = useMutation({
-    mutationFn: async () => {
-      return autoSplitItems(projectId, { ratios, stratify: requiresLabelClasses ? stratify : false })
-    },
-    onSuccess: (data) => {
-      invalidateProjectScope(queryClient, projectId)
-      notifications.show({
-        title: 'Auto-split complete',
-        message: `${data.updated} item(s) reassigned`,
-        color: 'green',
-      })
-      for (const warning of data.warnings ?? []) {
-        notifications.show({ title: 'Split warning', message: warning, color: 'yellow' })
-      }
-      onClose()
-    },
-    onError: () => {
-      notifications.show({ title: 'Error', message: 'Auto-split failed', color: 'red' })
-    },
-  })
-
-  return (
-    <Stack gap="md">
-      <Text size="sm" c="dimmed">
-        Randomly shuffles every item currently in the draft into train/validation/test, matching this ratio as closely
-        as rounding allows. This overwrites any manual split assignments.
-      </Text>
-      <Group grow>
-        <NumberInput
-          label="Train"
-          min={0}
-          value={ratios.train}
-          onChange={(v) => setRatios((r) => ({ ...r, train: Number(v) || 0 }))}
-        />
-        <NumberInput
-          label="Validation"
-          min={0}
-          value={ratios.validation}
-          onChange={(v) => setRatios((r) => ({ ...r, validation: Number(v) || 0 }))}
-        />
-        <NumberInput
-          label="Test"
-          min={0}
-          value={ratios.test}
-          onChange={(v) => setRatios((r) => ({ ...r, test: Number(v) || 0 }))}
-        />
-      </Group>
-      {total > 0 && (
-        <Text size="xs" c="dimmed">
-          {((ratios.train / total) * 100).toFixed(0)}% / {((ratios.validation / total) * 100).toFixed(0)}% /{' '}
-          {((ratios.test / total) * 100).toFixed(0)}%
-        </Text>
-      )}
-      {requiresLabelClasses && (
-        <Checkbox
-          label="Stratify by label class"
-          description="Keeps each class's items in the same ratio across train/validation/test, instead of one shuffled pool. Recommended — an unstratified split can leave a class entirely out of validation or test."
-          checked={stratify}
-          onChange={(e) => setStratify(e.currentTarget.checked)}
-        />
-      )}
-      <Group justify="flex-end">
-        <Button variant="subtle" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          leftSection={<ShuffleIcon size={14} />}
-          disabled={total <= 0}
-          loading={autoSplit.isPending}
-          onClick={() => autoSplit.mutate()}
-        >
-          Apply
-        </Button>
-      </Group>
-    </Stack>
-  )
-}
 
 /* ── Bulk actions toolbar ── */
 const BulkActionsToolbar = ({
@@ -456,23 +226,15 @@ const BulkActionsToolbar = ({
 /* ── Main Dataset page ── */
 export function DatasetPage() {
   const { projectId } = routeApi.useParams()
-  const { page, perPage, split, classId, search, sort } = routeApi.useSearch()
+  const { page, perPage, split, classId, search, sort, tab = 'browse' } = routeApi.useSearch()
   const navigate = routeApi.useNavigate()
   const {
     data: { project: activeProject },
-  } = useSuspenseQuery({
-    ...projectDetailQueryOptions(projectId),
-    // Snapshot builds are async (see server/lib/snapshot.ts) — poll while the
-    // draft is (re)building so status changes show up without a refresh.
-    refetchInterval: (query) => (query.state.data?.project.dataset?.draft?.status === 'building' ? 3000 : false),
-  })
+  } = useSuspenseQuery(projectDetailQueryOptions(projectId))
   const dataset = activeProject.dataset
   const descriptor = getTaskDescriptor(activeProject.task)
-  const needsAnnotations = descriptor.columns.some((c) => c.kind === 'label' || c.kind === 'text_sequence_label')
 
-  const [createVersionOpened, { open: openCreateVersion, close: closeCreateVersion }] = useDisclosure(false)
   const [autoSplitOpened, { open: openAutoSplit, close: closeAutoSplit }] = useDisclosure(false)
-  const [healthOpened, { open: openHealth, close: closeHealth }] = useDisclosure(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const queryClient = useQueryClient()
 
@@ -583,36 +345,61 @@ export function DatasetPage() {
       }
     : undefined
 
-  return (
-    <Box mb="-1.25rem">
-      <Stack gap="xl">
-        <PageHeader
-          title="Dataset"
-          actions={
-            dataset?.draft && (
-              <Group gap="sm">
-                <Button size="sm" leftSection={<HeartbeatIcon size={14} />} variant="light" onClick={openHealth}>
-                  Dataset health
-                </Button>
-                <Button size="sm" leftSection={<ShuffleIcon size={14} />} variant="light" onClick={openAutoSplit}>
-                  Auto-split
-                </Button>
-                <Button leftSection={<PlusIcon size={14} />} onClick={openCreateVersion}>
-                  Create Snapshot
-                </Button>
-              </Group>
-            )
-          }
-        />
+  const draftSplitCounts = dataset?.draft ? splitCounts(dataset.draft) : null
 
-        {!dataset?.draft ? (
-          <EmptyState
-            icon={DatabaseIcon}
-            title="No draft dataset found"
-            description="This project's dataset hasn't been initialized yet."
-          />
-        ) : (
-          <Stack gap="lg">
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <PageHeader
+        title="Dataset"
+        description={
+          draftSplitCounts
+            ? `${dataset?.draft?.itemCount ?? 0} items · train ${draftSplitCounts.train} · validation ${draftSplitCounts.validation} · test ${draftSplitCounts.test}`
+            : undefined
+        }
+        actions={
+          dataset?.draft && (
+            <>
+              <Button
+                size="compact-md"
+                leftSection={<ShuffleIcon size={14} />}
+                variant="default"
+                onClick={openAutoSplit}
+              >
+                Auto-split
+              </Button>
+              <LinkButton
+                to="/project/$projectId/snapshots/new"
+                params={{ projectId }}
+                leftSection={<PlusIcon size={14} />}
+              >
+                Create snapshot
+              </LinkButton>
+            </>
+          )
+        }
+      />
+
+      {!dataset?.draft ? (
+        <EmptyState
+          icon={DatabaseIcon}
+          title="No draft dataset found"
+          description="This project's dataset hasn't been initialized yet."
+        />
+      ) : (
+        <Tabs
+          value={tab}
+          onChange={(t) =>
+            navigate({ search: (prev) => ({ ...prev, tab: t === 'browse' ? undefined : (t as 'distribution') }) })
+          }
+        >
+          <Tabs.List>
+            <Tabs.Tab value="browse">Browse</Tabs.Tab>
+            <Tabs.Tab value="distribution" leftSection={<HeartbeatIcon size={14} />}>
+              Distribution
+            </Tabs.Tab>
+          </Tabs.List>
+
+          <Tabs.Panel value="browse" pt="sm">
             <Stack gap="sm">
               <SplitProgressBar version={dataset.draft} />
               <ItemsFilterBar
@@ -628,9 +415,7 @@ export function DatasetPage() {
                 sort={sort ?? 'newest'}
                 onSortChange={(sort) => navigate({ search: (prev) => ({ ...prev, sort, page: 1 }) })}
               />
-            </Stack>
 
-            <Stack gap="sm">
               <ItemsByModality
                 items={items}
                 modality={dataset.modality}
@@ -667,31 +452,24 @@ export function DatasetPage() {
                 />
               )}
             </Stack>
-          </Stack>
-        )}
-      </Stack>
+          </Tabs.Panel>
 
-      <Modal
-        opened={createVersionOpened}
-        onClose={closeCreateVersion}
-        title="Create Snapshot Version"
-        size="lg"
-        centered
-      >
-        <CreateVersionModal projectId={projectId} needsAnnotations={needsAnnotations} onClose={closeCreateVersion} />
-      </Modal>
+          <Tabs.Panel value="distribution" pt="sm">
+            <Paper p="md">
+              <DatasetHealthPanel projectId={projectId} active={tab === 'distribution'} />
+            </Paper>
+          </Tabs.Panel>
+        </Tabs>
+      )}
 
       <Modal opened={autoSplitOpened} onClose={closeAutoSplit} title="Auto-split the draft" centered>
-        <AutoSplitModal
+        <AutoSplitForm
           projectId={projectId}
           requiresLabelClasses={descriptor.annotation.requiresLabelClasses}
-          onClose={closeAutoSplit}
+          onDone={closeAutoSplit}
+          onCancel={closeAutoSplit}
         />
       </Modal>
-
-      <Modal opened={healthOpened} onClose={closeHealth} title="Dataset health" size="lg" centered>
-        <DatasetHealthPanel projectId={projectId} active={healthOpened} />
-      </Modal>
-    </Box>
+    </div>
   )
 }

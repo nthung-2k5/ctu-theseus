@@ -1,5 +1,6 @@
-import { Progress, Select, Tooltip } from '@mantine/core'
+import { Select } from '@mantine/core'
 import { FunnelIcon } from '@phosphor-icons/react'
+import { ProportionBar } from '@public/components/ui'
 import { SPLIT_COLORS } from '@public/lib/constants'
 import type { DatasetVersion } from '@public/store/types'
 
@@ -17,27 +18,18 @@ export const splitCounts = (version: DatasetVersion) =>
     number
   >
 
-/* ── Split progress bar (top of the item list — visualizes train/validation/test membership) ── */
+/* ── Split bar (top of the item list — visualizes train/validation/test membership) ── */
 export const SplitProgressBar = ({ version }: { version: DatasetVersion }) => {
   const counts = splitCounts(version)
-  const total = SPLIT_TYPES.reduce((sum, s) => sum + counts[s], 0)
-
   return (
-    <Progress.Root size={12} radius="xl">
-      {total > 0 ? (
-        SPLIT_TYPES.filter((s) => counts[s] > 0).map((splitType) => (
-          <Tooltip
-            label={`${splitType[0].toUpperCase()}${splitType.slice(1)}: ${counts[splitType]}`}
-            withArrow
-            key={splitType}
-          >
-            <Progress.Section value={(counts[splitType] / total) * 100} color={SPLIT_COLORS[splitType] ?? 'gray'} />
-          </Tooltip>
-        ))
-      ) : (
-        <Progress.Section value={100} color="gray.3" />
-      )}
-    </Progress.Root>
+    <ProportionBar
+      segments={SPLIT_TYPES.map((s) => ({
+        key: s,
+        label: `${s[0].toUpperCase()}${s.slice(1)}`,
+        value: counts[s],
+        color: SPLIT_COLORS[s] ?? 'gray',
+      }))}
+    />
   )
 }
 

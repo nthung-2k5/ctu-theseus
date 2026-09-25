@@ -1,5 +1,5 @@
 /**
- * Augmentation picker for the "Create Snapshot" dialog.
+ * Augmentation picker for the snapshot builder.
  *
  * Nothing here knows about a specific augmentation: the list of ops and every
  * op's tunable parameters come from GET /projects/:id/augmentations, where
@@ -7,7 +7,7 @@
  * class shows up in this form after a backend restart with no frontend change.
  */
 
-import { Checkbox, Group, NumberInput, Slider, Stack, Text } from '@mantine/core'
+import { Checkbox, Group, NumberInput, Paper, Slider, Stack, Text } from '@mantine/core'
 import { ParamField } from '@public/components/ui'
 import type { AugmentationConfig, AugmentationInfo } from '@public/lib/api/generated/models'
 
@@ -71,44 +71,46 @@ export function AugmentationConfigForm({
         {options.map((op) => {
           const selected = draft.ops[op.id]
           return (
-            <Stack key={op.id} gap={6}>
-              <Checkbox
-                label={op.label}
-                description={op.description}
-                checked={!!selected}
-                onChange={(e) => toggle(op, e.currentTarget.checked)}
-              />
-              {selected && (
-                <Stack gap="xs" pl={28}>
-                  <div>
-                    <Text size="xs" fw={500}>
-                      Applied to {Math.round(selected.probability * 100)}% of copies
-                    </Text>
-                    <Slider
-                      size="sm"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={selected.probability}
-                      label={(v) => `${Math.round(v * 100)}%`}
-                      onChange={(v) => patch(op.id, { probability: v })}
-                    />
-                  </div>
-                  {op.params.length > 0 && (
-                    <Group gap="sm" align="flex-end" wrap="wrap">
-                      {op.params.map((p) => (
-                        <ParamField
-                          key={p.name}
-                          spec={p}
-                          value={selected.params[p.name]}
-                          onChange={(v) => patch(op.id, { params: { ...selected.params, [p.name]: v } })}
-                        />
-                      ))}
-                    </Group>
-                  )}
-                </Stack>
-              )}
-            </Stack>
+            <Paper key={op.id} p="sm" style={selected ? { borderColor: 'var(--mantine-color-cyan-5)' } : undefined}>
+              <Stack gap={6}>
+                <Checkbox
+                  label={op.label}
+                  description={op.description}
+                  checked={!!selected}
+                  onChange={(e) => toggle(op, e.currentTarget.checked)}
+                />
+                {selected && (
+                  <Stack gap="xs" pl={28}>
+                    <div>
+                      <Text size="xs" fw={500}>
+                        Applied to {Math.round(selected.probability * 100)}% of copies
+                      </Text>
+                      <Slider
+                        size="sm"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={selected.probability}
+                        label={(v) => `${Math.round(v * 100)}%`}
+                        onChange={(v) => patch(op.id, { probability: v })}
+                      />
+                    </div>
+                    {op.params.length > 0 && (
+                      <Group gap="sm" align="flex-end" wrap="wrap">
+                        {op.params.map((p) => (
+                          <ParamField
+                            key={p.name}
+                            spec={p}
+                            value={selected.params[p.name]}
+                            onChange={(v) => patch(op.id, { params: { ...selected.params, [p.name]: v } })}
+                          />
+                        ))}
+                      </Group>
+                    )}
+                  </Stack>
+                )}
+              </Stack>
+            </Paper>
           )
         })}
       </Stack>
