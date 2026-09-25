@@ -1,7 +1,7 @@
 import { AppShell } from '@public/layouts/AppShell'
 import { sessionQueryOptions } from '@public/lib/auth'
-import { ApiKeysPage } from '@public/pages/ApiKeysPage'
 import { DashboardPage } from '@public/pages/DashboardPage'
+import { SettingsPage } from '@public/pages/SettingsPage'
 import { createRoute, Outlet, redirect } from '@tanstack/react-router'
 import { rootRoute } from './__root'
 
@@ -22,12 +22,19 @@ export const appRoute = createRoute({
 
 export const dashboardRoute = createRoute({
   getParentRoute: () => appRoute,
-  path: '/',
+  path: '/projects',
   component: DashboardPage,
 })
 
+export const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/settings',
+  component: SettingsPage,
+})
+
+/** Old URL: API keys are a section of Settings now. */
 export const apiKeysRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/settings/api-keys',
-  component: ApiKeysPage,
+  component: SettingsPage,
 })

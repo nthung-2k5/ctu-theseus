@@ -9,8 +9,8 @@ function NotFound() {
       <Stack align="center" gap="sm">
         <Title order={1}>404</Title>
         <Text c="dimmed">This page doesn't exist.</Text>
-        <Button component={Link} to="/" mt="sm">
-          Back to dashboard
+        <Button component={Link} to="/projects" mt="sm">
+          Back to projects
         </Button>
       </Stack>
     </Center>
@@ -25,8 +25,8 @@ function ErrorFallback({ error }: { error: Error }) {
         <Text c="dimmed" ta="center">
           {error.message || 'An unexpected error occurred.'}
         </Text>
-        <Button component={Link} to="/" mt="sm">
-          Back to dashboard
+        <Button component={Link} to="/projects" mt="sm">
+          Back to projects
         </Button>
       </Stack>
     </Center>

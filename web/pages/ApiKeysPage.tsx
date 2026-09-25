@@ -6,7 +6,7 @@
  * exactly once, right after creation — losing it means generating a new one.
  */
 
-import { Alert, Badge, Box, Button, Code, CopyButton, Group, Modal, Stack, Text, TextInput } from '@mantine/core'
+import { Alert, Badge, Button, Code, CopyButton, Group, Modal, Stack, Text, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
@@ -16,8 +16,8 @@ import {
   DataTable,
   type DataTableColumn,
   EmptyState,
-  PageHeader,
   QueryBoundary,
+  SectionLabel,
 } from '@public/components/ui'
 import {
   getCreateApiKeyMutationOptions,
@@ -37,7 +37,8 @@ interface ApiKeySummary {
   revokedAt: string | Date | null
 }
 
-export function ApiKeysPage() {
+/** Issue, list and revoke API keys. Rendered as a section of the Settings page. */
+export function ApiKeysSection() {
   const queryClient = useQueryClient()
   const keysQueryKey = getListApiKeysQueryKey()
 
@@ -151,30 +152,30 @@ export function ApiKeysPage() {
   ]
 
   return (
-    <Box>
-      <Stack gap="xl">
-        <PageHeader
-          title="API Keys"
-          description="Bearer credentials for the hosted prediction API — see POST /api/v1/predict/:runId"
-          actions={
-            <Button leftSection={<PlusIcon size={16} />} onClick={openCreate}>
-              New Key
-            </Button>
-          }
-        />
+    <div className="flex flex-col gap-2">
+      <Group justify="space-between">
+        <div>
+          <SectionLabel>API keys</SectionLabel>
+          <Text size="xs" c="dimmed">
+            Bearer credentials for the hosted prediction API (POST /api/v1/predict/:runId).
+          </Text>
+        </div>
+        <Button leftSection={<PlusIcon size={14} />} onClick={openCreate}>
+          New key
+        </Button>
+      </Group>
 
-        <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
-          {keys.length === 0 ? (
-            <EmptyState
-              icon={KeyIcon}
-              title="No API keys yet"
-              description="Create one to call the prediction API from a script."
-            />
-          ) : (
-            <DataTable columns={columns} data={keys} getRowKey={(k) => k.id} />
-          )}
-        </QueryBoundary>
-      </Stack>
+      <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
+        {keys.length === 0 ? (
+          <EmptyState
+            icon={KeyIcon}
+            title="No API keys yet"
+            description="Create one to call the prediction API from a script."
+          />
+        ) : (
+          <DataTable columns={columns} data={keys} getRowKey={(k) => k.id} />
+        )}
+      </QueryBoundary>
 
       <Modal opened={createOpened} onClose={closeCreate} title="New API Key" centered>
         {newKey ? (
@@ -225,6 +226,6 @@ export function ApiKeysPage() {
           </form>
         )}
       </Modal>
-    </Box>
+    </div>
   )
 }
