@@ -1,18 +1,19 @@
 /**
- * RunComparisonPanel – side-by-side comparison of a handful of runs: status,
- * accuracy/macro-F1 (denormalized onto TrainingRunSummary from the run's
- * evaluation report — see GET /projects/:projectId/runs in
- * server/routes/training.ts), and the hyperparameters each was started with.
- * Hyperparameters aren't in the run list response (fixed at queue time, only
- * worth fetching for the handful of runs actually being compared), so each
- * row fetches its own run detail — mirrors RunOverviewPanel's same tradeoff.
+ * RunComparisonPanel – compare a handful of runs: an overlay of one metric across runs, and a table
+ * of status, accuracy/macro-F1 (denormalized onto the run summary from its evaluation report) and
+ * the hyperparameters each run started with. Hyperparameters and per-epoch metrics aren't in the
+ * run list response, so each selected run fetches its own detail.
  */
 
-import { Badge, Button, Card, Group, Table, Text, Title } from '@mantine/core'
-import { ArrowLeftIcon } from '@phosphor-icons/react'
-import { useTrainingRunDetail } from '@public/lib/queries'
-import type { TrainingRunSummary } from '@public/store/types'
-import { STATUS_COLORS } from './constants'
+import { LineChart } from '@mantine/charts'
+import { Badge, Group, MultiSelect, Paper, SegmentedControl, Select, Table, Text } from '@mantine/core'
+import { EmptyState, SectionLabel, StatusBadge } from '@public/components/ui'
+import { CHART_COLORS } from '@public/lib/palette'
+import { trainingRunDetailQueryOptions, useTrainingRunDetail } from '@public/lib/queries'
+import type { SplitType, TrainingRunSummary } from '@public/store/types'
+import { useQueries } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { formatMetricLabel, STATUS_COLORS } from './constants'
 
 function formatHyperparamValue(value: unknown): string {
   if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'None'
@@ -21,30 +22,29 @@ function formatHyperparamValue(value: unknown): string {
   return String(value)
 }
 
-function ComparisonRow({ run }: { run: TrainingRunSummary }) {
+function ComparisonRow({ run, color, isCurrent }: { run: TrainingRunSummary; color: string; isCurrent: boolean }) {
   const { data } = useTrainingRunDetail(run.id, true)
   const hyperparameters = (data?.run.hyperparameters ?? null) as Record<string, unknown> | null
+  const best = run.evaluation?.status === 'success' ? run.evaluation : null
 
   return (
     <Table.Tr>
       <Table.Td>
-        <Text size="sm" fw={600}>
-          {run.name}
-        </Text>
+        <Group gap={6} wrap="nowrap">
+          <span style={{ width: 8, height: 8, background: color, flex: 'none' }} />
+          <Text size="sm" fw={600} c={color}>
+            {run.name}
+          </Text>
+          {isCurrent && <Badge color="cyan">this run</Badge>}
+        </Group>
       </Table.Td>
       <Table.Td>
-        <Badge variant="light" color={STATUS_COLORS[run.status] ?? 'gray'} tt="capitalize" size="sm">
-          {run.status}
-        </Badge>
+        <StatusBadge value={run.status} colorMap={STATUS_COLORS} />
       </Table.Td>
+      <Table.Td className="tnum">{best?.accuracy != null ? best.accuracy.toFixed(3) : '—'}</Table.Td>
+      <Table.Td className="tnum">{best?.macroF1 != null ? best.macroF1.toFixed(3) : '—'}</Table.Td>
       <Table.Td>
-        <Text size="sm">{run.evaluation?.accuracy != null ? run.evaluation.accuracy.toFixed(3) : '—'}</Text>
-      </Table.Td>
-      <Table.Td>
-        <Text size="sm">{run.evaluation?.macroF1 != null ? run.evaluation.macroF1.toFixed(3) : '—'}</Text>
-      </Table.Td>
-      <Table.Td>
-        <Text size="xs" c="dimmed" maw={280}>
+        <Text size="xs" c="dimmed" maw={320}>
           {hyperparameters
             ? Object.entries(hyperparameters)
                 .filter(([key]) => key !== 'encoderId')
@@ -57,36 +57,132 @@ function ComparisonRow({ run }: { run: TrainingRunSummary }) {
   )
 }
 
-export function RunComparisonPanel({ runs, onBack }: { runs: TrainingRunSummary[]; onBack: () => void }) {
-  return (
-    <Card withBorder p="lg" radius="md">
-      <Group justify="space-between" mb="md">
-        <Group gap="sm">
-          <Button variant="subtle" color="gray" size="xs" leftSection={<ArrowLeftIcon size={14} />} onClick={onBack}>
-            Back to runs
-          </Button>
-          <Title order={5}>Comparing {runs.length} runs</Title>
-        </Group>
-      </Group>
+export function RunComparisonPanel({
+  runs,
+  selectedIds,
+  onSelectedChange,
+  currentRunId,
+}: {
+  /** Every run that can be compared. */
+  runs: TrainingRunSummary[]
+  selectedIds: string[]
+  onSelectedChange: (ids: string[]) => void
+  currentRunId?: string
+}) {
+  const [metric, setMetric] = useState('loss')
+  const [split, setSplit] = useState<SplitType>('validation')
+  const selected = selectedIds.map((id) => runs.find((r) => r.id === id)).filter((r): r is TrainingRunSummary => !!r)
 
-      <Table.ScrollContainer minWidth={640}>
-        <Table verticalSpacing="sm">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Name</Table.Th>
-              <Table.Th>Status</Table.Th>
-              <Table.Th>Accuracy</Table.Th>
-              <Table.Th>Macro F1</Table.Th>
-              <Table.Th>Hyperparameters</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {runs.map((run) => (
-              <ComparisonRow key={run.id} run={run} />
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
-    </Card>
+  const details = useQueries({
+    queries: selected.map((r) => ({ ...trainingRunDetailQueryOptions(r.id), enabled: true })),
+  })
+
+  const metricNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const d of details) for (const m of d.data?.run.metrics ?? []) names.add(m.metricName)
+    return Array.from(names).sort()
+  }, [details])
+  const activeMetric = metricNames.includes(metric) ? metric : (metricNames[0] ?? metric)
+
+  // One row per epoch; a column per run (keyed by run id) holding the chosen metric on the chosen split.
+  const data = useMemo(() => {
+    const byEpoch = new Map<number, Record<string, number>>()
+    selected.forEach((run, i) => {
+      for (const m of details[i]?.data?.run.metrics ?? []) {
+        if (m.metricName !== activeMetric || m.split !== split) continue
+        const row = byEpoch.get(m.epoch) ?? { epoch: m.epoch }
+        row[run.id] = m.metricValue
+        byEpoch.set(m.epoch, row)
+      }
+    })
+    return Array.from(byEpoch.values()).sort((a, b) => a.epoch - b.epoch)
+  }, [details, selected, activeMetric, split])
+
+  const colorFor = (id: string) => CHART_COLORS[Math.max(0, selectedIds.indexOf(id)) % CHART_COLORS.length]
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Paper p="sm">
+        <Group gap="sm" align="flex-end" wrap="wrap">
+          <MultiSelect
+            size="xs"
+            label="Runs"
+            w={360}
+            searchable
+            data={runs.map((r) => ({ value: r.id, label: r.name }))}
+            value={selectedIds}
+            onChange={onSelectedChange}
+          />
+          <Select
+            size="xs"
+            label="Metric"
+            w={200}
+            data={metricNames.map((n) => ({ value: n, label: formatMetricLabel(n) }))}
+            value={activeMetric}
+            onChange={(v) => v && setMetric(v)}
+            allowDeselect={false}
+            disabled={metricNames.length === 0}
+          />
+          <SegmentedControl
+            value={split}
+            onChange={(v) => setSplit(v as SplitType)}
+            data={[
+              { value: 'train', label: 'Train' },
+              { value: 'validation', label: 'Validation' },
+              { value: 'test', label: 'Test' },
+            ]}
+          />
+        </Group>
+      </Paper>
+
+      {selected.length === 0 ? (
+        <EmptyState title="Pick runs to compare" description="Select two or more runs above." compact />
+      ) : (
+        <Paper p="sm">
+          <SectionLabel mb={4}>
+            {formatMetricLabel(activeMetric)} · {split}
+          </SectionLabel>
+          <LineChart
+            h={280}
+            data={data}
+            dataKey="epoch"
+            series={selected.map((r) => ({
+              name: r.id,
+              label: r.name,
+              color: colorFor(r.id),
+              strokeWidth: r.id === currentRunId ? 3 : 1.75,
+            }))}
+            withLegend
+            withDots={false}
+            curveType="monotone"
+            connectNulls
+            gridAxis="y"
+          />
+        </Paper>
+      )}
+
+      {selected.length > 0 && (
+        <Paper>
+          <Table.ScrollContainer minWidth={640}>
+            <Table verticalSpacing={6}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Run</Table.Th>
+                  <Table.Th>Status</Table.Th>
+                  <Table.Th>Accuracy</Table.Th>
+                  <Table.Th>Macro F1</Table.Th>
+                  <Table.Th>Hyperparameters</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {selected.map((run) => (
+                  <ComparisonRow key={run.id} run={run} color={colorFor(run.id)} isCurrent={run.id === currentRunId} />
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Paper>
+      )}
+    </div>
   )
 }

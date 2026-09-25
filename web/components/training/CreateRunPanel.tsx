@@ -7,20 +7,35 @@
  * fixed Ludwig-shaped schema baked into the frontend. Adding a backend, or changing what one
  * offers, needs no change here.
  *
+ * One config, two views: Simple picks the model and a couple of headline settings, Advanced shows
+ * every hyperparameter. Both edit the same state, so switching never loses anything.
+ *
  * Augmentation is not a training option: it is chosen when a snapshot is created (see
- * DatasetPage), so the augmented copies are real, browsable train-split items.
+ * SnapshotBuilderPage), so the augmented copies are real, browsable train-split items.
  */
 
-import { Alert, Button, Card, Group, Select, Skeleton, Stack, TextInput, Title } from '@mantine/core'
-import { useForm } from '@mantine/form'
-import { BrainIcon, WarningIcon } from '@phosphor-icons/react'
-import { ParamFields } from '@public/components/ui'
+import { Alert, Badge, Button, Group, Paper, SegmentedControl, SimpleGrid, Skeleton, Text } from '@mantine/core'
+import { WarningIcon } from '@phosphor-icons/react'
+import { groupParams, ParamField, SectionLabel } from '@public/components/ui'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
+import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { BlockBuilder } from './BlockBuilder'
+import { ConfigHeader, LaunchBar } from './ConfigHeader'
+
+export interface RunPrefill {
+  name: string
+  datasetVersionId: string
+  backend?: string
+  hyperparameters: Record<string, unknown>
+}
 
 interface CreateRunPanelProps {
   project: ProjectDetail
+  /** Start from an earlier run's setup ("New run from this setup"). */
+  prefill?: RunPrefill
+  loading?: boolean
   onStartTraining: (config: {
     name: string
     datasetVersionId: string
@@ -29,51 +44,92 @@ interface CreateRunPanelProps {
   }) => void
 }
 
-export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps) {
-  const dataset = project.dataset
+type Level = 'simple' | 'advanced'
+
+/** The settings worth surfacing in Simple mode, when the backend has them. */
+const QUICK_PARAM_NAMES = ['epochs', 'batchSize']
+
+export function CreateRunPanel({ project, prefill, loading, onStartTraining }: CreateRunPanelProps) {
   const { data, isLoading } = useListProjectTrainingBackends(project.id)
   const backends = data?.backends ?? []
 
+  const [level, setLevel] = useState<Level>('simple')
+  const [name, setName] = useState('')
+  const [versionId, setVersionId] = useState<string | null>(null)
+
   const [backendId, setBackendId] = useState<string | null>(null)
   useEffect(() => {
-    if (!backendId && backends.length > 0) setBackendId(backends[0].id)
-  }, [backendId, backends])
+    if (backendId || backends.length === 0) return
+    const preferred = prefill?.backend && backends.some((b) => b.id === prefill.backend) ? prefill.backend : null
+    setBackendId(preferred ?? backends[0].id)
+  }, [backendId, backends, prefill?.backend])
   const backend = backends.find((b) => b.id === backendId)
 
   const [modelId, setModelId] = useState<string | null>(null)
-  useEffect(() => {
-    setModelId(backend?.models[0]?.id ?? null)
-  }, [backend])
-
   const [values, setValues] = useState<Record<string, unknown>>({})
+  // Defaults first, then overlay the prefill's values for knobs this backend actually has.
   useEffect(() => {
-    setValues(Object.fromEntries((backend?.params ?? []).map((p) => [p.name, p.default])))
-  }, [backend])
+    const defaults = Object.fromEntries((backend?.params ?? []).map((p) => [p.name, p.default]))
+    const overlay = Object.fromEntries(Object.entries(prefill?.hyperparameters ?? {}).filter(([k]) => k in defaults))
+    setValues({ ...defaults, ...overlay })
+    const prefillModel = backend
+      ? (prefill?.hyperparameters?.[backend.modelParamName] as string | undefined)
+      : undefined
+    setModelId(
+      prefillModel && backend?.models.some((m) => m.id === prefillModel)
+        ? prefillModel
+        : (backend?.models[0]?.id ?? null),
+    )
+  }, [backend, prefill])
 
-  // Only snapshots that finished building can actually be trained on — the
-  // draft is mutable and has no parquet, and `building`/`failed` versions
-  // have none either.
-  const versionOptions =
-    dataset?.versions
-      ?.filter((v) => v.status === 'ready')
-      .map((v) => ({
-        value: v.id,
-        label: `${v.versionTag} (${v.itemCount ?? 0} items${v.augmentedCount ? `, ${v.augmentedCount} augmented` : ''})`,
-      })) ?? []
+  // Only snapshots that finished building can actually be trained on: the draft is mutable and has
+  // no parquet, and `building`/`failed` versions have none either.
+  const readyVersions = useMemo(
+    () => (project.dataset?.versions ?? []).filter((v) => v.status === 'ready'),
+    [project.dataset?.versions],
+  )
+  useEffect(() => {
+    if (versionId || readyVersions.length === 0) return
+    const preferred = prefill && readyVersions.some((v) => v.id === prefill.datasetVersionId)
+    setVersionId(preferred ? (prefill?.datasetVersionId ?? null) : readyVersions[readyVersions.length - 1].id)
+  }, [versionId, readyVersions, prefill])
 
-  const form = useForm({
-    initialValues: { name: '', datasetVersionId: '' },
-    validate: {
-      name: (v) => (v.trim().length > 0 ? null : 'Run name is required'),
-      datasetVersionId: (v) => (v ? null : 'Please select a ready dataset snapshot'),
-    },
-  })
+  useEffect(() => {
+    if (prefill) setName(`${prefill.name} (copy)`)
+  }, [prefill])
 
-  const handleSubmit = (formValues: typeof form.values) => {
-    if (!backend) return
+  const classCount = project.dataset?.classes?.length ?? 0
+  const problems: string[] = []
+  if (readyVersions.length === 0) problems.push('Build a snapshot first: there is nothing to train on yet.')
+  else if (!versionId) problems.push('Select a snapshot.')
+  if (!name.trim()) problems.push('Give the run a name.')
+  if (isClassificationTask(project.task) && classCount < 2) problems.push('Define at least 2 classes.')
+  if (!backend) problems.push('No trainer backend is available.')
+
+  const params = backend?.params ?? []
+  const quick = useMemo(() => {
+    const named = QUICK_PARAM_NAMES.map((n) => params.find((p) => p.name === n)).filter((p) => !!p)
+    return named.length > 0 ? named : params.filter((p) => p.type !== 'bool').slice(0, 2)
+  }, [params])
+
+  const selectedVersion = readyVersions.find((v) => v.id === versionId)
+  const modelInfo = backend?.models.find((m) => m.id === modelId)
+  const hasHead = params.some((p) => p.name === 'headLayers')
+  const headLayers = Number(values.headLayers ?? 0)
+  const blockBadges = [
+    values.imageSize != null ? `pre · ${values.imageSize}px` : null,
+    values.maxSequenceLength != null ? `pre · ${values.maxSequenceLength} tokens` : null,
+    selectedVersion?.augmentationConfig ? `augment · ${selectedVersion.augmentationConfig.ops.length} ops` : null,
+    modelInfo ? `${modelInfo.label}${values.freezeBackbone === true ? ' · frozen' : ''}` : null,
+    hasHead ? (headLayers === 0 ? 'head · linear' : `head · ${headLayers}×${values.headWidth ?? 256}`) : null,
+    values.useClassWeights === true ? 'class weights' : null,
+  ].filter((b): b is string => !!b)
+
+  const launch = () => {
+    if (!backend || !versionId) return
     onStartTraining({
-      name: formValues.name,
-      datasetVersionId: formValues.datasetVersionId,
+      name: name.trim(),
+      datasetVersionId: versionId,
       backend: backend.id,
       hyperparameters: { ...values, ...(modelId && { [backend.modelParamName]: modelId }) },
     })
@@ -90,70 +146,110 @@ export function CreateRunPanel({ project, onStartTraining }: CreateRunPanelProps
     )
   }
 
+  const setValue = (n: string, v: unknown) => setValues((prev) => ({ ...prev, [n]: v }))
+
   return (
-    <Card withBorder p="lg" radius="md">
-      <form onSubmit={form.onSubmit(handleSubmit)}>
-        <Stack gap="lg">
-          <Group gap="sm">
-            <BrainIcon size={24} />
-            <Title order={4}>New Training Run</Title>
-          </Group>
-
-          <TextInput label="Run Name" placeholder="e.g. ResNet-18 baseline" {...form.getInputProps('name')} />
-
-          <Select
-            label="Dataset Snapshot"
-            placeholder={
-              versionOptions.length === 0
-                ? 'No ready snapshots — create one on the Dataset page'
-                : 'Select a snapshot to train on'
-            }
-            data={versionOptions}
-            disabled={versionOptions.length === 0}
-            {...form.getInputProps('datasetVersionId')}
-            searchable
+    <div className="flex flex-col gap-3">
+      <ConfigHeader
+        project={project}
+        nameLabel="Run name"
+        namePlaceholder="e.g. baseline"
+        name={name}
+        onNameChange={setName}
+        versionId={versionId}
+        onVersionChange={setVersionId}
+        backends={backends}
+        backendId={backendId}
+        onBackendChange={setBackendId}
+        right={
+          <SegmentedControl
+            size="xs"
+            value={level}
+            onChange={(v) => setLevel(v as Level)}
+            data={[
+              { value: 'simple', label: 'Simple' },
+              { value: 'advanced', label: 'Advanced' },
+            ]}
           />
+        }
+      />
 
-          {backends.length > 1 && (
-            <Select
-              label="Trainer Backend"
-              data={backends.map((b) => ({ value: b.id, label: b.label }))}
-              value={backendId}
-              onChange={setBackendId}
-              allowDeselect={false}
-            />
-          )}
-
-          {backend && backend.models.length > 0 && (
-            <Select
-              label="Model"
-              description={backend.models.find((m) => m.id === modelId)?.description || undefined}
-              data={backend.models.map((m) => ({ value: m.id, label: m.label }))}
-              value={modelId}
-              onChange={setModelId}
-              allowDeselect={false}
-            />
-          )}
-
+      {level === 'simple' ? (
+        <>
           {backend && (
-            <ParamFields
-              specs={backend.params}
+            <BlockBuilder
+              backend={backend}
               values={values}
-              onChange={(name, v) => setValues((prev) => ({ ...prev, [name]: v }))}
+              onValue={setValue}
+              modelId={modelId}
+              onModelChange={setModelId}
+              version={selectedVersion}
             />
           )}
+          <Paper p="sm">
+            <SectionLabel mb="xs">Quick settings</SectionLabel>
+            <Group gap="lg" align="flex-end">
+              {quick.map((spec) =>
+                spec.type === 'choice' && (spec.choices?.length ?? 0) <= 6 && spec.default != null ? (
+                  <div key={spec.name}>
+                    <Text size="xs" fw={500} mb={4}>
+                      {spec.label}
+                    </Text>
+                    <SegmentedControl
+                      size="xs"
+                      value={values[spec.name] != null ? String(values[spec.name]) : String(spec.default)}
+                      onChange={(v) => setValue(spec.name, v)}
+                      data={spec.choices ?? []}
+                    />
+                  </div>
+                ) : (
+                  <div key={spec.name} style={{ width: 130 }}>
+                    <ParamField spec={spec} value={values[spec.name]} onChange={(v) => setValue(spec.name, v)} />
+                  </div>
+                ),
+              )}
+              <Text size="xs" c="dimmed" maw={360}>
+                Everything else uses sensible defaults. Open <b>Advanced</b> for all {params.length} hyperparameters.
+              </Text>
+            </Group>
+          </Paper>
+        </>
+      ) : (
+        <>
+          <Paper p="sm">
+            <Group justify="space-between" wrap="nowrap">
+              <Group gap={6}>
+                <SectionLabel>Architecture</SectionLabel>
+                {blockBadges.map((b) => (
+                  <Badge key={b} variant="light" color="gray" tt="none">
+                    {b}
+                  </Badge>
+                ))}
+              </Group>
+              <Button size="compact-xs" variant="default" onClick={() => setLevel('simple')}>
+                Edit blocks in Simple
+              </Button>
+            </Group>
+          </Paper>
+          {groupParams(params).map(({ group, specs }) => (
+            <Paper key={group} p="sm">
+              <SectionLabel mb="xs">{group}</SectionLabel>
+              <SimpleGrid cols={{ base: 2, md: 3 }} spacing="sm" style={{ alignItems: 'end' }}>
+                {specs.map((spec) => (
+                  <ParamField
+                    key={spec.name}
+                    spec={spec}
+                    value={values[spec.name]}
+                    onChange={(v) => setValue(spec.name, v)}
+                  />
+                ))}
+              </SimpleGrid>
+            </Paper>
+          ))}
+        </>
+      )}
 
-          <Group justify="flex-end">
-            <Button
-              type="submit"
-              leftSection={<BrainIcon size={16} />}
-              disabled={versionOptions.length === 0 || !backend}
-            >
-              Start Training
-            </Button>
-          </Group>
-        </Stack>
-      </form>
-    </Card>
+      <LaunchBar problems={problems} label="Launch run" loading={loading} onLaunch={launch} />
+    </div>
   )
 }

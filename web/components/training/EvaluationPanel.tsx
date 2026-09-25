@@ -27,6 +27,7 @@ import {
 } from '@mantine/core'
 import { ChartBarIcon, MagnifyingGlassIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { DataTable, type DataTableColumn, EmptyState } from '@public/components/ui'
+import { heatmapColor } from '@public/lib/palette'
 import { useRunEvaluation } from '@public/lib/queries'
 import type { EvaluationReport, Modality, PerClassStats, RunEvaluation, TrainingRunSummary } from '@public/store/types'
 import { Fragment, useState } from 'react'
@@ -88,11 +89,10 @@ function ConfusionMatrix({ report }: { report: EvaluationReport }) {
                       justifyContent: 'center',
                       borderRadius: 4,
                       fontSize: 11,
-                      backgroundColor: isDiagonal
-                        ? `rgba(34, 139, 87, ${0.15 + intensity * 0.7})`
-                        : value > 0
-                          ? `rgba(224, 49, 49, ${0.1 + intensity * 0.6})`
-                          : 'var(--mantine-color-default-hover)',
+                      backgroundColor: heatmapColor(intensity),
+                      color: intensity > 0.7 ? '#0a0f1c' : '#e2e8f0',
+                      // The diagonal is the correct predictions; outline it since colour alone is not the cue.
+                      outline: isDiagonal ? '1px solid rgba(226, 232, 240, 0.35)' : undefined,
                     }}
                   >
                     {value > 0 ? value : ''}

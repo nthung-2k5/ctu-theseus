@@ -9,25 +9,15 @@
  * more interesting axes) and is left out of this form; every `int`/`float`/`choice` knob is.
  */
 
-import {
-  Button,
-  Card,
-  Checkbox,
-  Group,
-  MultiSelect,
-  NumberInput,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-  Title,
-} from '@mantine/core'
-import { useForm } from '@mantine/form'
+import { Checkbox, Group, MultiSelect, NumberInput, Paper, Select, SimpleGrid, Text, TextInput } from '@mantine/core'
 import { FlaskIcon } from '@phosphor-icons/react'
+import { groupParams, SectionLabel } from '@public/components/ui'
 import type { ParamSpec } from '@public/lib/api/generated/models'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
+import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail, SweepSearchSpace, SweepStrategyValue } from '@public/store/types'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { ConfigHeader, LaunchBar } from './ConfigHeader'
 
 export interface SweepStartConfig {
   name: string
@@ -61,9 +51,10 @@ function SweepKnobField({
 }) {
   return (
     <Group gap="sm" align="flex-start">
-      <Checkbox mt={30} checked={included} onChange={(e) => onIncludedChange(e.currentTarget.checked)} />
+      <Checkbox size="xs" mt={26} checked={included} onChange={(e) => onIncludedChange(e.currentTarget.checked)} />
       {spec.type === 'choice' ? (
         <MultiSelect
+          size="xs"
           flex={1}
           label={`${spec.label} candidates`}
           data={spec.choices ?? []}
@@ -73,6 +64,7 @@ function SweepKnobField({
         />
       ) : (
         <TextInput
+          size="xs"
           flex={1}
           label={`${spec.label} candidates`}
           description={spec.type === 'int' ? 'Comma-separated integers' : 'Comma-separated numbers'}
@@ -88,13 +80,18 @@ function SweepKnobField({
 export function CreateSweepPanel({
   project,
   onStartSweep,
+  loading,
 }: {
   project: ProjectDetail
   onStartSweep: (config: SweepStartConfig) => void
+  loading?: boolean
 }) {
-  const dataset = project.dataset
   const { data } = useListProjectTrainingBackends(project.id)
   const backends = data?.backends ?? []
+
+  const [name, setName] = useState('')
+  const [strategy, setStrategy] = useState<SweepStrategyValue>('grid')
+  const [maxTrials, setMaxTrials] = useState<number | string>(6)
 
   const [backendId, setBackendId] = useState<string | null>(null)
   useEffect(() => {
@@ -115,23 +112,29 @@ export function CreateSweepPanel({
     )
   }, [backend])
 
-  const versionOptions =
-    dataset?.versions
-      ?.filter((v) => v.status === 'ready')
-      .map((v) => ({ value: v.id, label: `${v.versionTag} (${v.itemCount ?? 0} items)` })) ?? []
-
-  const form = useForm({
-    initialValues: { name: '', datasetVersionId: '', strategy: 'grid' as SweepStrategyValue, maxTrials: 6 },
-    validate: {
-      name: (v) => (v.trim().length > 0 ? null : 'Sweep name is required'),
-      datasetVersionId: (v) => (v ? null : 'Please select a ready dataset snapshot'),
-    },
-  })
+  // Only ready snapshots have a parquet to train on.
+  const readyVersions = useMemo(
+    () => (project.dataset?.versions ?? []).filter((v) => v.status === 'ready'),
+    [project.dataset?.versions],
+  )
+  const [versionId, setVersionId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!versionId && readyVersions.length > 0) setVersionId(readyVersions[readyVersions.length - 1].id)
+  }, [versionId, readyVersions])
 
   const includedCount = Object.values(included).filter(Boolean).length
+  const classCount = project.dataset?.classes?.length ?? 0
 
-  const handleSubmit = (values: typeof form.values) => {
-    if (!backend) return
+  const problems: string[] = []
+  if (readyVersions.length === 0) problems.push('Build a snapshot first: there is nothing to train on yet.')
+  else if (!versionId) problems.push('Select a snapshot.')
+  if (!name.trim()) problems.push('Give the sweep a name.')
+  if (isClassificationTask(project.task) && classCount < 2) problems.push('Define at least 2 classes.')
+  if (!backend) problems.push('No trainer backend is available.')
+  if (includedCount === 0) problems.push('Check at least one hyperparameter to search over.')
+
+  const launch = () => {
+    if (!backend || !versionId) return
     const searchSpace: SweepSearchSpace = {}
     for (const spec of sweepableKnobs) {
       if (!included[spec.name]) continue
@@ -143,105 +146,93 @@ export function CreateSweepPanel({
         if (numbers.length > 0) searchSpace[spec.name] = numbers
       }
     }
-
     onStartSweep({
-      name: values.name,
-      datasetVersionId: values.datasetVersionId,
+      name: name.trim(),
+      datasetVersionId: versionId,
       backend: backend.id,
       searchSpace,
-      strategy: values.strategy,
-      maxTrials: values.maxTrials,
+      strategy,
+      maxTrials: Number(maxTrials) || 1,
     })
   }
 
   return (
-    <Card withBorder p="lg" radius="md">
-      <form onSubmit={form.onSubmit(handleSubmit)}>
-        <Stack gap="lg">
-          <Group gap="sm">
-            <FlaskIcon size={24} />
-            <Title order={4}>New Sweep</Title>
-          </Group>
-
-          <Text size="sm" c="dimmed">
-            Check the knobs to search over and list their candidate values. Every combination (grid) or a random sample
-            of combinations (random) is dispatched as its own training run.
-          </Text>
-
-          <TextInput label="Sweep Name" placeholder="e.g. Encoder + LR search" {...form.getInputProps('name')} />
-
-          <Select
-            label="Dataset Snapshot"
-            placeholder={
-              versionOptions.length === 0
-                ? 'No ready snapshots — create one on the Dataset page'
-                : 'Select a snapshot to train on'
-            }
-            data={versionOptions}
-            disabled={versionOptions.length === 0}
-            {...form.getInputProps('datasetVersionId')}
-            searchable
-          />
-
-          {backends.length > 1 && (
+    <div className="flex flex-col gap-3">
+      <ConfigHeader
+        project={project}
+        nameLabel="Sweep name"
+        namePlaceholder="e.g. encoder + LR search"
+        name={name}
+        onNameChange={setName}
+        versionId={versionId}
+        onVersionChange={setVersionId}
+        backends={backends}
+        backendId={backendId}
+        onBackendChange={setBackendId}
+        extras={
+          <>
             <Select
-              label="Trainer Backend"
-              data={backends.map((b) => ({ value: b.id, label: b.label }))}
-              value={backendId}
-              onChange={setBackendId}
-              allowDeselect={false}
-            />
-          )}
-
-          <Group grow align="flex-end">
-            <Select
+              size="xs"
               label="Strategy"
-              data={[
-                { value: 'grid', label: 'Grid — every combination' },
-                { value: 'random', label: 'Random — sample combinations' },
-              ]}
+              w={230}
               allowDeselect={false}
-              {...form.getInputProps('strategy')}
+              data={[
+                { value: 'grid', label: 'Grid: every combination' },
+                { value: 'random', label: 'Random: sample combinations' },
+              ]}
+              value={strategy}
+              onChange={(v) => v && setStrategy(v as SweepStrategyValue)}
             />
             <NumberInput
-              label="Max Trials"
-              description="Caps how many runs this sweep can dispatch"
+              size="xs"
+              label="Max trials"
+              w={100}
               min={1}
               max={50}
-              {...form.getInputProps('maxTrials')}
+              allowDecimal={false}
+              value={maxTrials}
+              onChange={setMaxTrials}
             />
-          </Group>
+          </>
+        }
+      />
 
-          <Stack gap="sm">
-            {sweepableKnobs.map((spec) => (
-              <SweepKnobField
-                key={spec.name}
-                spec={spec}
-                included={!!included[spec.name]}
-                onIncludedChange={(v) => setIncluded((prev) => ({ ...prev, [spec.name]: v }))}
-                value={candidates[spec.name] ?? (spec.type === 'choice' ? [] : '')}
-                onValueChange={(v) => setCandidates((prev) => ({ ...prev, [spec.name]: v }))}
-              />
-            ))}
-          </Stack>
+      <Paper p="sm">
+        <SectionLabel mb={4}>Search space</SectionLabel>
+        <Text size="xs" c="dimmed" mb="sm">
+          Check the knobs to search over and list their candidate values. Every combination (grid) or a random sample of
+          combinations (random) is dispatched as its own training run.
+        </Text>
+        <div className="flex flex-col gap-3">
+          {groupParams(sweepableKnobs).map(({ group, specs }) => (
+            <div key={group}>
+              <Text size="xs" fw={500} mb={6}>
+                {group}
+              </Text>
+              <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
+                {specs.map((spec) => (
+                  <SweepKnobField
+                    key={spec.name}
+                    spec={spec}
+                    included={!!included[spec.name]}
+                    onIncludedChange={(v) => setIncluded((prev) => ({ ...prev, [spec.name]: v }))}
+                    value={candidates[spec.name] ?? (spec.type === 'choice' ? [] : '')}
+                    onValueChange={(v) => setCandidates((prev) => ({ ...prev, [spec.name]: v }))}
+                  />
+                ))}
+              </SimpleGrid>
+            </div>
+          ))}
+        </div>
+      </Paper>
 
-          {includedCount === 0 && (
-            <Text size="xs" c="red">
-              Check at least one hyperparameter to search over.
-            </Text>
-          )}
-
-          <Group justify="flex-end">
-            <Button
-              type="submit"
-              leftSection={<FlaskIcon size={16} />}
-              disabled={versionOptions.length === 0 || includedCount === 0 || !backend}
-            >
-              Start Sweep
-            </Button>
-          </Group>
-        </Stack>
-      </form>
-    </Card>
+      <LaunchBar
+        problems={problems}
+        label="Launch sweep"
+        icon={<FlaskIcon size={15} />}
+        loading={loading}
+        onLaunch={launch}
+      />
+    </div>
   )
 }

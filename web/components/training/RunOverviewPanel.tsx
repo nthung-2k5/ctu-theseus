@@ -6,7 +6,8 @@
  * queue time and don't change as the run progresses.
  */
 
-import { Badge, Card, Group, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'
+import { Badge, Group, Paper, SimpleGrid, Skeleton, Stack, Table, Text } from '@mantine/core'
+import { SectionLabel, StatusBadge } from '@public/components/ui'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
 import { useTrainingRunDetail } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
@@ -44,16 +45,24 @@ function formatDuration(ms: number): string {
   return parts.join(' ')
 }
 
-function InfoStat({ label, value }: { label: string; value: ReactNode }) {
+function KeyValueTable({ rows }: { rows: [string, ReactNode][] }) {
   return (
-    <div>
-      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-        {label}
-      </Text>
-      <Text size="sm" fw={500}>
-        {value}
-      </Text>
-    </div>
+    <Table verticalSpacing={4} withRowBorders={false} className="tnum">
+      <Table.Tbody>
+        {rows.map(([label, value]) => (
+          <Table.Tr key={label}>
+            <Table.Td w="45%">
+              <Text size="xs" c="dimmed">
+                {label}
+              </Text>
+            </Table.Td>
+            <Table.Td>
+              <Text size="sm">{value}</Text>
+            </Table.Td>
+          </Table.Tr>
+        ))}
+      </Table.Tbody>
+    </Table>
   )
 }
 
@@ -89,33 +98,31 @@ export function RunOverviewPanel({
   const configEntries = hyperparameters ? Object.entries(hyperparameters).filter(([key]) => key !== 'encoderId') : []
 
   return (
-    <Card withBorder p="lg" radius="md">
-      <Stack gap="lg">
-        <Group justify="space-between">
-          <Title order={4}>{run.name}</Title>
-          <Badge variant="light" color={STATUS_COLORS[run.status] ?? 'gray'} tt="capitalize">
-            {run.status}
-          </Badge>
-        </Group>
-
-        <Stack gap="sm">
-          <InfoStat label="Created" value={new Date(run.createdAt).toLocaleString()} />
-          <InfoStat label="Started" value={startedAt ? startedAt.toLocaleString() : '—'} />
-          <InfoStat label="Completed" value={completedAt ? completedAt.toLocaleString() : '—'} />
-          <InfoStat label="Duration" value={duration ?? '—'} />
+    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
+      <Paper p="md">
+        <Stack gap="xs">
+          <Group justify="space-between">
+            <SectionLabel>Run</SectionLabel>
+            <StatusBadge value={run.status} colorMap={STATUS_COLORS} />
+          </Group>
+          <KeyValueTable
+            rows={[
+              ['Created', new Date(run.createdAt).toLocaleString()],
+              ['Started', startedAt ? startedAt.toLocaleString() : '—'],
+              ['Completed', completedAt ? completedAt.toLocaleString() : '—'],
+              ['Duration', duration ?? '—'],
+              [
+                'Model',
+                isLoading ? <Skeleton key="m" height={16} width={140} /> : <Badge key="model">{modelLabel}</Badge>,
+              ],
+            ]}
+          />
         </Stack>
+      </Paper>
 
-        <div>
-          <Text size="sm" fw={600} mb="xs">
-            Model
-          </Text>
-          {isLoading ? <Skeleton height={20} width={160} /> : <Badge variant="light">{modelLabel}</Badge>}
-        </div>
-
-        <div>
-          <Text size="sm" fw={600} mb="xs">
-            Configuration
-          </Text>
+      <Paper p="md">
+        <Stack gap="xs">
+          <SectionLabel>Hyperparameters</SectionLabel>
           {isLoading ? (
             <Skeleton height={60} />
           ) : configEntries.length === 0 ? (
@@ -123,14 +130,12 @@ export function RunOverviewPanel({
               No configuration recorded for this run.
             </Text>
           ) : (
-            <SimpleGrid cols={2} spacing="lg">
-              {configEntries.map(([key, value]) => (
-                <InfoStat key={key} label={HYPERPARAM_LABELS[key] ?? key} value={formatHyperparamValue(value)} />
-              ))}
-            </SimpleGrid>
+            <KeyValueTable
+              rows={configEntries.map(([key, value]) => [HYPERPARAM_LABELS[key] ?? key, formatHyperparamValue(value)])}
+            />
           )}
-        </div>
-      </Stack>
-    </Card>
+        </Stack>
+      </Paper>
+    </SimpleGrid>
   )
 }
