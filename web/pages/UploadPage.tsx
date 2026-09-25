@@ -1,35 +1,39 @@
 /**
- * Upload page – gets raw data into the project: file drop for vision/audio
- * tasks, inline text entry for text tasks, CSV import for tabular tasks.
+ * Upload page – gets raw data into the project.
  *
- * The left column only *stages* items; the right column previews the whole
- * batch, with each item's split and class editable, and owns the Upload
- * button that actually sends it. Once uploaded, items land in the mutable
- * draft ready for snapshotting on the Dataset page. This page doesn't browse
- * the pool itself — see DatasetPage.
+ * File tasks (vision/audio) get a filesystem view: class folders holding
+ * train/validation/test folders, filled by dropping files, folders or archives
+ * (see FileTreeView). Text tasks type items inline and tabular tasks import a
+ * CSV; for those the left column *stages* items and the right column previews
+ * the batch, with each item's split and class editable, and owns the Upload
+ * button that actually sends it.
+ *
+ * Either way, nothing is sent until the user presses Upload, and uploaded
+ * items land in the mutable draft ready for snapshotting on the Dataset page.
+ * This page doesn't browse the pool itself — see DatasetPage.
  */
 
-import { Box, Button, Card, Group, Select, Stack, Text, Textarea, ThemeIcon, Title } from '@mantine/core'
-import { Dropzone } from '@mantine/dropzone'
-import { CloudArrowUpIcon, UploadSimpleIcon } from '@phosphor-icons/react'
+import { Button, Group, Paper, Select, Stack, Textarea } from '@mantine/core'
+import { FileTreeView } from '@public/components/dataset/FileTreeView'
+import { FileUploadBar } from '@public/components/dataset/FileUploadBar'
 import { TabularCsvImporter } from '@public/components/dataset/TabularCsvImporter'
 import { UploadQueuePanel } from '@public/components/dataset/UploadQueuePanel'
-import { PageHeader } from '@public/components/ui'
+import { PageHeader, SectionLabel } from '@public/components/ui'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
-import { formatBytes } from '@public/lib/format'
 import { projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
+import { useFileStaging } from '@public/lib/upload/useFileStaging'
 import { type StagedDraft, useUploadQueue } from '@public/lib/uploadQueue'
 import type { LabelClass, SplitType } from '@public/store/types'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 const routeApi = getRouteApi('/_app/project/$projectId/upload')
 
 /**
- * Both entry panels pick a split/class up front purely as the *default* for
- * whatever they stage next — the preview pane is where these get corrected,
+ * The text entry panel picks a split/class up front purely as the *default* for
+ * whatever it stages next — the preview pane is where these get corrected,
  * so nothing here is a final assignment.
  */
 function StagingDefaults({
@@ -66,57 +70,6 @@ function StagingDefaults({
         />
       )}
     </Group>
-  )
-}
-
-/* ── File staging panel (vision/audio tasks) ── */
-function FileStagePanel({
-  accept,
-  classes,
-  onStage,
-}: {
-  accept?: string[]
-  classes: LabelClass[]
-  onStage: (drafts: StagedDraft[]) => void
-}) {
-  const [split, setSplit] = useState<SplitType>('train')
-  const [classId, setClassId] = useState<string | null>(null)
-
-  const handleDrop = (files: File[]) =>
-    onStage(
-      files.map((file) => ({
-        kind: 'file' as const,
-        name: file.name,
-        detail: formatBytes(file.size),
-        split,
-        classId,
-        file,
-      })),
-    )
-
-  return (
-    <Stack gap="sm" className="h-full">
-      <StagingDefaults
-        split={split}
-        onSplitChange={setSplit}
-        classId={classId}
-        onClassChange={setClassId}
-        classes={classes}
-      />
-      <Dropzone onDrop={handleDrop} accept={accept} radius="md" className="flex-1 grid place-items-center">
-        <Group justify="center" gap="md" py="xl" style={{ pointerEvents: 'none' }}>
-          <ThemeIcon size={44} variant="light" color="primary" radius="xl">
-            <CloudArrowUpIcon size={24} />
-          </ThemeIcon>
-          <div>
-            <Text fw={600}>Drop files here or click to browse</Text>
-            <Text size="xs" c="dimmed">
-              Nothing is uploaded until you review the batch and press Upload.
-            </Text>
-          </div>
-        </Group>
-      </Dropzone>
-    </Stack>
   )
 }
 
@@ -176,48 +129,64 @@ export function UploadPage() {
   } = useSuspenseQuery(projectDetailQueryOptions(projectId))
 
   const descriptor = getTaskDescriptor(activeProject.task)
-  const { data: classesData } = useLabelClasses(descriptor.annotation.requiresLabelClasses ? projectId : undefined)
+  const taskUsesClasses = descriptor.annotation.requiresLabelClasses
+  const { data: classesData } = useLabelClasses(taskUsesClasses ? projectId : undefined)
   // Tasks that don't label with classes (regression, captioning, ASR, generation) get no class controls at
   // all, whatever classes the project happens to hold, so no class can be attached to their uploads.
-  const classes = descriptor.annotation.requiresLabelClasses ? (classesData?.classes ?? []) : []
+  const classes = useMemo(
+    () => (taskUsesClasses ? (classesData?.classes ?? []) : []),
+    [taskUsesClasses, classesData?.classes],
+  )
+  const classRefs = useMemo(() => classes.map((c) => ({ classId: c.classId, name: c.name })), [classes])
 
+  const isFileTask = descriptor.itemSpec.payload === 'file'
   const queue = useUploadQueue()
+  const staging = useFileStaging({ accept: descriptor.itemSpec.accept, taskUsesClasses, classes: classRefs })
+  const [uploadingFiles, setUploadingFiles] = useState(false)
 
   return (
-    <Box
-      style={{
-        height:
-          'calc(100vh - (var(--app-shell-header-offset, 0rem) + var(--app-shell-padding) + var(--app-shell-footer-offset, 0rem) + var(--app-shell-padding)))',
-      }}
+    <div
+      className="flex flex-col gap-3 p-3"
+      style={{ height: 'calc(100vh - var(--app-shell-header-offset, 0rem))', overflow: 'hidden' }}
     >
-      <Stack gap="xl" className="h-full" style={{ overflow: 'hidden' }}>
-        <PageHeader
-          title="Upload"
-          description="Stage items, review their split and class in the preview, then upload. Manage splits, classes, and snapshots from the Dataset page."
-        />
+      <PageHeader
+        title="Upload"
+        description={
+          isFileTask
+            ? 'Drop files, folders or archives into class and split folders, review them, then upload. Manage splits, classes and snapshots from the Dataset page.'
+            : 'Stage items, review their split and class in the preview, then upload. Manage splits, classes and snapshots from the Dataset page.'
+        }
+      />
 
-        <div className="grid gap-6 md:grid-cols-[30rem_1fr] overflow-hidden flex-1">
-          <Card withBorder p="lg" radius="md">
-            <Group gap="sm" mb="md">
-              <ThemeIcon size="md" variant="light" color="primary">
-                <UploadSimpleIcon size={18} />
-              </ThemeIcon>
-              <Title order={5}>Add items</Title>
-            </Group>
-            {descriptor.itemSpec.payload === 'file' && (
-              <FileStagePanel accept={descriptor.itemSpec.accept} classes={classes} onStage={queue.stage} />
-            )}
+      {isFileTask ? (
+        <div className="flex flex-col gap-3" style={{ flex: 1, minHeight: 0 }}>
+          <FileUploadBar
+            projectId={projectId}
+            staging={staging}
+            taskUsesClasses={taskUsesClasses}
+            onUploadingChange={setUploadingFiles}
+          />
+          <Paper p="md" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <FileTreeView
+              staging={staging}
+              classes={classes}
+              taskUsesClasses={taskUsesClasses}
+              accept={descriptor.itemSpec.accept}
+              disabled={uploadingFiles}
+            />
+          </Paper>
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-[30rem_1fr] overflow-hidden flex-1">
+          <Paper p="md">
+            <SectionLabel mb="sm">Add items</SectionLabel>
             {descriptor.itemSpec.payload === 'inline_text' && (
               <TextStagePanel classes={classes} onStage={queue.stage} />
             )}
             {descriptor.itemSpec.payload === 'record' && (
-              <TabularCsvImporter
-                requiresLabelClasses={descriptor.annotation.requiresLabelClasses}
-                classes={classes}
-                onStage={queue.stage}
-              />
+              <TabularCsvImporter requiresLabelClasses={taskUsesClasses} classes={classes} onStage={queue.stage} />
             )}
-          </Card>
+          </Paper>
 
           <UploadQueuePanel
             projectId={projectId}
@@ -229,7 +198,7 @@ export function UploadPage() {
             onClear={queue.clear}
           />
         </div>
-      </Stack>
-    </Box>
+      )}
+    </div>
   )
 }

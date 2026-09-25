@@ -1,22 +1,19 @@
 /**
- * The Upload page's right-hand pane: everything staged but not yet sent.
+ * The Upload page's right-hand pane for text and tabular tasks: everything staged but not yet sent.
  *
- * Uploading used to fire the moment files hit the dropzone, so a wrong split
- * or class had to be repaired afterwards on the Dataset page. Here the split
- * and class of every staged item stay editable — per row, or across the whole
- * batch — until the user presses Upload.
+ * The split and class of every staged item stay editable — per row, or across the whole batch — until the
+ * user presses Upload, so a wrong split or class never has to be repaired afterwards on the Dataset page.
+ * Rows go out through POST /projects/:id/items, which is per-item. (File tasks don't come through here; see
+ * FileTreeView and FileUploadBar.)
  *
- * One wrinkle drives the send logic: POST /projects/:id/upload takes a single
- * split + classId for the whole request, so per-row overrides go out as one
- * request per distinct (split, class) pair. Inline text and CSV rows use POST
- * /projects/:id/items instead, which is already per-item.
+ * The table is virtualized: a CSV import can stage thousands of rows, and every row carries its own selects.
  */
 
-import { ActionIcon, Badge, Box, Button, Group, Select, Stack, Text, ThemeIcon, Title, Tooltip } from '@mantine/core'
+import { ActionIcon, Badge, Button, Group, Select, Stack, Text, ThemeIcon, Title, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ListChecksIcon, TrashIcon, UploadSimpleIcon, XIcon } from '@phosphor-icons/react'
-import { DataTable, type DataTableColumn } from '@public/components/ui'
-import { createItems, uploadItems } from '@public/lib/api/generated/datasets/datasets'
+import { type VirtualColumn, VirtualDataTable } from '@public/components/ui'
+import { createItems } from '@public/lib/api/generated/datasets/datasets'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
 import { invalidateProjectScope } from '@public/lib/queries'
 import type { StagedEdit, StagedItem } from '@public/lib/uploadQueue'
@@ -24,7 +21,7 @@ import type { LabelClass, SplitType } from '@public/store/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
-/** The `items.post` payload for one non-file staged item. */
+/** The `items.post` payload for one staged item. */
 function toItemPayload(item: StagedItem) {
   const annotations =
     item.targetValue != null
@@ -76,43 +73,12 @@ export function UploadQueuePanel({
 
   const upload = useMutation({
     mutationFn: async () => {
-      let uploaded = 0
-      let failed = 0
-
-      const groups = new Map<string, StagedItem[]>()
-      for (const item of items) {
-        if (!item.file) continue
-        const key = `${item.split}|${item.classId ?? ''}`
-        const group = groups.get(key)
-        if (group) group.push(item)
-        else groups.set(key, [item])
+      try {
+        const data = await createItems(projectId, { items: items.map(toItemPayload) })
+        return { uploaded: data.created.length, failed: data.failed.length }
+      } catch {
+        return { uploaded: 0, failed: items.length }
       }
-
-      for (const group of groups.values()) {
-        try {
-          await uploadItems(projectId, {
-            split: group[0].split,
-            classId: group[0].classId ?? undefined,
-            files: group.map((item) => item.file as File),
-          })
-          uploaded += group.length
-        } catch {
-          failed += group.length
-        }
-      }
-
-      const recordItems = items.filter((item) => !item.file)
-      if (recordItems.length > 0) {
-        try {
-          const data = await createItems(projectId, { items: recordItems.map(toItemPayload) })
-          uploaded += data.created.length
-          failed += data.failed.length
-        } catch {
-          failed += recordItems.length
-        }
-      }
-
-      return { uploaded, failed }
     },
     onSuccess: ({ uploaded, failed }) => {
       invalidateProjectScope(queryClient, projectId)
@@ -133,12 +99,12 @@ export function UploadQueuePanel({
     },
   })
 
-  const columns: DataTableColumn<StagedItem>[] = [
+  const columns: VirtualColumn<StagedItem>[] = [
     {
       key: 'item',
       header: 'Item',
       render: (item) => (
-        <Stack gap={0} maw={260}>
+        <Stack gap={0}>
           <Text size="xs" fw={500} truncate>
             {item.name}
           </Text>
@@ -153,11 +119,11 @@ export function UploadQueuePanel({
     {
       key: 'split',
       header: 'Split',
-      fit: true,
+      width: 130,
       render: (item) => (
         <Select
           size="xs"
-          w={130}
+          w="100%"
           data={SPLIT_OPTIONS}
           value={item.split}
           onChange={(value) => onEdit(item.id, { split: (value ?? 'train') as SplitType })}
@@ -171,11 +137,11 @@ export function UploadQueuePanel({
           {
             key: 'class',
             header: 'Class',
-            fit: true,
+            width: 150,
             render: (item: StagedItem) => (
               <Select
                 size="xs"
-                w={150}
+                w="100%"
                 placeholder="Unassigned"
                 data={classOptions}
                 value={item.classId}
@@ -193,7 +159,7 @@ export function UploadQueuePanel({
           {
             key: 'target',
             header: 'Target',
-            fit: true,
+            width: 80,
             render: (item: StagedItem) => <Text size="xs">{item.targetValue ?? '—'}</Text>,
           },
         ]
@@ -201,7 +167,7 @@ export function UploadQueuePanel({
     {
       key: 'remove',
       header: '',
-      fit: true,
+      width: 32,
       render: (item) => (
         <ActionIcon
           size="sm"
@@ -303,14 +269,14 @@ export function UploadQueuePanel({
         </Group>
       )}
 
-      <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        <DataTable
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <VirtualDataTable
           columns={columns}
           data={items}
           getRowKey={(item) => item.id}
           emptyMessage="Nothing staged yet — add items on the left, then review each one's split and class here before uploading."
         />
-      </Box>
+      </div>
     </Stack>
   )
 }
