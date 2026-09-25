@@ -70,7 +70,7 @@ bunx biome check .                           # lint/format from repo root
   under `snapshots/{versionId}/augmented/`, pool dedup lookups must filter `source_item_id IS NULL`, and
   they are deleted with their snapshot. There is no augmentation in a trainer backend's compiled config.
 - **Job handlers must stay fast and idempotent.** `theseus/jobs/dispatcher.py` claims work off the
-  domain tables themselves (`training_runs`, `model_exports`, `inference_jobs` — see
+  domain tables themselves (`training_runs`, `model_exports` — see
   `README.md`'s "Jobs" section) with a guarded compare-and-swap
   (`UPDATE ... WHERE status = ... RETURNING`); zero rows means someone else already moved the row
   on. Follow that same pattern for any new job kind rather than doing the follow-up work inline in

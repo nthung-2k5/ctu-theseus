@@ -18,9 +18,6 @@ theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for verify scripts
-  {runId}/predictions/{inferenceId}.csv      batch inference results
-theseus-uploads/
-  inference/{inferenceId}/input{ext}         inference inputs that outlive the request
 """
 
 import hashlib
@@ -44,7 +41,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-BUCKETS = (C.BUCKET_DATASETS, C.BUCKET_TRAINING, C.BUCKET_MODELS, C.BUCKET_UPLOADS)
+BUCKETS = (C.BUCKET_DATASETS, C.BUCKET_TRAINING, C.BUCKET_MODELS)
 
 
 @lru_cache
@@ -137,14 +134,6 @@ def bundle_key(run_id: str, export_id: str) -> str:
 
 def expected_sample_key(run_id: str) -> str:
     return f"{run_id}/expected.json"
-
-
-def batch_inference_result_key(run_id: str, inference_id: str) -> str:
-    return f"{run_id}/predictions/{inference_id}.csv"
-
-
-def inference_upload_key(inference_id: str, ext: str) -> str:
-    return f"inference/{inference_id}/input{ext}"
 
 
 def s3fs_path(bucket: str, key: str) -> str:

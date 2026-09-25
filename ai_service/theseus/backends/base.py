@@ -98,7 +98,7 @@ class OutputSpec:
 
 
 class LoadedModel(ABC):
-    """A trained model resident in memory: the seam `services/model_cache.py`, `jobs/inference.py`,
+    """A trained model resident in memory: the seam `services/model_cache.py`, `services/inference.py`,
     `jobs/export.py` and `services/evaluate.py` use instead of talking to a specific framework."""
 
     input_columns: list[str]

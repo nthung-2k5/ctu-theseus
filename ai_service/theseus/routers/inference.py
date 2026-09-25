@@ -1,33 +1,34 @@
-"""/api/inference: session-authenticated inference (dispatch is asynchronous, results are polled).
+"""/api/inference: session-authenticated inference.
 
-Dispatch inserts a `pending` inference_jobs row and returns 202 + inferenceId; the job runs on the
-inference lane and writes its result straight to that row, so the poll route just reads Postgres.
-Body shape depends on the run task (see get_inference_input_spec): file-backed tasks send `file`;
-text and tabular tasks send `fields`, a JSON-encoded object (multipart form fields cannot carry
-nested objects).
+A prediction runs inside the request and its result is the response: nothing is queued or stored (see
+services/inference.py). Body shape depends on the run task (see get_inference_input_spec): file-backed
+tasks send `file`; text and tabular tasks send `fields`, a JSON-encoded object (multipart form fields
+cannot carry nested objects). Batch scoring takes a CSV and answers with the scored CSV.
 """
 
 import asyncio
-import uuid
 from typing import Annotated
 
-import sqlalchemy as sa
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 
-from theseus import constants as C
-from theseus.db.models import InferenceJob, Project
+from theseus.db.models import Project
 from theseus.deps import RunDep, SessionDep
-from theseus.jobs.inference import spawn_warm
-from theseus.schemas.serving import InferenceAccepted, InferenceJobListResponse, InferenceJobRow, PolledJob
+from theseus.schemas.serving import PredictResponse
 from theseus.services import inference as svc
-from theseus.services import storage
+from theseus.services.inference import spawn_warm
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
 FileField = Annotated[UploadFile | None, File()]
 FieldsField = Annotated[str | None, Form()]
 TopKField = Annotated[int | None, Form(alias="topK", ge=1, le=1000)]
+
+BATCH_CSV_RESPONSES = {
+    200: {
+        "description": "The uploaded rows plus the prediction columns. `X-Row-Count` holds the row count.",
+        "content": {"text/csv": {"schema": {"type": "string"}}},
+    }
+}
 
 
 async def task_of(session, run) -> str:
@@ -37,73 +38,30 @@ async def task_of(session, run) -> str:
     return project.task
 
 
-@router.post("/{run_id}", status_code=202, response_model=InferenceAccepted)
+def csv_response(result: svc.BatchResult) -> Response:
+    return Response(
+        result.csv,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="predictions.csv"',
+            "X-Row-Count": str(result.row_count),
+            "Access-Control-Expose-Headers": "X-Row-Count",
+        },
+    )
+
+
+@router.post("/{run_id}", response_model=PredictResponse)
 async def run_inference(
     run: RunDep, session: SessionDep, file: FileField = None, fields: FieldsField = None, top_k: TopKField = None
-) -> InferenceAccepted:
-    result = await svc.dispatch_inference(
-        session, run, await task_of(session, run), file=file, fields=fields, top_k=top_k
-    )
-    if isinstance(result, svc.DispatchError):
-        raise HTTPException(result.code, result.message)
-    return InferenceAccepted(inference_id=result.inference_id)
+) -> PredictResponse:
+    output = await svc.predict_one(run, await task_of(session, run), file=file, fields=fields, top_k=top_k)
+    return PredictResponse(output=output)
 
 
-@router.post("/{run_id}/batch", status_code=202, response_model=InferenceAccepted)
-async def run_batch_inference(
-    run: RunDep, session: SessionDep, file: Annotated[UploadFile, File()]
-) -> InferenceAccepted:
-    """One CSV row per prediction, scored in a single Ludwig predict call."""
-    result = await svc.dispatch_batch_inference(session, run, await task_of(session, run), file)
-    if isinstance(result, svc.DispatchError):
-        raise HTTPException(result.code, result.message)
-    return InferenceAccepted(inference_id=result.inference_id)
-
-
-@router.get("/{run_id}/jobs", response_model=InferenceJobListResponse)
-async def list_inference_jobs(run: RunDep, session: SessionDep) -> InferenceJobListResponse:
-    jobs = (
-        (
-            await session.execute(
-                sa.select(InferenceJob)
-                .where(InferenceJob.run_id == run.id)
-                .order_by(InferenceJob.created_at.desc(), InferenceJob.id.desc())
-                .limit(50)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return InferenceJobListResponse(
-        jobs=[
-            InferenceJobRow(
-                id=j.id,
-                run_id=j.run_id,
-                status=svc.public_status(j.status),
-                output=j.output,
-                error=j.error,
-                created_at=j.created_at,
-                completed_at=j.completed_at,
-            )
-            for j in jobs
-        ]
-    )
-
-
-@router.get("/{run_id}/jobs/{inference_id}", response_model=PolledJob, response_model_exclude_none=True)
-async def get_inference_job(run: RunDep, inference_id: uuid.UUID, session: SessionDep) -> PolledJob:
-    job = await svc.get_job(session, run.id, inference_id)
-    if job is None:
-        raise HTTPException(404, "Inference job not found for this run")
-    return PolledJob(**svc.polled(job))
-
-
-@router.get("/{run_id}/jobs/{inference_id}/download", include_in_schema=False)
-async def download_inference_result(run: RunDep, inference_id: uuid.UUID, session: SessionDep) -> RedirectResponse:
-    key = svc.batch_result_key(await svc.get_job(session, run.id, inference_id))
-    if key is None:
-        raise HTTPException(404, "Inference job not found for this run, or has no downloadable result")
-    return RedirectResponse(storage.get_download_url(C.BUCKET_MODELS, key), status_code=302)
+@router.post("/{run_id}/batch", response_class=Response, responses=BATCH_CSV_RESPONSES)
+async def run_batch_inference(run: RunDep, session: SessionDep, file: Annotated[UploadFile, File()]) -> Response:
+    """One CSV row per prediction, scored in a single predict call."""
+    return csv_response(await svc.predict_batch(run, await task_of(session, run), file))
 
 
 @router.post("/{run_id}/warm", status_code=202)

@@ -417,6 +417,58 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "classes"
+        ],
+        "summary": "Save Classes",
+        "description": "Replace the whole class list in one transaction: rename, recolor, describe, add and delete.\n\n`classes` is the desired final set:\n  * an entry with `classId` updates that class (name, description, and colour when given);\n  * an entry without one creates a class, or revives a deleted class of the same name;\n  * an active class missing from the list is deleted (soft, like DELETE).\nNames must be unique ignoring case. Renames may swap or reuse names freely, including the name of a\nclass deleted earlier. Concurrent saves serialize on a row lock: the last one wins.",
+        "operationId": "save_classes",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveClassesBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/projects/{project_id}/classes/{class_id}": {
@@ -2179,12 +2231,12 @@
           }
         },
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InferenceAccepted"
+                  "$ref": "#/components/schemas/PredictResponse"
                 }
               }
             }
@@ -2208,7 +2260,7 @@
           "inference"
         ],
         "summary": "Run Batch Inference",
-        "description": "One CSV row per prediction, scored in a single Ludwig predict call.",
+        "description": "One CSV row per prediction, scored in a single predict call.",
         "operationId": "run_batch_inference",
         "parameters": [
           {
@@ -2233,108 +2285,12 @@
           }
         },
         "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InferenceAccepted"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/inference/{run_id}/jobs": {
-      "get": {
-        "tags": [
-          "inference"
-        ],
-        "summary": "List Inference Jobs",
-        "operationId": "list_inference_jobs",
-        "parameters": [
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Run Id"
-            }
-          }
-        ],
-        "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The uploaded rows plus the prediction columns. `X-Row-Count` holds the row count.",
             "content": {
-              "application/json": {
+              "text/csv": {
                 "schema": {
-                  "$ref": "#/components/schemas/InferenceJobListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/inference/{run_id}/jobs/{inference_id}": {
-      "get": {
-        "tags": [
-          "inference"
-        ],
-        "summary": "Get Inference Job",
-        "operationId": "get_inference_job",
-        "parameters": [
-          {
-            "name": "inference_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Inference Id"
-            }
-          },
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Run Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PolledJob"
+                  "type": "string"
                 }
               }
             }
@@ -2588,6 +2544,7 @@
           "v1"
         ],
         "summary": "V1 Predict",
+        "description": "Score one item and return the prediction. 503 + Retry-After when every inference slot is busy.",
         "operationId": "v1_predict",
         "parameters": [
           {
@@ -2611,75 +2568,12 @@
           }
         },
         "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InferenceAccepted"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/predict/{run_id}/sync": {
-      "post": {
-        "tags": [
-          "v1"
-        ],
-        "summary": "V1 Predict Sync",
-        "description": "Dispatch and wait for the result.\n\nA real await rather than a poll loop. asyncio.shield keeps the job running when the wait\ntimes out or the client disconnects: on timeout the caller gets the same 202 + inferenceId as\nbefore and can poll, and a disconnect can never kill a GPU job another poller may be watching.",
-        "operationId": "v1_predict_sync",
-        "parameters": [
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Run Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_v1_predict_sync"
-              }
-            }
-          }
-        },
-        "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SyncPredictResponse"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Not finished in time: poll the returned inferenceId",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SyncPredictResponse"
+                  "$ref": "#/components/schemas/PredictResponse"
                 }
               }
             }
@@ -2703,6 +2597,7 @@
           "v1"
         ],
         "summary": "V1 Predict Batch",
+        "description": "Score every row of a CSV (text and tabular tasks) and return the scored CSV.",
         "operationId": "v1_predict_batch",
         "parameters": [
           {
@@ -2727,65 +2622,12 @@
           }
         },
         "responses": {
-          "202": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InferenceAccepted"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/predict/{run_id}/jobs/{inference_id}": {
-      "get": {
-        "tags": [
-          "v1"
-        ],
-        "summary": "V1 Get Prediction Job",
-        "operationId": "v1_get_prediction_job",
-        "parameters": [
-          {
-            "name": "inference_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Inference Id"
-            }
-          },
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Run Id"
-            }
-          }
-        ],
-        "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The uploaded rows plus the prediction columns. `X-Row-Count` holds the row count.",
             "content": {
-              "application/json": {
+              "text/csv": {
                 "schema": {
-                  "$ref": "#/components/schemas/PolledJob"
+                  "type": "string"
                 }
               }
             }
@@ -3578,48 +3420,6 @@
           "file"
         ],
         "title": "Body_v1_predict_batch"
-      },
-      "Body_v1_predict_sync": {
-        "properties": {
-          "file": {
-            "anyOf": [
-              {
-                "type": "string",
-                "contentMediaType": "application/octet-stream"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File"
-          },
-          "fields": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fields"
-          },
-          "topK": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1000.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Topk"
-          }
-        },
-        "type": "object",
-        "title": "Body_v1_predict_sync"
       },
       "ClassCount": {
         "properties": {
@@ -4874,102 +4674,6 @@
         ],
         "title": "HealthClassCount"
       },
-      "InferenceAccepted": {
-        "properties": {
-          "inferenceId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Inferenceid"
-          }
-        },
-        "type": "object",
-        "required": [
-          "inferenceId"
-        ],
-        "title": "InferenceAccepted"
-      },
-      "InferenceJobListResponse": {
-        "properties": {
-          "jobs": {
-            "items": {
-              "$ref": "#/components/schemas/InferenceJobRow"
-            },
-            "type": "array",
-            "title": "Jobs"
-          }
-        },
-        "type": "object",
-        "required": [
-          "jobs"
-        ],
-        "title": "InferenceJobListResponse"
-      },
-      "InferenceJobRow": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "runId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Runid"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "output": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Createdat"
-          },
-          "completedAt": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completedat"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "runId",
-          "status",
-          "output",
-          "error",
-          "createdAt",
-          "completedAt"
-        ],
-        "title": "InferenceJobRow"
-      },
       "ItemFailure": {
         "properties": {
           "index": {
@@ -5751,6 +5455,17 @@
               }
             ],
             "title": "Choices"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
           }
         },
         "type": "object",
@@ -5763,50 +5478,18 @@
         "title": "ParamSpec",
         "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `theseus.params`."
       },
-      "PolledJob": {
+      "PredictResponse": {
         "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
           "output": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
             "title": "Output"
-          },
-          "rowCount": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rowcount"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
           }
         },
         "type": "object",
         "required": [
-          "status"
+          "output"
         ],
-        "title": "PolledJob",
-        "description": "pending | success (with output) | batch (with rowCount) | failed (with error).\n\nFields that do not apply to a state are omitted from the response (exclude_none), which is\nthe same discriminated shape the gateway returned."
+        "title": "PredictResponse",
+        "description": "One prediction. `output` is one of the framework-neutral shapes in services/predict.py, told\napart by `kind`: classification | regression | text | tokens."
       },
       "ProjectDetail": {
         "properties": {
@@ -6682,6 +6365,75 @@
         ],
         "title": "RunVersionDataset"
       },
+      "SaveClassEntry": {
+        "properties": {
+          "classId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classid"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "uiColorHex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uicolorhex"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "SaveClassEntry",
+        "description": "One class in a batch save. An entry without `class_id` is created (or revives a deleted class)."
+      },
+      "SaveClassesBody": {
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/SaveClassEntry"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Classes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classes"
+        ],
+        "title": "SaveClassesBody",
+        "description": "The whole desired class list. Active classes missing from it are deleted."
+      },
       "SetSplitBody": {
         "properties": {
           "itemIds": {
@@ -7022,56 +6774,6 @@
           "completedAt"
         ],
         "title": "SweepTrial"
-      },
-      "SyncPredictResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "output": {
-            "anyOf": [
-              {},
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output"
-          },
-          "rowCount": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rowcount"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "inferenceId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Inferenceid"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status",
-          "inferenceId"
-        ],
-        "title": "SyncPredictResponse"
       },
       "TabularFeaturesIn": {
         "properties": {

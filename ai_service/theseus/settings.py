@@ -54,7 +54,6 @@ class Settings(BaseSettings):
     # A running training run with no event for this long is presumed hung. Log lines count as
     # events, so this only needs to exceed the longest silent stretch (e.g. dataset preprocessing).
     run_heartbeat_timeout_seconds: int = 900
-    sync_predict_max_wait_seconds: float = 25.0
     # Persisted log rows per run in run_events; the full log always goes to S3 regardless.
     run_log_max_rows: int = 20_000
 

@@ -7,14 +7,12 @@ from datetime import timedelta
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import DatasetVersion, InferenceJob, ModelExport, RunEvent, TrainingRun
+from theseus.db.models import DatasetVersion, ModelExport, RunEvent, TrainingRun
 from theseus.events import InProcessRunEventBus, set_event_writer
 from theseus.events.writer import EventWriter
 from theseus.jobs import abort, queue, reapers
-from theseus.jobs import inference as inference_jobs
 from theseus.jobs.dispatcher import Dispatcher, Lane
 from theseus.jobs.recovery import recover_on_startup
-from theseus.services import storage
 
 
 @pytest.fixture
@@ -25,13 +23,6 @@ async def writer(db):
     yield w
     await w.stop()
     set_event_writer(None)
-
-
-@pytest.fixture
-def deleted_keys(monkeypatch):
-    keys: list[str] = []
-    monkeypatch.setattr(storage, "delete_file", lambda bucket, key: keys.append(key))
-    return keys
 
 
 async def one(db, model, id_):
@@ -130,27 +121,6 @@ async def test_recovery_requeues_exports_with_attempts_left_and_fails_the_rest(d
     assert (await one(db, ModelExport, untouched)).status == "ready"
 
 
-async def test_recovery_only_requeues_inference_whose_input_survived(db, writer, make_inference, deleted_keys):
-    text, _ = await make_inference(status="running", attempt=1)
-    durable, _ = await make_inference(
-        status="running", attempt=1, payload={"kind": "file", "filename": "a.png"}, upload_key="inference/x/input.png"
-    )
-    lost_temp, _ = await make_inference(
-        status="running", attempt=1, payload={"kind": "file", "filename": "b.png", "localPath": "/nonexistent/b.png"}
-    )
-    exhausted, _ = await make_inference(status="running", attempt=3)
-
-    report = await recover_on_startup()
-
-    assert (report.inference_requeued, report.inference_failed) == (2, 2)
-    assert (await one(db, InferenceJob, text)).status == "pending"
-    assert (await one(db, InferenceJob, durable)).status == "pending"
-    for dead in (lost_temp, exhausted):
-        j = await one(db, InferenceJob, dead)
-        assert j.status == "failed" and j.completed_at is not None
-        assert j.error == inference_jobs.GENERIC_FAILURE  # the client never sees internals
-
-
 async def test_recovery_fails_snapshots_left_building(db, writer, make_run):
     rid = await make_run()
     async with db() as s:
@@ -187,40 +157,6 @@ async def test_stale_run_reaper_fails_only_running_runs_that_have_gone_silent(db
     assert (await one(db, TrainingRun, silent)).status == "failed"
     assert (await one(db, TrainingRun, fresh)).status == "running"
     assert (await one(db, TrainingRun, queued)).status == "queued"
-
-
-async def test_stale_pending_inference_is_failed_and_its_upload_deleted(db, make_inference, deleted_keys):
-    old, _ = await make_inference(upload_key="inference/old/input.png", payload={"kind": "file", "filename": "x"})
-    recent, _ = await make_inference()
-    async with db() as s:
-        await s.execute(
-            sa.update(InferenceJob).where(InferenceJob.id == old).values(created_at=sa.func.now() - timedelta(hours=2))
-        )
-        await s.commit()
-
-    assert await reapers.stale_pending_inference() == 1
-    assert (await one(db, InferenceJob, old)).status == "failed"
-    assert (await one(db, InferenceJob, recent)).status == "pending"
-    assert deleted_keys == ["inference/old/input.png"]
-    assert (await one(db, InferenceJob, old)).upload_key is None
-
-
-async def test_terminal_uploads_are_reaped_by_row_state_never_by_age(db, make_inference, deleted_keys):
-    done, _ = await make_inference(status="success", upload_key="inference/done/input.png", payload={"kind": "file"})
-    running, _ = await make_inference(
-        status="running", upload_key="inference/live/input.csv", payload={"kind": "batch"}, attempt=1
-    )
-    async with db() as s:  # the in-flight batch job is old, but its input must survive
-        await s.execute(
-            sa.update(InferenceJob)
-            .where(InferenceJob.id == running)
-            .values(created_at=sa.func.now() - timedelta(days=3))
-        )
-        await s.commit()
-
-    assert await reapers.terminal_uploads() == 1
-    assert deleted_keys == ["inference/done/input.png"]
-    assert (await one(db, InferenceJob, running)).upload_key == "inference/live/input.csv"
 
 
 async def test_event_retention_drops_old_logs_of_finished_runs_and_very_old_events(db, writer, make_run):
@@ -350,8 +286,8 @@ async def test_a_failing_job_invokes_its_failure_handler_and_frees_the_slot(db, 
     assert failures == [first]  # the second job still ran: one failure never wedges the lane
 
 
-async def test_leases_are_renewed_while_a_long_job_runs(db, make_inference):
-    job_id, _ = await make_inference()
+async def test_leases_are_renewed_while_a_long_job_runs(db, make_export):
+    job_id, _ = await make_export()
     seen: list = []
 
     async def run(jid):
@@ -359,14 +295,12 @@ async def test_leases_are_renewed_while_a_long_job_runs(db, make_inference):
             await asyncio.sleep(0.2)
             async with db() as s:
                 seen.append(
-                    (
-                        await s.execute(sa.select(InferenceJob.lease_expires_at).where(InferenceJob.id == jid))
-                    ).scalar_one()
+                    (await s.execute(sa.select(ModelExport.lease_expires_at).where(ModelExport.id == jid))).scalar_one()
                 )
         await asyncio.sleep(0)
 
     d = Dispatcher(
-        [Lane("inference", queue.INFERENCE, 1, run, renew_lease=True)],
+        [Lane("export", queue.EXPORT, 1, run, renew_lease=True)],
         poll_interval=0.05,
         lease_seconds=60,
         renew_interval=0.15,

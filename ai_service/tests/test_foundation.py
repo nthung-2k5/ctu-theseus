@@ -17,7 +17,6 @@ def test_key_layout_matches_documented_layout():
     assert storage.training_config_key("r1") == "r1/config.yaml"
     assert storage.evaluation_report_key("r1") == "r1/evaluation/report.json"
     assert storage.bundle_key("r1", "e1") == "r1/bundles/e1.zip"
-    assert storage.inference_upload_key("i1", ".csv") == "inference/i1/input.csv"
 
 
 def test_async_database_url_adds_asyncpg_driver():
@@ -36,7 +35,8 @@ def test_metadata_has_every_table_and_load_bearing_constraints():
     import theseus.db.models  # noqa: F401
 
     tables = Base.metadata.tables
-    assert {"users", "refresh_tokens", "run_events", "training_runs", "exports", "inference_jobs"} <= set(tables)
+    assert {"users", "refresh_tokens", "run_events", "training_runs", "exports"} <= set(tables)
+    assert "inference_jobs" not in tables  # predictions run in the request; nothing is stored
     # The better-auth tables are gone with the move to JWT.
     assert not {"sessions", "accounts", "verifications"} & set(tables)
     assert "conversion_job_id" not in tables["exports"].c

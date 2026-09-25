@@ -206,18 +206,9 @@ def nudge(lane_name: str) -> None:
 
 def build_default_lanes() -> list[Lane]:
     """The real lanes. Imported lazily because train/export pull in torch and Ludwig."""
-    from theseus.jobs import export, inference, train
+    from theseus.jobs import export, train
 
-    s = get_settings()
     return [
         Lane("train", queue.TRAIN, 1, train.run_train, train.handle_failure),
         Lane("export", queue.EXPORT, 2, export.run_export, export.handle_failure, renew_lease=True),
-        Lane(
-            "inference",
-            queue.INFERENCE,
-            s.inference_concurrency,
-            inference.run_inference,
-            inference.handle_failure,
-            renew_lease=True,
-        ),
     ]

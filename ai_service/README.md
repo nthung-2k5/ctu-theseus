@@ -57,7 +57,7 @@ theseus/
                         backend" below
   services/             domain logic: task_registry (framework-neutral), snapshot (parquet), sweep,
                         datasets, training, inference, storage, evaluate, predict, model_cache, ...
-  jobs/                 queue (claim/lease/CAS), dispatcher + lanes, train, export, inference,
+  jobs/                 queue (claim/lease/CAS), dispatcher + lanes, train, export,
                         abort, recovery, reapers
   events/               single-writer run_events, in-process bus, SSE stream, log capture
   export/               bundle assembly, preprocessing decompiler, README generation, templates/
@@ -91,11 +91,14 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
   `golden_prediction`'s shape breaks every previously exported bundle's verify step.
 - **Export golden sample.** After conversion the export job runs one real test-split row through the
   trained model and uploads it as `expected.json`; the bundle's verify script checks against it.
-- **Inference.** Sync predict (`/api/v1/predict/{runId}/sync`) awaits a shielded job with a bounded
-  wait and falls back to `202 + inferenceId` on timeout (the job keeps running). Async and batch
-  inputs go to the `theseus-uploads` bucket and are deleted once the job ends. Loaded models are
-  cached in-process by `services/model_cache.py` (LRU, `INFERENCE_MODEL_CACHE_SIZE`), and
-  `POST /api/inference/{runId}/warm` preloads one.
+- **Inference.** A prediction (`POST /api/v1/predict/{runId}`, or the session route
+  `/api/inference/{runId}`) runs inside the request and returns `{output}`; batch
+  (`.../batch`) takes a CSV and returns the scored CSV with an `X-Row-Count` header. Nothing is queued
+  or stored. Concurrency is capped at `inference_concurrency` (`503` + `Retry-After` when full) and
+  the run time at `INFERENCE_TIMEOUT_SECONDS` (`504`); a thread cannot be interrupted, so a slot is
+  only freed when its thread really finishes. Loaded models are cached in-process by
+  `services/model_cache.py` (LRU, `INFERENCE_MODEL_CACHE_SIZE`), and `POST /api/inference/{runId}/warm`
+  preloads one.
 - **Templates are package data** (`theseus/export/templates/`), read from the installed package,
   and must be present in the Docker image (the Dockerfile copies the whole project).
 - **Postgres generic plans.** After a prepared statement has run five times, Postgres may switch to
@@ -110,7 +113,7 @@ process and it shows up everywhere: `theseus.backends.registry.trainable_backend
 tasks it can train), `GET /api/projects/{id}/training-backends` (its models and hyperparameters,
 for the create-run/sweep UI), and every run trained with it (`training_runs.backend`) flows
 through the rest of the pipeline — `jobs/train.py`, `services/model_cache.py`,
-`jobs/inference.py`, `jobs/export.py` — with no backend-specific code outside the package itself.
+`services/inference.py`, `jobs/export.py` — with no backend-specific code outside the package itself.
 
 What to implement, roughly in the order a run touches them:
 
@@ -128,7 +131,7 @@ What to implement, roughly in the order a run touches them:
    `best_epoch`. Return the trained model already loaded (see `load` below).
 5. `load(model_dir)`: load a trained model from a downloaded directory into a `LoadedModel`
    (`predict`, `to_output`, `golden_prediction`, `close`) — the interface `model_cache.py`,
-   `jobs/inference.py` and `jobs/export.py` actually talk to.
+   `services/inference.py` and `jobs/export.py` actually talk to.
 6. `evaluate(model, df, split_column, item_id_column)` (optional) and `convert(model, artifact_id,
    workdir)` / `artifacts` (optional): the evaluation report and export conversions, if you want
    either. Both default to "not supported" so a minimal backend can skip them.

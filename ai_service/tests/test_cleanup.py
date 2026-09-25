@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from theseus.db.models import Dataset, DatasetItem, DatasetVersion, InferenceJob, Project, TrainingRun, User
+from theseus.db.models import Dataset, DatasetItem, DatasetVersion, Project, TrainingRun, User
 from theseus.services import cleanup, storage
 
 
@@ -55,7 +55,7 @@ async def _seed_project(s):
     return project
 
 
-async def test_project_cleanup_covers_pool_snapshots_runs_and_pending_inference_uploads(db, calls):
+async def test_project_cleanup_covers_pool_snapshots_and_runs(db, calls):
     async with db() as s:
         project = await _seed_project(s)
         draft = DatasetVersion(dataset_id=project.id, version_tag=None, status="draft")
@@ -72,8 +72,6 @@ async def test_project_cleanup_covers_pool_snapshots_runs_and_pending_inference_
         run = TrainingRun(project_id=project.id, dataset_version_id=snapshot.id, name="r", hyperparameters={})
         s.add(run)
         await s.flush()
-        s.add(InferenceJob(run_id=run.id, payload={"kind": "file"}, upload_key="inference/i1/input.png"))
-        s.add(InferenceJob(run_id=run.id, payload={"kind": "text"}, upload_key=None))
         await s.commit()
         pid, rid, sid = project.id, run.id, snapshot.id
 
@@ -85,13 +83,12 @@ async def test_project_cleanup_covers_pool_snapshots_runs_and_pending_inference_
     assert ("prefix", "theseus-training", f"{rid}/results/") in calls
     assert ("prefix", "theseus-training", f"{rid}/evaluation/") in calls
     assert ("prefix", "theseus-models", f"{rid}/") in calls
-    assert ("files", "theseus-uploads", ("inference/i1/input.png",)) in calls
     assert ("prefix", "theseus-datasets", f"snapshots/{sid}/augmented/") in calls
     # only the real snapshot has snapshot objects (parquet, manifest, augmented copies); the draft has none
     assert sum(1 for c in calls if "snapshots/" in str(c[2])) == 3
 
 
-async def test_run_cleanup_includes_that_runs_pending_uploads_only(db, calls):
+async def test_run_cleanup_removes_only_that_runs_objects(db, calls):
     async with db() as s:
         project = await _seed_project(s)
         version = DatasetVersion(dataset_id=project.id, version_tag="v1", status="ready")
@@ -100,17 +97,10 @@ async def test_run_cleanup_includes_that_runs_pending_uploads_only(db, calls):
         run_a = TrainingRun(project_id=project.id, dataset_version_id=version.id, name="a", hyperparameters={})
         run_b = TrainingRun(project_id=project.id, dataset_version_id=version.id, name="b", hyperparameters={})
         s.add_all([run_a, run_b])
-        await s.flush()
-        s.add_all(
-            [
-                InferenceJob(run_id=run_a.id, payload={}, upload_key="inference/a/input.png"),
-                InferenceJob(run_id=run_b.id, payload={}, upload_key="inference/b/input.png"),
-            ]
-        )
         await s.commit()
-        run_a_id = run_a.id
+        run_a_id, run_b_id = run_a.id, run_b.id
 
-    async with db() as s:
-        await cleanup.cleanup_run_storage(s, run_a_id)
-    assert ("files", "theseus-uploads", ("inference/a/input.png",)) in calls
-    assert not any("inference/b/" in str(c) for c in calls)
+    await cleanup.cleanup_run_storage(run_a_id)
+    assert ("prefix", "theseus-models", f"{run_a_id}/") in calls
+    assert ("prefix", "theseus-training", f"{run_a_id}/results/") in calls
+    assert not any(str(run_b_id) in str(c) for c in calls)

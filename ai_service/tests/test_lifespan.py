@@ -47,7 +47,7 @@ async def test_startup_and_shutdown_install_and_remove_every_process_wide_compon
         assert events_pkg.get_event_writer() is not None
         assert events_pkg.get_log_handler() in logging.getLogger("ludwig").handlers
         d = get_dispatcher()
-        assert d is not None and set(d.lanes) == {"train", "export", "inference"}
+        assert d is not None and set(d.lanes) == {"train", "export"}
         assert [d.lanes[n].concurrency for n in ("train", "export")] == [1, 2]
 
     assert get_dispatcher() is None

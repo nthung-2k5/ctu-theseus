@@ -186,7 +186,7 @@ async def delete_run(run: RunDep, session: SessionDep) -> None:
     if run.status in ("queued", "running"):
         await abort.request_cancel(run.id)
         await get_event_writer().flush()  # so no late event targets the row deleted below
-    await cleanup_run_storage(session, run.id)
+    await cleanup_run_storage(run.id)
     await session.delete(run)
     await session.commit()
 

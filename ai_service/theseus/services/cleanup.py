@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from theseus import constants as C
-from theseus.db.models import DatasetItem, DatasetVersion, InferenceJob, TrainingRun
+from theseus.db.models import DatasetItem, DatasetVersion, TrainingRun
 from theseus.services import storage
 
 logger = logging.getLogger(__name__)
@@ -46,20 +46,16 @@ def _version_steps(version_id: uuid.UUID | str, version_tag: str | None) -> list
     ]
 
 
-def _run_steps(run_id: uuid.UUID | str, upload_keys: Iterable[str] = ()) -> list[tuple[Callable[..., Any], tuple]]:
+def _run_steps(run_id: uuid.UUID | str) -> list[tuple[Callable[..., Any], tuple]]:
     r = str(run_id)
-    steps: list[tuple[Callable[..., Any], tuple]] = [
+    return [
         (storage.delete_file, (C.BUCKET_TRAINING, storage.training_config_key(r))),
         (storage.delete_prefix, (C.BUCKET_TRAINING, storage.training_results_prefix(r))),
         (storage.delete_file, (C.BUCKET_TRAINING, storage.training_logs_key(r))),
         (storage.delete_prefix, (C.BUCKET_TRAINING, storage.evaluation_prefix(r))),
-        # Covers model.{format}, expected.json, bundles/*.zip and batch predictions in one sweep.
+        # Covers model.{format}, expected.json and bundles/*.zip in one sweep.
         (storage.delete_prefix, (C.BUCKET_MODELS, f"{r}/")),
     ]
-    keys = list(upload_keys)
-    if keys:
-        steps.append((storage.delete_files, (C.BUCKET_UPLOADS, keys)))
-    return steps
 
 
 async def cleanup_version_storage(version_id: uuid.UUID | str, version_tag: str | None) -> None:
@@ -67,20 +63,9 @@ async def cleanup_version_storage(version_id: uuid.UUID | str, version_tag: str 
     await _run(_version_steps(version_id, version_tag))
 
 
-async def cleanup_run_storage(session: AsyncSession, run_id: uuid.UUID | str) -> None:
-    """Delete one training run S3 objects: config, results, logs, exports, and pending inference uploads."""
-    upload_keys = (
-        (
-            await session.execute(
-                sa.select(InferenceJob.upload_key).where(
-                    InferenceJob.run_id == run_id, InferenceJob.upload_key.is_not(None)
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    await _run(_run_steps(run_id, upload_keys))
+async def cleanup_run_storage(run_id: uuid.UUID | str) -> None:
+    """Delete one training run S3 objects: config, results, logs and exports."""
+    await _run(_run_steps(run_id))
 
 
 async def cleanup_project_storage(session: AsyncSession, project_id: uuid.UUID) -> None:
@@ -104,20 +89,6 @@ async def cleanup_project_storage(session: AsyncSession, project_id: uuid.UUID) 
     runs = (
         (await session.execute(sa.select(TrainingRun.id).where(TrainingRun.project_id == project_id))).scalars().all()
     )
-    upload_keys = (
-        (
-            await session.execute(
-                sa.select(InferenceJob.upload_key).where(
-                    InferenceJob.run_id.in_(runs), InferenceJob.upload_key.is_not(None)
-                )
-            )
-        )
-        .scalars()
-        .all()
-        if runs
-        else []
-    )
-
     steps: list[tuple[Callable[..., Any], tuple]] = []
     if storage_urls:
         steps.append((storage.delete_files, (C.BUCKET_DATASETS, list(storage_urls))))
@@ -125,6 +96,4 @@ async def cleanup_project_storage(session: AsyncSession, project_id: uuid.UUID) 
         steps.extend(_version_steps(version_id, tag))
     for run_id in runs:
         steps.extend(_run_steps(run_id))
-    if upload_keys:
-        steps.append((storage.delete_files, (C.BUCKET_UPLOADS, list(upload_keys))))
     await _run(steps)

@@ -2,7 +2,7 @@
 
 There is no separate jobs table: that would mean writing every transition twice, with a real
 dual-truth failure mode (job row failed, run row still running). Instead training_runs,
-exports and inference_jobs each carry a few job columns (attempt, max_attempts, available_at,
+and exports each carry a few job columns (attempt, max_attempts, available_at,
 claimed_by, lease_expires_at, last_error) and are claimed with FOR UPDATE SKIP LOCKED.
 
 House style for every transition here: the status column is the lock. Each change is a guarded
@@ -18,7 +18,7 @@ from typing import Any
 import sqlalchemy as sa
 
 from theseus.db.base import get_sessionmaker
-from theseus.db.models import InferenceJob, ModelExport, TrainingRun
+from theseus.db.models import ModelExport, TrainingRun
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,6 @@ class JobKind:
 
 TRAIN = JobKind("train", TrainingRun, "queued", ("running",), "running", "failed")
 EXPORT = JobKind("export", ModelExport, "pending", ("converting", "assembling"), "converting", "failed")
-INFERENCE = JobKind("inference", InferenceJob, "pending", ("running",), "running", "failed")
 
 
 async def claim_one(kind: JobKind, worker_id: str, lease_seconds: int) -> uuid.UUID | None:

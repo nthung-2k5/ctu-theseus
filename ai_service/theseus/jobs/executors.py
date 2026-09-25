@@ -5,7 +5,6 @@ in a pool that also serves every S3 call, parquet read and password hash in the 
 
   train      1 thread   the GPU is singular
   export     2 threads  preserves the old MAX_CONCURRENCY=2; zlib releases the GIL, so threads suffice
-  inference  default    short jobs sharing the process with GPU-resident cached models
 """
 
 import asyncio

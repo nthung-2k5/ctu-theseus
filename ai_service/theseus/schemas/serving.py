@@ -8,39 +8,11 @@ from theseus.db.enums import ExportStatus
 from theseus.schemas.common import ApiModel
 
 
-class InferenceAccepted(ApiModel):
-    inference_id: uuid.UUID
+class PredictResponse(ApiModel):
+    """One prediction. `output` is one of the framework-neutral shapes in services/predict.py, told
+    apart by `kind`: classification | regression | text | tokens."""
 
-
-class PolledJob(ApiModel):
-    """pending | success (with output) | batch (with rowCount) | failed (with error).
-
-    Fields that do not apply to a state are omitted from the response (exclude_none), which is
-    the same discriminated shape the gateway returned.
-    """
-
-    status: str
-    output: Any | None = None
-    row_count: int | None = None
-    error: str | None = None
-
-
-class SyncPredictResponse(PolledJob):
-    inference_id: uuid.UUID
-
-
-class InferenceJobRow(ApiModel):
-    id: uuid.UUID
-    run_id: uuid.UUID
-    status: str
-    output: Any | None
-    error: str | None
-    created_at: datetime
-    completed_at: datetime | None
-
-
-class InferenceJobListResponse(ApiModel):
-    jobs: list[InferenceJobRow]
+    output: Any
 
 
 class CreateExportBody(ApiModel):

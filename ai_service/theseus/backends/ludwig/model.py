@@ -1,7 +1,7 @@
 """`LudwigLoadedModel`: wraps a loaded `LudwigModel` behind the framework-neutral `LoadedModel`
 interface, and the two prediction-shaping functions that used to live in services/predict.py.
 
-Moved out of services/predict.py and jobs/inference.py when trainer backends became a plugin
+Moved out of services/predict.py and the old jobs/inference.py when trainer backends became a plugin
 system. `build_inference_output`/`parse_prediction_row` are Ludwig-specific: they know Ludwig's own
 `{feature}_predictions` / `{feature}_probabilities` prediction-frame column naming and its
 `category`/`number`/`sequence`/`text` feature type strings. `theseus.services.predict` keeps only

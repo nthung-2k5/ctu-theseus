@@ -25,8 +25,6 @@ EvaluationSplit = Literal["train", "test", "validation", "full"]
 EvaluationStatus = Literal["success", "failed"]
 SweepStrategy = Literal["grid", "random"]
 SweepStatus = Literal["running", "completed", "canceled"]
-# `running` is new: a claimed job is no longer indistinguishable from a pending one (see jobs/queue.py).
-InferenceJobStatus = Literal["pending", "running", "success", "failed"]
 # Only what the browser consumes. Export and evaluation state live in their own tables.
 RunEventKind = Literal["status", "metric", "log"]
 

@@ -1,51 +1,136 @@
-"""Validate and enqueue inference jobs, and read their state back.
+"""Run predictions inside the request that asked for them.
 
-Shared by the session-cookie routes (/api/inference) and the API-key routes (/api/v1/predict) so
-the two surfaces cannot drift on payload validation. Ported from server/lib/inference.ts.
+There is no job row and no queue: a prediction is validated, run on a worker thread while the request
+waits, and its result is the response. Nothing about a prediction is stored. The trade-off is that a
+server restart mid-request simply drops that request (the client retries), and there are no automatic
+retries.
 
-Storage rule: durable storage only when the job outlives the request. A synchronous request
-keeps its upload in a temp file; an asynchronous or batch one goes to the theseus-uploads bucket
-so a restarted job can still find its input (see jobs/inference.py).
+Shared by the session-cookie routes (/api/inference) and the API-key routes (/api/v1/predict), so the
+two surfaces cannot drift on payload validation.
+
+Concurrency: at most `inference_concurrency` predictions run at once. A request that cannot get a slot
+within BUSY_WAIT_SECONDS is answered 503 + Retry-After rather than holding its connection open behind
+a cold model load. A thread cannot be interrupted, so a slot is only freed once its thread has really
+finished, even when the request already gave up on it.
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
-import uuid
+import re
+import tempfile
+import weakref
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import sqlalchemy as sa
-from fastapi import UploadFile
-from sqlalchemy.ext.asyncio import AsyncSession
+import pandas as pd
+from fastapi import HTTPException, UploadFile
 
-from theseus import constants as C
-from theseus.db.models import InferenceJob, TrainingRun
-from theseus.jobs import inference as inference_jobs
-from theseus.jobs.dispatcher import nudge
-from theseus.services import storage
+from theseus.db.models import TrainingRun
+from theseus.jobs.executors import run_in_executor
+from theseus.services.predict import InferenceOutput, build_batch_result_frame
 from theseus.services.task_registry import get_inference_input_spec
-from theseus.services.training import new_uuid7
 from theseus.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+# Keeps one batch's memory and predict time bounded, and its result CSV a sane download size.
+MAX_BATCH_ROWS = 10_000
+BUSY_WAIT_SECONDS = 1.0
+BUSY_RETRY_AFTER_SECONDS = 5
+
+# The client only ever sees this; the real error (internal paths, keys) stays in the logs.
+GENERIC_FAILURE = "Inference failed. Check server logs."
+
+
+class InferenceInputError(ValueError):
+    """The request is well-formed but its content cannot be scored. The message is safe to show the caller."""
 
 
 @dataclass
-class Dispatched:
-    inference_id: uuid.UUID
-    # Only set for a synchronous request: resolves when the job reaches a terminal state.
-    waiter: asyncio.Future | None = None
+class BatchResult:
+    csv: bytes
+    row_count: int
 
 
-@dataclass
-class DispatchError:
-    code: int
-    message: str
+def _model_cache():
+    """Imported lazily: the model cache pulls in torch and Ludwig, and the API must import without them."""
+    from theseus.services.model_cache import get_model_cache
+
+    return get_model_cache()
+
+
+_background: set[asyncio.Task] = set()
+
+
+def spawn_warm(run_id: str) -> None:
+    """Preload a run model into the cache ahead of the first real request (fire and forget)."""
+
+    async def _warm() -> None:
+        try:
+            await _model_cache().warm(run_id)
+            logger.info("Warmed inference model cache for run %s", run_id)
+        except Exception:
+            logger.exception("Failed to warm model cache for run %s", run_id)
+
+    task = asyncio.create_task(_warm())
+    _background.add(task)  # strong reference: the loop only keeps a weak one
+    task.add_done_callback(_background.discard)
+
+
+# -- Concurrency -----------------------------------------------------------------------------
+
+# One semaphore per event loop (a semaphore binds to the loop that first contends for it).
+_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _semaphores.get(loop)
+    if sem is None:
+        sem = _semaphores[loop] = asyncio.Semaphore(max(1, get_settings().inference_concurrency))
+    return sem
+
+
+async def _run_limited[T](work: Callable[[], Awaitable[T]]) -> T:
+    """Run `work` in a concurrency slot, bounded by the inference timeout, mapping failures to HTTP errors."""
+    sem = _semaphore()
+    try:
+        await asyncio.wait_for(sem.acquire(), BUSY_WAIT_SECONDS)
+    except TimeoutError:
+        raise HTTPException(
+            503,
+            "The inference workers are busy, retry shortly",
+            headers={"Retry-After": str(BUSY_RETRY_AFTER_SECONDS)},
+        ) from None
+
+    def _done(task: asyncio.Task) -> None:
+        sem.release()
+        if not task.cancelled():
+            task.exception()  # mark retrieved: an abandoned task must not log "never retrieved"
+
+    task = asyncio.ensure_future(work())
+    task.add_done_callback(_done)
+    try:
+        # shield: a timeout or a client disconnect must not cancel work whose thread cannot be stopped.
+        return await asyncio.wait_for(asyncio.shield(task), get_settings().inference_timeout_seconds)
+    except TimeoutError:
+        raise HTTPException(504, "Inference timed out") from None
+    except InferenceInputError as e:
+        raise HTTPException(422, str(e)) from None
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Inference failed")
+        raise HTTPException(500, GENERIC_FAILURE) from None
+
+
+# -- Input handling --------------------------------------------------------------------------
 
 
 def _parse_fields_object(raw: str) -> dict[str, Any] | None:
@@ -56,165 +141,120 @@ def _parse_fields_object(raw: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-async def _read_upload(file: UploadFile) -> bytes | DispatchError:
+async def _read_upload(file: UploadFile) -> bytes:
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
-        return DispatchError(413, f"File is larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
+        raise HTTPException(413, f"File is larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
     return data
 
 
-async def _store_input(inference_id: uuid.UUID, data: bytes, ext: str, *, durable: bool) -> tuple[dict, str | None]:
-    """Persist an upload. Returns (payload fragment, upload_key)."""
-    filename = f"{inference_id}{ext}"
-    if durable:
-        key = storage.inference_upload_key(str(inference_id), ext)
-        await asyncio.get_running_loop().run_in_executor(
-            None, storage.upload_bytes, C.BUCKET_UPLOADS, key, data, "application/octet-stream"
-        )
-        return {"filename": filename}, key
-    folder = Path(get_settings().temp_dir) / "inference-uploads"
-    folder.mkdir(parents=True, exist_ok=True)
-    local = folder / filename
-    local.write_bytes(data)
-    return {"filename": filename, "localPath": str(local)}, None
+def _safe_extension(filename: str | None) -> str:
+    ext = os.path.splitext(filename or "")[1]
+    return ext if re.fullmatch(r"\.[A-Za-z0-9]{1,10}", ext) else ""
 
 
-async def _insert_job(
-    session: AsyncSession, job: InferenceJob, *, cleanup_key: str | None, cleanup_path: str | None
-) -> None:
-    try:
-        session.add(job)
-        await session.commit()
-    except Exception:
-        # The upload exists but no row points at it, so nothing would ever reap it.
-        await session.rollback()
-        if cleanup_key:
-            await asyncio.get_running_loop().run_in_executor(None, storage.delete_file, C.BUCKET_UPLOADS, cleanup_key)
-        if cleanup_path:
-            Path(cleanup_path).unlink(missing_ok=True)
-        raise
-    nudge("inference")
-
-
-async def dispatch_inference(
-    session: AsyncSession,
-    run: TrainingRun,
-    task: str,
-    *,
-    file: UploadFile | None,
-    fields: str | None,
-    top_k: int | None,
-    sync: bool = False,
-) -> Dispatched | DispatchError:
-    """Validate a single-item request against the run task and enqueue it."""
+def _ensure_ready(run: TrainingRun) -> None:
     if run.status != "succeeded":
-        return DispatchError(409, "No successfully trained model found for this run")
+        raise HTTPException(409, "No successfully trained model found for this run")
 
+
+async def _validated_input(task: str, *, file: UploadFile | None, fields: str | None) -> tuple[str, Any, str]:
+    """Check a single-item request against the task. Returns (kind, value, file extension).
+
+    `value` is the file bytes (kind "file"), the field values ("text") or the record ("record").
+    """
     spec = get_inference_input_spec(task)
-    inference_id = new_uuid7()
-    payload: dict[str, Any]
-    upload_key: str | None = None
-
     if spec["kind"] == "file":
         if file is None:
-            return DispatchError(422, "This task requires a `file` field")
+            raise HTTPException(422, "This task requires a `file` field")
         accept = spec.get("accept")
         if accept and file.content_type not in accept:
-            return DispatchError(422, f"This task only accepts: {', '.join(accept)}")
-        data = await _read_upload(file)
-        if isinstance(data, DispatchError):
-            return data
-        fragment, upload_key = await _store_input(
-            inference_id, data, os.path.splitext(file.filename or "")[1], durable=not sync
-        )
-        payload = {"kind": "file", **fragment}
-    else:
-        if not fields:
-            return DispatchError(422, "This task requires a `fields` field")
-        parsed = _parse_fields_object(fields)
-        if parsed is None:
-            return DispatchError(422, "`fields` must be a JSON-encoded object")
-        if spec["kind"] == "text":
-            missing = [f for f in spec["fields"] if not isinstance(parsed.get(f), str) or parsed[f] == ""]
-            if missing:
-                return DispatchError(422, f"Missing required field(s): {', '.join(missing)}")
-            payload = {"kind": "text", "fields": {f: parsed[f] for f in spec["fields"]}}
-        else:
-            for key, value in parsed.items():
-                if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-                    return DispatchError(422, f"Field '{key}' must be a string or number")
-            payload = {"kind": "record", "record": parsed}
+            raise HTTPException(422, f"This task only accepts: {', '.join(accept)}")
+        return "file", await _read_upload(file), _safe_extension(file.filename)
 
-    # Register the waiter BEFORE the job can possibly run.
-    waiter = inference_jobs.register_waiter(inference_id) if sync else None
-    job = InferenceJob(
-        id=inference_id, run_id=run.id, status="pending", payload=payload, top_k=top_k, upload_key=upload_key
-    )
-    try:
-        await _insert_job(session, job, cleanup_key=upload_key, cleanup_path=payload.get("localPath"))
-    except Exception:
-        inference_jobs.drop_waiter(inference_id)
-        raise
-    return Dispatched(inference_id, waiter)
+    if not fields:
+        raise HTTPException(422, "This task requires a `fields` field")
+    parsed = _parse_fields_object(fields)
+    if parsed is None:
+        raise HTTPException(422, "`fields` must be a JSON-encoded object")
+    if spec["kind"] == "text":
+        missing = [f for f in spec["fields"] if not isinstance(parsed.get(f), str) or parsed[f] == ""]
+        if missing:
+            raise HTTPException(422, f"Missing required field(s): {', '.join(missing)}")
+        return "text", {f: parsed[f] for f in spec["fields"]}, ""
+    for key, value in parsed.items():
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            raise HTTPException(422, f"Field '{key}' must be a string or number")
+    return "record", parsed, ""
 
 
-async def dispatch_batch_inference(
-    session: AsyncSession, run: TrainingRun, task: str, file: UploadFile
-) -> Dispatched | DispatchError:
-    """Validate and enqueue a batch (CSV of rows) job. Text and tabular tasks only."""
-    if run.status != "succeeded":
-        return DispatchError(409, "No successfully trained model found for this run")
+# -- Execution -------------------------------------------------------------------------------
+
+
+async def predict_one(
+    run: TrainingRun, task: str, *, file: UploadFile | None, fields: str | None, top_k: int | None
+) -> InferenceOutput:
+    """Validate and score one item (an image/audio file, a text object or a tabular record)."""
+    _ensure_ready(run)
+    kind, value, ext = await _validated_input(task, file=file, fields=fields)
+
+    async def work() -> InferenceOutput:
+        model = await _model_cache().get(str(run.id))
+        input_columns = model.input_columns
+        # Only meaningful for a single-input sequence task (token_classification): the tokens the
+        # predicted tags align against.
+        input_tokens: list[str] | None = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            if kind == "file":
+                path = Path(temp_dir) / f"input{ext}"
+                path.write_bytes(value)
+                resolved: dict[str, Any] = {input_columns[0]: str(path)}
+            elif kind == "text":
+                missing = [c for c in input_columns if c not in value]
+                if missing:
+                    raise InferenceInputError(f"Missing required field(s): {', '.join(missing)}")
+                resolved = {c: value[c] for c in input_columns}
+                if len(input_columns) == 1:
+                    input_tokens = str(resolved[input_columns[0]]).split()
+            else:  # "record": tabular tasks have dataset-defined input features, not fixed ones
+                resolved = dict(value)
+
+            def _predict() -> InferenceOutput:
+                frame = pd.DataFrame({col: [val] for col, val in resolved.items()})
+                predictions = model.predict(frame)
+                return model.to_output(predictions, top_k=top_k or 100, input_tokens=input_tokens)
+
+            # The temp dir must outlive the thread, so the executor call stays inside this `with`.
+            return await run_in_executor(None, _predict)
+
+    return await _run_limited(work)
+
+
+async def predict_batch(run: TrainingRun, task: str, file: UploadFile) -> BatchResult:
+    """Score every row of an uploaded CSV in one predict call. Text and tabular tasks only."""
+    _ensure_ready(run)
     # File-backed tasks (vision/audio) would need an archive of many files, not a CSV of rows.
     if get_inference_input_spec(task)["kind"] == "file":
-        return DispatchError(422, "Batch inference is only available for text and tabular tasks")
+        raise HTTPException(422, "Batch inference is only available for text and tabular tasks")
     data = await _read_upload(file)
-    if isinstance(data, DispatchError):
-        return data
 
-    inference_id = new_uuid7()
-    fragment, key = await _store_input(inference_id, data, ".csv", durable=True)
-    job = InferenceJob(
-        id=inference_id, run_id=run.id, status="pending", payload={"kind": "batch", **fragment}, upload_key=key
-    )
-    await _insert_job(session, job, cleanup_key=key, cleanup_path=None)
-    return Dispatched(inference_id)
+    async def work() -> BatchResult:
+        model = await _model_cache().get(str(run.id))
 
+        def _predict_all() -> BatchResult:
+            try:
+                frame = pd.read_csv(io.BytesIO(data))
+            except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError):
+                raise InferenceInputError("The uploaded file is not a readable CSV") from None
+            if len(frame) == 0:
+                raise InferenceInputError("Uploaded batch file has no rows")
+            if len(frame) > MAX_BATCH_ROWS:
+                raise InferenceInputError(f"Batch file has {len(frame)} rows, exceeding the {MAX_BATCH_ROWS}-row limit")
+            predictions = model.predict(frame)
+            result = build_batch_result_frame(frame, predictions)
+            return BatchResult(result.to_csv(index=False).encode(), len(result))
 
-# -- Reading state back ----------------------------------------------------------------------
+        return await run_in_executor(None, _predict_all)
 
-
-def public_status(status: str) -> str:
-    """`running` is an internal state; clients only ever knew pending / success / failed."""
-    return "pending" if status == "running" else status
-
-
-def polled(job: InferenceJob) -> dict[str, Any]:
-    """The polled shape: pending | success (+output) | batch (+rowCount) | failed (+error)."""
-    if job.status in ("pending", "running"):
-        return {"status": "pending"}
-    if job.status == "failed":
-        return {"status": "failed", "error": job.error or "Inference failed"}
-    output = job.output or {}
-    if output.get("kind") == "batch":
-        return {"status": "batch", "rowCount": output["rowCount"]}
-    return {"status": "success", "output": output}
-
-
-async def get_job(
-    session: AsyncSession, run_id: uuid.UUID, inference_id: uuid.UUID, *, refresh: bool = False
-) -> InferenceJob | None:
-    """Scoped by run in the same query, so an id belonging to another run simply does not match.
-
-    refresh=True re-reads the row even if this session already holds it (a synchronous request
-    inserted the job itself, and the worker has since updated it in another session).
-    """
-    stmt = sa.select(InferenceJob).where(InferenceJob.id == inference_id, InferenceJob.run_id == run_id)
-    if refresh:
-        stmt = stmt.execution_options(populate_existing=True)
-    return (await session.execute(stmt)).scalar_one_or_none()
-
-
-def batch_result_key(job: InferenceJob | None) -> str | None:
-    if job is None or job.status != "success" or not job.output or job.output.get("kind") != "batch":
-        return None
-    return job.output["resultKey"]
+    return await _run_limited(work)

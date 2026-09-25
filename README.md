@@ -49,19 +49,25 @@ are the only schema.
 bus, the API-key rate limiter, the loaded-model cache and the GPU all assume it, and forking after
 a CUDA context exists is not survivable. Never run it with `--reload`, gunicorn or multiple workers.
 
-**Jobs.** The domain tables are the queue: `training_runs`, `model_exports` and `inference_jobs`
-carry `attempt`, `max_attempts`, `available_at`, `claimed_by`, `lease_expires_at` and
-`last_error`. A dispatcher claims work with `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP
-LOCKED)` and runs it on a lane with its own executor: `train` (one at a time), `export` (two) and
-`inference` (`INFERENCE_CONCURRENCY`). The house rule is that **the status column is the lock**:
-every transition is a guarded compare-and-swap (`UPDATE ... WHERE status = ... RETURNING`), and
-zero rows means someone else got there first. Training is never retried; export and inference are
-(3 attempts, 30 s apart).
+**Jobs.** The domain tables are the queue: `training_runs` and `model_exports` carry `attempt`,
+`max_attempts`, `available_at`, `claimed_by`, `lease_expires_at` and `last_error`. A dispatcher
+claims work with `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)` and runs it on a lane
+with its own executor: `train` (one at a time) and `export` (two). The house rule is that **the
+status column is the lock**: every transition is a guarded compare-and-swap
+(`UPDATE ... WHERE status = ... RETURNING`), and zero rows means someone else got there first.
+Training is never retried; export is (3 attempts, 30 s apart).
+
+**Inference is not a job.** A prediction runs inside the request that asked for it and its result is
+the response (`services/inference.py`): nothing is queued, stored or polled. At most
+`INFERENCE_CONCURRENCY` run at once; a request that cannot get a slot is answered `503` with
+`Retry-After`, and one that exceeds `INFERENCE_TIMEOUT_SECONDS` is a `504`. A restart mid-request
+drops that request (the client retries). Batch scoring works the same way: the CSV goes in, the
+scored CSV comes back.
 
 **Restarts.** On startup, before the dispatcher runs, a recovery pass fails any `running` training
-run ("Server restarted during training"), re-queues `running` exports, and re-queues or fails
-`running` inference jobs. A restart therefore ends in-flight training. A reaper loop also fails a
-training run whose heartbeat stops (a hung thread) and reclaims expired export/inference leases.
+run ("Server restarted during training") and re-queues `running` exports. A restart therefore ends
+in-flight training. A reaper loop also fails a training run whose heartbeat stops (a hung thread)
+and reclaims expired export leases.
 
 **Run events and live updates.** Metrics, status changes and log lines are appended to `run_events`
 by a single writer task (a `BIGSERIAL` is not commit-ordered, so concurrent writers would let a
@@ -112,9 +118,6 @@ theseus-training/
   {runId}/results/                           Ludwig's own output tree (incl. training_set_metadata.json)
   {runId}/logs/train.log
 
-theseus-uploads/
-  inference/{inferenceId}/input{ext}         async/batch inference inputs; deleted once the job ends
-
 theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
@@ -126,8 +129,8 @@ Dataset pool uploads are deduplicated per-project by sha256: the same file uploa
 
 ### Snapshot augmentation
 
-Augmentation is chosen when a **snapshot** is created, not when training. The "Create Snapshot"
-dialog can add N augmented copies of every item in the **train** split (validation and test stay
+Augmentation is chosen when a **snapshot** is created, not when training. The snapshot builder
+(Snapshots → New snapshot) can add N augmented copies of every item in the **train** split (validation and test stay
 original, so metrics measure real data). During the build these copies are materialized as real
 `dataset_items` rows (`source_item_id` points at the original, with the modality features and a copy
 of its labels) and train-split members of that snapshot, so the parquet, manifest, split counts and
@@ -249,7 +252,7 @@ ai_service/               The backend (FastAPI + Ludwig); see ai_service/README.
   theseus/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
                           inference, export, api_keys, api_v1)
   theseus/services/       task_registry (source of truth), ludwig_config, snapshot, sweep, ...
-  theseus/jobs/           queue, dispatcher, lanes, train/export/inference, recovery, reapers
+  theseus/jobs/           queue, dispatcher, lanes, train/export, recovery, reapers
   theseus/events/         run-event writer, in-process bus, SSE stream, log capture
   theseus/export/         devkit/app bundle assembly + templates
   theseus/db/, migrations/  SQLAlchemy models + Alembic

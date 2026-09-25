@@ -191,21 +191,3 @@ def make_export(db, make_run):
             return e.id, rid
 
     return _make
-
-
-@pytest.fixture
-def make_inference(db, make_run):
-    """Create an inference job row, returning (job_id, run_id)."""
-    from theseus.db.models import InferenceJob
-
-    async def _make(status: str = "pending", payload=None, run_id=None, **fields):
-        rid = run_id or await make_run(status="succeeded")
-        async with db() as s:
-            job = InferenceJob(
-                run_id=rid, status=status, payload=payload or {"kind": "text", "fields": {"text": "hi"}}, **fields
-            )
-            s.add(job)
-            await s.commit()
-            return job.id, rid
-
-    return _make
