@@ -30,7 +30,7 @@ export function DataTable<T>({
 
   return (
     <ScrollArea>
-      <Table striped highlightOnHover>
+      <Table highlightOnHover withTableBorder verticalSpacing={6}>
         <Table.Thead>
           <Table.Tr>
             {columns.map((c) => (

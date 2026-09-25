@@ -1,3 +1,5 @@
+import { PARTITION_COLORS } from '@public/lib/palette'
+
 /** Shared UI color maps used across the dataset/snapshot/training views. */
 
 /**
@@ -6,16 +8,16 @@
  * grid and blue in the metrics chart.
  */
 export const SPLIT_COLORS: Record<string, string> = {
-  train: 'green',
-  validation: 'yellow',
-  test: 'red',
+  train: PARTITION_COLORS.train,
+  validation: PARTITION_COLORS.validation,
+  test: PARTITION_COLORS.test,
 }
 
 /** Chart-shade variants of the same palette, for series lines/areas. */
 export const SPLIT_CHART_COLORS: Record<string, string> = {
-  train: 'green.6',
-  validation: 'yellow.6',
-  test: 'red.6',
+  train: PARTITION_COLORS.train,
+  validation: PARTITION_COLORS.validation,
+  test: PARTITION_COLORS.test,
 }
 
 /**

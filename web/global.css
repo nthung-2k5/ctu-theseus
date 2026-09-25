@@ -1,10 +1,19 @@
-@import url("https://fonts.googleapis.com/css2?family=K2D:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800&family=Readex+Pro:wght@160..700&display=swap");
+/* Tailwind: theme tokens + utilities ONLY. Preflight is deliberately omitted so it
+   cannot reset Mantine component styles. */
+@layer theme, base, mantine, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 
-@import "tailwindcss";
-@import "@mantine/core/styles.css";
-@import "@mantine/notifications/styles.css";
-@import "@mantine/dropzone/styles.css";
-@import "@mantine/charts/styles.css";
+@import "@mantine/core/styles.layer.css";
+@import "@mantine/notifications/styles.layer.css";
+@import "@mantine/dropzone/styles.layer.css";
+@import "@mantine/charts/styles.layer.css";
+@import "@fontsource/readex-pro/300.css";
+@import "@fontsource/readex-pro/400.css";
+@import "@fontsource/readex-pro/500.css";
+@import "@fontsource/readex-pro/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/600.css";
 
 @theme {
   --color-primary-50: var(--mantine-color-primary-0);
@@ -17,7 +26,7 @@
   --color-primary-700: var(--mantine-color-primary-7);
   --color-primary-800: var(--mantine-color-primary-8);
   --color-primary-900: var(--mantine-color-primary-9);
-  --color-primary: var(--mantine-color-primary-6);
+  --color-primary: var(--mantine-color-primary-7);
 
   --color-secondary-50: var(--mantine-color-secondary-0);
   --color-secondary-100: var(--mantine-color-secondary-1);
@@ -29,40 +38,31 @@
   --color-secondary-700: var(--mantine-color-secondary-7);
   --color-secondary-800: var(--mantine-color-secondary-8);
   --color-secondary-900: var(--mantine-color-secondary-9);
-  --color-secondary: var(--mantine-color-secondary-6);
+  --color-secondary: var(--mantine-color-secondary-5);
 }
 
-/* ---------- Base resets ---------- */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* ---------- Base ---------- */
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
 html {
-  font-family: "Readex Pro", sans-serif;
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  min-height: 100vh;
+  margin: 0;
   background-color: var(--mantine-color-body);
   color: var(--mantine-color-text);
 }
 
-/* ---------- Title font override ---------- */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6,
-.mantine-Title-root {
-  font-family: "K2D", sans-serif;
+/* Tabular numerals for KPIs, counts and tables. */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- Scrollbar ---------- */
@@ -80,7 +80,7 @@ h6,
   border-radius: 999px;
 }
 
-/* ---------- Custom utility layers ---------- */
+/* ---------- Custom component classes ---------- */
 @layer components {
   .page-container {
     max-width: 1440px;
@@ -90,16 +90,13 @@ h6,
 
   .card-elevated {
     background: var(--mantine-color-body);
-    border: 1px solid var(--mantine-color-dark-4);
+    border: 1px solid var(--mantine-color-default-border);
     border-radius: var(--mantine-radius-md);
-    transition:
-      box-shadow 150ms ease,
-      transform 150ms ease;
+    transition: border-color 120ms ease;
   }
 
   .card-elevated:hover {
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-    transform: translateY(-2px);
+    border-color: var(--mantine-color-cyan-5);
   }
 
   .spin {

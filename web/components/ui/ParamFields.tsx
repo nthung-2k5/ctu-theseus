@@ -68,6 +68,19 @@ export function ParamField({
   )
 }
 
+/**
+ * Splits parameters into the sections their `group` names, in order of first appearance. Parameters
+ * without a group share one section titled `fallback`, placed where the first of them appears.
+ */
+export function groupParams(specs: ParamSpec[], fallback = 'Hyperparameters'): { group: string; specs: ParamSpec[] }[] {
+  const sections = new Map<string, ParamSpec[]>()
+  for (const spec of specs) {
+    const key = spec.group || fallback
+    sections.set(key, [...(sections.get(key) ?? []), spec])
+  }
+  return [...sections].map(([group, items]) => ({ group, specs: items }))
+}
+
 /** One `ParamField` per spec, laid out in a wrapping row. `values`/`onChange` are keyed by `spec.name`. */
 export function ParamFields({
   specs,
