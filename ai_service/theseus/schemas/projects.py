@@ -7,7 +7,7 @@ frontend migration is a type swap rather than a behavior change.
 import uuid
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from theseus.augmentation.config import AugmentationConfig
 from theseus.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType
@@ -138,3 +138,30 @@ class UpdateClassBody(ApiModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     ui_color_hex: str | None = Field(default=None, pattern=HEX_COLOR)
+
+
+MAX_CLASSES = 200
+
+
+class SaveClassEntry(ApiModel):
+    """One class in a batch save. An entry without `class_id` is created (or revives a deleted class)."""
+
+    class_id: uuid.UUID | None = None
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = None
+    # Omitted: an existing class keeps its colour and a new one gets the next palette colour.
+    ui_color_hex: str | None = Field(default=None, pattern=HEX_COLOR)
+
+    @field_validator("name")
+    @classmethod
+    def _collapse_whitespace(cls, value: str) -> str:
+        collapsed = " ".join(value.split())
+        if not collapsed:
+            raise ValueError("Class name must not be blank")
+        return collapsed
+
+
+class SaveClassesBody(ApiModel):
+    """The whole desired class list. Active classes missing from it are deleted."""
+
+    classes: list[SaveClassEntry] = Field(max_length=MAX_CLASSES)
