@@ -10,8 +10,8 @@
  * One config, two views: Simple picks the model and a couple of headline settings, Advanced shows
  * every hyperparameter. Both edit the same state, so switching never loses anything.
  *
- * Augmentation is not a training option: it is chosen when a snapshot is created (see
- * SnapshotBuilderPage), so the augmented copies are real, browsable train-split items.
+ * Preprocessing and augmentation are not training options: both are chosen when a snapshot is
+ * created (see SnapshotBuilderPage), so the resulting items are real, browsable dataset items.
  */
 
 import { Alert, Badge, Button, Group, Paper, SegmentedControl, SimpleGrid, Skeleton, Text } from '@mantine/core'
@@ -119,6 +119,7 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
   const blockBadges = [
     values.imageSize != null ? `pre · ${values.imageSize}px` : null,
     values.maxSequenceLength != null ? `pre · ${values.maxSequenceLength} tokens` : null,
+    selectedVersion?.preprocessingConfig ? `preprocess · ${selectedVersion.preprocessingConfig.ops.length} ops` : null,
     selectedVersion?.augmentationConfig ? `augment · ${selectedVersion.augmentationConfig.ops.length} ops` : null,
     modelInfo ? `${modelInfo.label}${values.freezeBackbone === true ? ' · frozen' : ''}` : null,
     hasHead ? (headLayers === 0 ? 'head · linear' : `head · ${headLayers}×${values.headWidth ?? 256}`) : null,

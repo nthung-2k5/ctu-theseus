@@ -15,6 +15,7 @@ from theseus.db.enums import (
     ImageFormat,
     SplitType,
 )
+from theseus.preprocessing.config import PreprocessingConfig, PreprocessingInfo
 from theseus.schemas.common import ApiModel
 from theseus.schemas.projects import VersionOut
 
@@ -30,8 +31,14 @@ class VersionDetail(VersionOut):
 
 class CreateVersionBody(ApiModel):
     version_tag: str = Field(min_length=1, max_length=50)
+    # Replace items with a deterministic preprocessed copy, per split. Omit for no preprocessing.
+    preprocessing: PreprocessingConfig | None = None
     # Add augmented copies of the train split to the snapshot. Omit for a plain snapshot.
     augmentation: AugmentationConfig | None = None
+
+
+class PreprocessingListResponse(ApiModel):
+    preprocessing: list[PreprocessingInfo]
 
 
 class AugmentationListResponse(ApiModel):
@@ -110,9 +117,12 @@ class ItemOut(ItemRow):
     annotations: list[AnnotationOut] = []
     split_type: SplitType
     download_url: str | None = None
-    # Set on augmented copies: the original they came from and the ops that produced them.
+    # Set on any derived item (preprocessed or augmented): the pool original it came from.
     source_item_id: uuid.UUID | None = None
     source_external_id: str | None = None
+    # The preprocessing ops (if any) that produced this item, carried forward onto an augmented copy.
+    preprocessing: Any | None = None
+    # The augmentation ops that produced this item; set only on an augmented copy.
     augmentation: Any | None = None
 
 

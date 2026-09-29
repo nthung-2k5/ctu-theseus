@@ -122,7 +122,7 @@ async def create_item(session: AsyncSession, dataset_id: uuid.UUID, draft_id: uu
                 sa.select(DatasetItem).where(
                     DatasetItem.dataset_id == dataset_id,
                     DatasetItem.content_hash == content_hash,
-                    DatasetItem.source_item_id.is_(None),  # never dedup onto an augmented copy
+                    DatasetItem.source_item_id.is_(None),  # never dedup onto a derived item
                 )
             )
         ).scalar_one_or_none()
@@ -318,7 +318,7 @@ async def create_items_bulk(
             sa.select(DatasetItem).where(
                 DatasetItem.dataset_id == dataset_id,
                 DatasetItem.content_hash.in_(wanted[start : start + _CHUNK]),
-                DatasetItem.source_item_id.is_(None),  # never dedup onto an augmented copy
+                DatasetItem.source_item_id.is_(None),  # never dedup onto a derived item
             )
         )
         known.update({r.content_hash: r for r in rows.scalars()})

@@ -1,10 +1,16 @@
 """Materialize a snapshot's augmented items: the TRAIN split gets N extra, real, browsable copies.
 
-Runs as the first phase of build_snapshot. Each copy is a dataset_items row (with `source_item_id`
-pointing at its original, plus the modality features and a copy of the original's annotations) and
-a dataset_version_items row in the train split, so the parquet, manifest, split counts and the
-items browser all pick it up with no special casing. File-backed copies are written under the
-snapshot's own S3 prefix, never the content-addressed pool (see storage.augmented_prefix).
+Runs as the second phase of build_snapshot, after preprocessing (services/preprocessing.py) has
+already replaced any train items its ops were scoped to: an augmented copy is made from whatever
+is in the train split at that point, so it carries forward a preprocessed item's `preprocessing`
+record and always points `source_item_id` at the pool ancestor, never at an intermediate
+preprocessed row (see services/derived_items.py).
+
+Each copy is a dataset_items row (with `source_item_id` pointing at its pool ancestor, plus the
+modality features and a copy of the original's annotations) and a dataset_version_items row in the
+train split, so the parquet, manifest, split counts and the items browser all pick it up with no
+special casing. File-backed copies are written under the snapshot's own S3 prefix, never the
+content-addressed pool (see storage.augmented_prefix).
 
 The work per original (download, decode, augment, encode, upload) is blocking and CPU-heavy, so it
 runs in worker threads with bounded concurrency; database writes happen on the event loop, one
@@ -17,11 +23,9 @@ import hashlib
 import logging
 import random
 import uuid
-from dataclasses import dataclass, field
-from decimal import Decimal
+from dataclasses import dataclass
 from typing import Any
 
-import sqlalchemy as sa
 import uuid_utils
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,37 +34,23 @@ from theseus.augmentation import media
 from theseus.augmentation.config import AugmentationConfig
 from theseus.augmentation.pipeline import ConfiguredOp, augment, build_plan, seed_for
 from theseus.db.base import get_sessionmaker
-from theseus.db.models import (
-    Annotation,
-    AudioFeatures,
-    DatasetItem,
-    DatasetVersion,
-    DatasetVersionItem,
-    Project,
-    TabularFeatures,
-    TextFeatures,
-    VisionFeatures,
-)
+from theseus.db.models import DatasetItem, DatasetVersion, DatasetVersionItem, Project
 from theseus.services import storage
 from theseus.services.datasets import canonical_json
+from theseus.services.derived_items import (
+    Original,
+    copy_annotations,
+    feature_row,
+    has_content,
+    load_items,
+    samples_for_fit,
+)
 from theseus.services.task_registry import get_task_descriptor
 
 logger = logging.getLogger(__name__)
 
 _BATCH = 16  # originals per DB transaction
 _CONCURRENCY = 4  # originals augmented at once (threads)
-_DELETE_CHUNK = 5000
-
-
-@dataclass
-class Original:
-    id: uuid.UUID
-    external_id: str | None
-    storage_url: str | None
-    content_hash: str | None
-    text: dict[str, Any] | None = None
-    features_json: Any = None
-    annotations: list[Annotation] = field(default_factory=list)
 
 
 @dataclass
@@ -80,64 +70,6 @@ class AugmentResult:
     created: int = 0
     skipped: int = 0  # originals that could not be augmented
     total: int = 0  # originals attempted
-
-
-# -- Loading ---------------------------------------------------------------------------------
-
-
-async def _load_originals(session: AsyncSession, version_id: uuid.UUID, modality: str) -> list[Original]:
-    """The version's train-split originals (never augmented copies) with what each modality needs."""
-    rows = (
-        await session.execute(
-            sa.select(DatasetItem)
-            .join(DatasetVersionItem, DatasetVersionItem.item_id == DatasetItem.id)
-            .where(
-                DatasetVersionItem.version_id == version_id,
-                DatasetVersionItem.split_type == "train",
-                DatasetItem.source_item_id.is_(None),
-            )
-            .order_by(DatasetItem.id)
-        )
-    ).scalars()
-    originals = {i.id: Original(i.id, i.external_id, i.storage_url, i.content_hash) for i in rows}
-    if not originals:
-        return []
-    ids = list(originals)
-
-    if modality == "text":
-        for f in (await session.execute(sa.select(TextFeatures).where(TextFeatures.item_id.in_(ids)))).scalars():
-            originals[f.item_id].text = {
-                "raw_text": f.raw_text,
-                "language_code": f.language_code,
-                "meta_json": f.meta_json,
-            }
-    elif modality == "tabular":
-        for f in (await session.execute(sa.select(TabularFeatures).where(TabularFeatures.item_id.in_(ids)))).scalars():
-            originals[f.item_id].features_json = f.features_json
-
-    for a in (
-        await session.execute(
-            sa.select(Annotation).where(Annotation.item_id.in_(ids)).order_by(Annotation.created_at, Annotation.id)
-        )
-    ).scalars():
-        originals[a.item_id].annotations.append(a)
-    return list(originals.values())
-
-
-def _has_content(original: Original, modality: str) -> bool:
-    if modality == "text":
-        return original.text is not None
-    if modality == "tabular":
-        return isinstance(original.features_json, dict)
-    return original.storage_url is not None
-
-
-def _samples_for_prepare(originals: list[Original], modality: str) -> list[Any]:
-    if modality == "text":
-        return [o.text["raw_text"] for o in originals if o.text]
-    if modality == "tabular":
-        return [o.features_json for o in originals if isinstance(o.features_json, dict)]
-    return []
 
 
 # -- Producing copies (blocking; runs in worker threads) -------------------------------------
@@ -234,34 +166,6 @@ def _produce(
 # -- Writing ---------------------------------------------------------------------------------
 
 
-def _feature_row(modality: str, item_id: uuid.UUID, f: dict[str, Any]) -> Any:
-    if modality == "vision":
-        return VisionFeatures(
-            item_id=item_id,
-            width=f["width"],
-            height=f["height"],
-            channels=f["channels"],
-            image_format=f["image_format"],
-        )
-    if modality == "audio":
-        return AudioFeatures(
-            item_id=item_id,
-            duration_seconds=Decimal(str(f["duration_seconds"])),
-            sample_rate_hz=f["sample_rate_hz"],
-            channels=f["channels"],
-            audio_codec=f["audio_codec"],
-        )
-    if modality == "text":
-        return TextFeatures(
-            item_id=item_id,
-            raw_text=f["raw_text"],
-            token_count=f["token_count"],
-            language_code=f["language_code"],
-            meta_json=f["meta_json"],
-        )
-    return TabularFeatures(item_id=item_id, features_json=f["features_json"])
-
-
 def _add_items(
     session: AsyncSession, dataset_id: uuid.UUID, original: Original, copies: list[Produced]
 ) -> list[tuple[uuid.UUID, Produced]]:
@@ -277,7 +181,10 @@ def _add_items(
                 storage_url=p.storage_url,
                 content_hash=p.content_hash,
                 byte_size=p.byte_size,
-                source_item_id=original.id,
+                # Always the pool ancestor, even when `original` is itself a preprocessed item:
+                # there is never a chain of derived items (see db/models/dataset.py).
+                source_item_id=original.source_item_id or original.id,
+                preprocessing=original.preprocessing,
                 augmentation={"copy": p.copy_number, "ops": p.applied},
             )
         )
@@ -294,19 +201,8 @@ def _add_children(
 ) -> None:
     """Features, copied annotations and train-split membership. Must run after the item rows are flushed."""
     for item_id, p in staged:
-        session.add(_feature_row(modality, item_id, p.features))
-        for a in original.annotations:
-            session.add(
-                Annotation(
-                    item_id=item_id,
-                    annotator_id=a.annotator_id,
-                    annotation_type=a.annotation_type,
-                    class_id=a.class_id,
-                    label_text_sequence=a.label_text_sequence,
-                    label_structured=a.label_structured,
-                    confidence_score=a.confidence_score,
-                )
-            )
+        session.add(feature_row(modality, item_id, p.features))
+        copy_annotations(session, item_id, original.annotations)
         session.add(DatasetVersionItem(version_id=version_id, item_id=item_id, split_type="train"))
 
 
@@ -325,13 +221,21 @@ async def materialize_augmentations(version_id: uuid.UUID) -> AugmentResult:
         if project is None:
             raise ValueError(f"Version {version_id} project not found")
         modality = get_task_descriptor(project.task).modality
-        originals = [o for o in await _load_originals(session, version_id, modality) if _has_content(o, modality)]
+        # Whatever is currently in the train split and not already an augmented copy: a pool
+        # original, or a preprocessed replacement if preprocessing ran first.
+        originals = [
+            o
+            for o in await load_items(
+                session, version_id, modality, splits={"train"}, where=DatasetItem.augmentation.is_(None)
+            )
+            if has_content(o, modality)
+        ]
 
     result = AugmentResult(total=len(originals))
     if not originals:
         return result
 
-    plan = build_plan(config, _samples_for_prepare(originals, modality))
+    plan = build_plan(config, samples_for_fit(originals, modality))
     gate = asyncio.Semaphore(_CONCURRENCY)
 
     async def run(original: Original) -> list[Produced] | None:
@@ -360,34 +264,3 @@ async def materialize_augmentations(version_id: uuid.UUID) -> AugmentResult:
             "could not be processed, the rest were left unchanged by the ops)"
         )
     return result
-
-
-# -- Removal ---------------------------------------------------------------------------------
-
-
-async def delete_augmented_items(session: AsyncSession, version_id: uuid.UUID) -> int:
-    """Delete a snapshot's augmented copies (rows only; S3 is cleanup_version_storage's job).
-
-    Membership rows go first: dataset_version_items.item_id is ON DELETE RESTRICT. Features and
-    annotations cascade from the item row.
-    """
-    ids = (
-        (
-            await session.execute(
-                sa.select(DatasetItem.id)
-                .join(DatasetVersionItem, DatasetVersionItem.item_id == DatasetItem.id)
-                .where(DatasetVersionItem.version_id == version_id, DatasetItem.source_item_id.is_not(None))
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for start in range(0, len(ids), _DELETE_CHUNK):
-        chunk = ids[start : start + _DELETE_CHUNK]
-        await session.execute(
-            sa.delete(DatasetVersionItem).where(
-                DatasetVersionItem.version_id == version_id, DatasetVersionItem.item_id.in_(chunk)
-            )
-        )
-        await session.execute(sa.delete(DatasetItem).where(DatasetItem.id.in_(chunk)))
-    return len(ids)

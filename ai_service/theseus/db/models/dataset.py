@@ -63,6 +63,11 @@ class DatasetVersion(Base):
     item_count: Mapped[int | None] = mapped_column(sa.Integer)
     class_count: Mapped[int | None] = mapped_column(sa.Integer)
     parquet_key: Mapped[str | None] = mapped_column(sa.Text)
+    # What the snapshot was built with (theseus.preprocessing.config.PreprocessingConfig), NULL for none.
+    preprocessing_config: Mapped[Any | None] = mapped_column(JSONB)
+    # Pool items replaced by a preprocessed copy in at least one split; NOT included in item_count
+    # (preprocessing replaces, it never adds).
+    preprocessed_count: Mapped[int] = mapped_column(sa.Integer, server_default="0")
     # What the snapshot was built with (theseus.augmentation.config.AugmentationConfig), NULL for none.
     augmentation_config: Mapped[Any | None] = mapped_column(JSONB)
     # Augmented copies added to the train split; included in item_count.
@@ -75,9 +80,15 @@ class DatasetVersion(Base):
 class DatasetItem(Base):
     """A row in the project-wide, content-addressed, deduplicated pool.
 
-    Augmented copies are rows too, but they are NOT pool members: `source_item_id` marks them, they
-    belong to exactly one snapshot (never the draft), and their files live under that snapshot's
-    S3 prefix. Pool dedup on (dataset_id, content_hash) therefore only covers originals.
+    Preprocessed replacements and augmented copies are rows too, but they are NOT pool members:
+    `source_item_id` marks them, they belong to exactly one snapshot (never the draft), and their
+    files live under that snapshot's S3 prefix. Pool dedup on (dataset_id, content_hash) therefore
+    only covers originals. `source_item_id` always points at the pool original directly, even for an
+    augmented copy made from a preprocessed item: there is never a chain of derived items.
+
+    An item with `source_item_id` set is preprocessed-only if `augmentation` is NULL (it replaced its
+    original for the splits its preprocessing ops selected), or augmented if `augmentation` is set
+    (a copy added to the train split, carrying forward any `preprocessing` its source item had).
     """
 
     __tablename__ = "dataset_items"
@@ -102,7 +113,10 @@ class DatasetItem(Base):
     source_item_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("dataset_items.id", ondelete="RESTRICT"), index=True
     )
-    # The ops (and params) that produced this copy.
+    # The preprocessing ops (and params) that produced this item, if any; carried forward onto an
+    # augmented copy made from a preprocessed item.
+    preprocessing: Mapped[Any | None] = mapped_column(JSONB)
+    # The augmentation ops (and params) that produced this copy; NULL for a preprocessed-only item.
     augmentation: Mapped[Any | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = created_at()
     # Set instead of hard-deleting when a snapshot RESTRICT FK blocks the delete.

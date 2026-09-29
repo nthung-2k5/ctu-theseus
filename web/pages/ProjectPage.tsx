@@ -116,7 +116,7 @@ export function ProjectPage() {
     {
       id: 'snapshots',
       label: 'Snapshot',
-      desc: 'Freeze the draft, optionally augmented, as an immutable version.',
+      desc: 'Freeze the draft, optionally preprocessed and/or augmented, as an immutable version.',
       icon: ArchiveIcon,
       to: '/project/$projectId/snapshots',
       status: hasReadySnapshot ? `${readySnapshots} ready` : 'None yet',

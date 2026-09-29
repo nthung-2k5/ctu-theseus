@@ -62,13 +62,29 @@ bunx biome check .                           # lint/format from repo root
   conversion is `TrainerBackend.convert`, and a format is only offered for a run whose backend
   actually produces that artifact (`backends.registry.trainable_backends` /
   `export.registry.list_export_formats(task, backend)`).
-- **Augmentation happens at snapshot creation, not training.** Ops are Python classes in
-  `ai_service/theseus/augmentation/ops/` (subclass `Augmentation`, a pydantic `Params` model, `apply`);
-  `GET /api/projects/{id}/augmentations` serves them and their parameters to the snapshot dialog.
-  `services/augmentation.py` materializes the copies as real train-split `dataset_items`
-  (`source_item_id` set) during `build_snapshot`. Augmented copies are NOT pool items: their files live
-  under `snapshots/{versionId}/augmented/`, pool dedup lookups must filter `source_item_id IS NULL`, and
-  they are deleted with their snapshot. There is no augmentation in a trainer backend's compiled config.
+- **Preprocessing and augmentation happen at snapshot creation, not training.** Two plugin packages,
+  both driven by `build_snapshot` (`services/snapshot.py`), preprocessing first:
+  - **Preprocessing** ops are deterministic and each is scoped to whichever splits (train/validation/
+    test) a snapshot's config selects for it. `services/preprocessing.py` REPLACES a pool item with its
+    preprocessed copy in the version's membership for exactly those splits — nothing is added, and an
+    item whose ops leave it unchanged, or whose split none of them selected, stays the pool item it
+    already is. A `fit`-needing op (e.g. tabular standardize) always fits on the train split's samples,
+    even if train itself isn't one of its selected splits, so nothing about validation or test leaks in.
+  - **Augmentation** ops are random and train-split only: `services/augmentation.py` adds N extra copies
+    of each train item, made from whatever is in the train split after preprocessing ran (so a copy
+    carries forward any `preprocessing` its source item had).
+  - Both are Python classes, one package per concern — `ai_service/theseus/preprocessing/ops/`
+    (subclass `Preprocessing`, a pydantic `Params` model, `apply`) and
+    `ai_service/theseus/augmentation/ops/` (subclass `Augmentation`, same shape plus an `rng`) —
+    served to the snapshot dialog via `GET /api/projects/{id}/preprocessing` and `/augmentations`.
+  - A preprocessed or augmented item is a real `dataset_items` row with `source_item_id` set, always
+    pointing at the pool ancestor directly (never at an intermediate preprocessed row — there is no
+    chain of derived items). `augmentation` is set only on an augmented copy; `preprocessing` is set on
+    a preprocessed item and carried forward onto an augmented copy made from one.
+  - Neither is a pool item: their files live under `snapshots/{versionId}/preprocessed/` and
+    `snapshots/{versionId}/augmented/`, pool dedup lookups must filter `source_item_id IS NULL`, and
+    they are deleted with their snapshot (`services/derived_items.delete_derived_items`). Neither is
+    replayed at inference or export time yet — a trained model only ever sees what the snapshot froze.
 - **Job handlers must stay fast and idempotent.** `theseus/jobs/dispatcher.py` claims work off the
   domain tables themselves (`training_runs`, `model_exports` — see
   `README.md`'s "Jobs" section) with a guarded compare-and-swap

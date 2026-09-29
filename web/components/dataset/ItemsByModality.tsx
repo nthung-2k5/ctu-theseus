@@ -37,9 +37,12 @@ export interface DatasetListItem {
   visionFeatures?: { width: number; height: number; imageFormat: string | null } | null
   audioFeatures?: { durationSeconds: string | number; sampleRateHz: number } | null
   tabularFeatures?: { featuresJson: unknown } | null
-  /** Set on an augmented copy (only snapshots built with augmentation have these). */
+  /** Set on any derived item (preprocessed, augmented, or both): the pool original it came from. */
   sourceItemId?: string | null
   sourceExternalId?: string | null
+  /** The preprocessing ops that produced this item; carried forward onto an augmented copy too. */
+  preprocessing?: unknown
+  /** Set only on an augmented copy. */
   augmentation?: unknown
 }
 
@@ -49,15 +52,27 @@ const opLabel = (id: string) => {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-/** The ops that produced an augmented copy, from its stored `{copy, ops: [{id, params}]}` record. */
-const appliedOps = (item: DatasetListItem): string[] => {
-  const ops = (item.augmentation as { ops?: { id: string }[] } | null | undefined)?.ops
+/** The ops recorded on a preprocessed or augmented item's `{ops: [{id, params}]}` (or `{copy, ops}`) field. */
+const appliedOps = (record: unknown): string[] => {
+  const ops = (record as { ops?: { id: string }[] } | null | undefined)?.ops
   return Array.isArray(ops) ? ops.map((o) => opLabel(o.id)) : []
 }
 
+const PreprocessedBadge = ({ item }: { item: DatasetListItem }) => {
+  if (!item.preprocessing) return null
+  const ops = appliedOps(item.preprocessing)
+  return (
+    <Tooltip label={`Preprocessed${ops.length ? ` · ${ops.join(', ')}` : ''}`} withArrow multiline maw={280}>
+      <Badge size="xs" variant="light" color="cyan">
+        Preprocessed
+      </Badge>
+    </Tooltip>
+  )
+}
+
 const AugmentedBadge = ({ item }: { item: DatasetListItem }) => {
-  if (!item.sourceItemId) return null
-  const ops = appliedOps(item)
+  if (!item.augmentation) return null
+  const ops = appliedOps(item.augmentation)
   return (
     <Tooltip
       label={`Augmented from ${item.sourceExternalId ?? 'an original item'}${ops.length ? ` · ${ops.join(', ')}` : ''}`}
@@ -197,16 +212,24 @@ const MediaItemDetails = ({
           <>
             <Group justify="space-between" py={4}>
               <Text size="sm" c="dimmed">
-                Augmented from
+                Derived from
               </Text>
               <Text size="sm">{item.sourceExternalId ?? 'an original item'}</Text>
             </Group>
-            {appliedOps(item).length > 0 && (
+            {appliedOps(item.preprocessing).length > 0 && (
               <Group justify="space-between" py={4}>
                 <Text size="sm" c="dimmed">
-                  Applied
+                  Preprocessed
                 </Text>
-                <Text size="sm">{appliedOps(item).join(', ')}</Text>
+                <Text size="sm">{appliedOps(item.preprocessing).join(', ')}</Text>
+              </Group>
+            )}
+            {appliedOps(item.augmentation).length > 0 && (
+              <Group justify="space-between" py={4}>
+                <Text size="sm" c="dimmed">
+                  Augmented
+                </Text>
+                <Text size="sm">{appliedOps(item.augmentation).join(', ')}</Text>
               </Group>
             )}
           </>
@@ -324,6 +347,7 @@ const MediaItemsGrid = <T extends DatasetListItem>({
                 </Text>
                 <Group gap={4} mt={4}>
                   <StatusBadge value={item.splitType} colorMap={SPLIT_COLORS} size="xs" />
+                  <PreprocessedBadge item={item} />
                   <AugmentedBadge item={item} />
                   {className && (
                     <Badge size="xs" variant="light" color="teal">
@@ -413,6 +437,7 @@ const TabularTextItemsTable = <T extends DatasetListItem>({
     render: (item) => (
       <Group gap={6} wrap="nowrap">
         <Text size="xs">{item.externalId ?? '—'}</Text>
+        <PreprocessedBadge item={item} />
         <AugmentedBadge item={item} />
       </Group>
     ),

@@ -40,8 +40,9 @@ class LudwigHyperparameters(HyperparamsBase):
     `model_id` (from HyperparamsBase) is the encoder id from the task's encoder catalog; defaults
     to the first. Kept as `encoderId` on the wire (the field predates the generic `model_id` name
     and every existing client already sends it) rather than picking up HyperparamsBase's generated
-    `modelId` alias. There is deliberately no augmentation here: it moved to snapshot creation,
-    where the augmented copies are real, browsable train-split items (see services/augmentation.py).
+    `modelId` alias. There is deliberately no preprocessing or augmentation here: both moved to
+    snapshot creation, where the resulting items are real, browsable dataset items (see
+    services/preprocessing.py and services/augmentation.py).
     """
 
     model_id: str | None = Field(default=None, alias="encoderId")

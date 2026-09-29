@@ -7,6 +7,7 @@ theseus-datasets/
   pool/{projectId}/{hash[0:2]}/{hash}{ext}   content-addressed, deduplicated upload pool
   snapshots/{versionId}/dataset.parquet      immutable, cut from the pool
   snapshots/{versionId}/manifest.json
+  snapshots/{versionId}/preprocessed/{hh}/{hash}{ext}   preprocessed replacements built with that snapshot (not pooled)
   snapshots/{versionId}/augmented/{hh}/{hash}{ext}   augmented copies built with that snapshot (not pooled)
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config
@@ -97,6 +98,17 @@ def augmented_prefix(version_id: str) -> str:
 
 def augmented_key(version_id: str, content_hash: str, ext: str) -> str:
     return f"{augmented_prefix(version_id)}{content_hash[:2]}/{content_hash}{ext}"
+
+
+def preprocessed_prefix(version_id: str) -> str:
+    """Everything a snapshot's preprocessing wrote. Version-scoped, NOT in the content-addressed pool:
+    a preprocessed replacement belongs to exactly one snapshot, so deleting the snapshot deletes the
+    prefix and no replacement can be shared with (or deduplicated onto) a real pool item."""
+    return f"snapshots/{version_id}/preprocessed/"
+
+
+def preprocessed_key(version_id: str, content_hash: str, ext: str) -> str:
+    return f"{preprocessed_prefix(version_id)}{content_hash[:2]}/{content_hash}{ext}"
 
 
 def training_config_key(run_id: str) -> str:

@@ -111,6 +111,7 @@ theseus-datasets/
   pool/{projectId}/{hash[0:2]}/{hash}{ext}   content-addressed, deduped upload pool
   snapshots/{versionId}/dataset.parquet      immutable, cut from the pool
   snapshots/{versionId}/manifest.json
+  snapshots/{versionId}/preprocessed/...     preprocessed replacements built with that snapshot (not pooled)
   snapshots/{versionId}/augmented/...        augmented copies built with that snapshot (not pooled)
 
 theseus-training/
@@ -127,28 +128,47 @@ theseus-models/
 Dataset pool uploads are deduplicated per-project by sha256: the same file uploaded twice
 (or referenced from two dataset versions) is stored once.
 
-### Snapshot augmentation
+### Snapshot preprocessing and augmentation
 
-Augmentation is chosen when a **snapshot** is created, not when training. The snapshot builder
-(Snapshots → New snapshot) can add N augmented copies of every item in the **train** split (validation and test stay
-original, so metrics measure real data). During the build these copies are materialized as real
-`dataset_items` rows (`source_item_id` points at the original, with the modality features and a copy
-of its labels) and train-split members of that snapshot, so the parquet, manifest, split counts and
-the Snapshots page all include them. The Snapshots page shows an "Augmented" badge and an
-Original / Augmented filter, and the training form has no augmentation option.
+Both are chosen when a **snapshot** is created, not when training, and preprocessing runs first.
 
-Augmented copies are *not* pool items: their files live under `snapshots/{versionId}/augmented/`,
-pool dedup only considers originals (`source_item_id IS NULL`), and deleting the snapshot deletes
-its copies. Copies are seeded from (snapshot, item, copy index), so a rebuild reproduces them.
+**Preprocessing** ops are deterministic and each is scoped to whichever splits (train/validation/test)
+the snapshot builder selects for it. A preprocessed item **replaces** its original in the snapshot's
+membership for exactly those splits — nothing is added, unlike augmentation below. An item whose ops
+leave it unchanged, or whose split none of them selected, stays the pool item it already is. A
+`fit`-needing op (e.g. tabular standardize) always fits on the train split's samples, even when train
+isn't one of its own selected splits, so nothing about validation or test leaks into how a value is
+scaled. Shipped ops: image (resize, grayscale), text (lowercase, normalize whitespace), audio
+(resample, mono) and tabular (standardize, min-max).
 
-**Adding an augmentation:** create a module in `ai_service/theseus/augmentation/ops/` with a
-subclass of `Augmentation` that sets `id`, `label`, `modality`, a pydantic `Params` model (its
-`ge`/`le`/`default`/`title` become the form fields) and implements `apply(sample, params, rng)`.
-Restart the backend. `GET /api/projects/{id}/augmentations` returns it for projects whose task it
+**Augmentation** can add N randomly perturbed copies of every item in the **train** split (validation
+and test stay real, so metrics measure real data), made from whatever is in the train split after
+preprocessing ran — so a copy carries forward any preprocessing its source item had. Shipped ops: image
+(flip, rotate, brightness, contrast, saturation, blur, crop, noise), text (word deletion, swap,
+duplication, typos), audio (gain, noise, time shift, speed) and tabular (noise, scale jitter, feature
+dropout).
+
+During the build, both are materialized as real `dataset_items` rows — `source_item_id` always points
+at the pool ancestor directly, even for an augmented copy made from a preprocessed item (there is never
+a chain of derived items) — with the modality features and a copy of the original's labels, so the
+parquet, manifest, split counts and the Snapshots page all include them unchanged. The Snapshots page
+shows "Preprocessed"/"Augmented" badges and an Original / Augmented filter, and the training form has
+neither option: both are fixed once the snapshot is built.
+
+Preprocessed and augmented items are *not* pool items: their files live under
+`snapshots/{versionId}/preprocessed/` and `snapshots/{versionId}/augmented/`, pool dedup only considers
+originals (`source_item_id IS NULL`), and deleting the snapshot deletes them
+(`services/derived_items.delete_derived_items`). Augmented copies are seeded from (snapshot, item, copy
+index), so a rebuild reproduces them.
+
+**Adding a preprocessing op:** create a module in `ai_service/theseus/preprocessing/ops/` with a
+subclass of `Preprocessing` that sets `id`, `label`, `modality`, a pydantic `Params` model and
+implements `apply(sample, params, state)` (no rng: it must be deterministic). **Adding an
+augmentation:** the same shape in `ai_service/theseus/augmentation/ops/`, subclassing `Augmentation`
+and implementing `apply(sample, params, rng, state)`. Either way, restart the backend:
+`GET /api/projects/{id}/preprocessing` or `/augmentations` returns it for projects whose task it
 supports (by default label-preserving classification and regression tasks of its modality) and the
-snapshot dialog renders its parameters, with no frontend change. Shipped ops: image (flip, rotate,
-brightness, contrast, saturation, blur, crop, noise), text (word deletion, swap, duplication,
-typos), audio (gain, noise, time shift, speed) and tabular (noise, scale jitter, feature dropout).
+snapshot dialog renders its parameters, with no frontend change.
 
 ### Export formats
 

@@ -1,38 +1,15 @@
 """Tabular augmentations. Samples are the item's features_json dict; only numeric columns are touched."""
 
-import math
 import random
 from typing import Any
 
 from pydantic import Field
 
 from theseus.augmentation.base import Augmentation, ParamsModel
-
-# (mean, std) per numeric column, computed over the originals being augmented.
-ColumnStats = dict[str, tuple[float, float]]
-
-
-def _is_number(v: Any) -> bool:
-    return isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v)
-
-
-def _column_stats(samples: list[dict[str, Any]]) -> ColumnStats:
-    columns: dict[str, list[float]] = {}
-    for row in samples:
-        for key, value in row.items():
-            if _is_number(value):
-                columns.setdefault(key, []).append(float(value))
-    stats: ColumnStats = {}
-    for key, values in columns.items():
-        mean = sum(values) / len(values)
-        std = math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
-        stats[key] = (mean, std)
-    return stats
-
-
-def _like(original: Any, value: float) -> Any:
-    """An int column stays integer-valued."""
-    return round(value) if isinstance(original, int) else value
+from theseus.tabular_stats import ColumnStats
+from theseus.tabular_stats import column_stats as _column_stats
+from theseus.tabular_stats import is_number as _is_number
+from theseus.tabular_stats import like as _like
 
 
 class _NumericOp(Augmentation):

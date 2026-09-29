@@ -31,7 +31,9 @@ from theseus.db.models import (
     TextFeatures,
 )
 from theseus.services import storage
-from theseus.services.augmentation import delete_augmented_items, materialize_augmentations
+from theseus.services.augmentation import materialize_augmentations
+from theseus.services.derived_items import delete_derived_items
+from theseus.services.preprocessing import materialize_preprocessing
 from theseus.services.task_registry import ColumnSpec, SnapshotContext, TaskDescriptor, get_task_descriptor
 
 logger = logging.getLogger(__name__)
@@ -220,16 +222,26 @@ async def build_snapshot(version_id: uuid.UUID) -> None:
     """Build the parquet and manifest, then flip building -> ready | failed. Never raises."""
     sessionmaker = get_sessionmaker()
     loop = asyncio.get_running_loop()
+    preprocessing_config: dict[str, Any] | None = None
     augmentation_config: dict[str, Any] | None = None
+    preprocessed = 0
     augmented = 0
     try:
-        # Phase 1 (only when requested): materialize augmented train-split copies as real items, so the
-        # membership load below, and with it the parquet, manifest and counts, includes them unchanged.
+        # Phase 1 (only when requested): materialize preprocessed replacements, then augmented
+        # train-split copies, as real items, so the membership load below, and with it the
+        # parquet, manifest and counts, includes them unchanged. Preprocessing runs first so a
+        # train-split augmented copy is made from the preprocessed item, not the raw original.
         async with sessionmaker() as session:
             version = await session.get(DatasetVersion, version_id)
             if version is None:
                 raise ValueError(f"Version {version_id} not found")
+            preprocessing_config = version.preprocessing_config
             augmentation_config = version.augmentation_config
+        if preprocessing_config:
+            result = await materialize_preprocessing(version_id)
+            preprocessed = result.created
+            if result.skipped:
+                preprocessing_config = {**preprocessing_config, "skippedItems": result.skipped}
         if augmentation_config:
             result = await materialize_augmentations(version_id)
             augmented = result.created
@@ -287,6 +299,8 @@ async def build_snapshot(version_id: uuid.UUID) -> None:
                     item_count=len(members),
                     class_count=len(class_names),
                     parquet_key=parquet_key,
+                    preprocessed_count=preprocessed,
+                    preprocessing_config=preprocessing_config,
                     augmented_count=augmented,
                     augmentation_config=augmentation_config,
                     built_at=sa.func.now(),
@@ -306,22 +320,31 @@ async def build_snapshot(version_id: uuid.UUID) -> None:
         except Exception:
             # Startup recovery fails any version left in `building`, so this is not fatal.
             logger.exception("Could not record snapshot failure for version %s", version_id)
-        if augmentation_config:
-            await _discard_partial_augmentation(version_id)
+        if preprocessing_config or augmentation_config:
+            await _discard_partial_derivations(version_id, preprocessing_config, augmentation_config)
 
 
-async def _discard_partial_augmentation(version_id: uuid.UUID) -> None:
-    """A failed build must not leave half an augmentation behind: its rows and S3 objects are useless
-    (nothing trains on a failed snapshot) and would otherwise linger until the version is deleted."""
+async def _discard_partial_derivations(
+    version_id: uuid.UUID, preprocessing_config: dict[str, Any] | None, augmentation_config: dict[str, Any] | None
+) -> None:
+    """A failed build must not leave half a preprocessing or augmentation behind: its rows and S3
+    objects are useless (nothing trains on a failed snapshot) and would otherwise linger until the
+    version is deleted."""
     try:
-        await asyncio.get_running_loop().run_in_executor(
-            None, storage.delete_prefix, C.BUCKET_DATASETS, storage.augmented_prefix(str(version_id))
-        )
+        loop = asyncio.get_running_loop()
+        if preprocessing_config:
+            await loop.run_in_executor(
+                None, storage.delete_prefix, C.BUCKET_DATASETS, storage.preprocessed_prefix(str(version_id))
+            )
+        if augmentation_config:
+            await loop.run_in_executor(
+                None, storage.delete_prefix, C.BUCKET_DATASETS, storage.augmented_prefix(str(version_id))
+            )
         async with get_sessionmaker()() as session:
-            await delete_augmented_items(session, version_id)
+            await delete_derived_items(session, version_id)
             await session.commit()
     except Exception:
-        logger.exception("Could not discard partial augmentation for version %s", version_id)
+        logger.exception("Could not discard partial preprocessing/augmentation for version %s", version_id)
 
 
 async def read_snapshot_manifest(version_id: uuid.UUID | str) -> SnapshotContext:

@@ -81,7 +81,7 @@ export function ConfigHeader({
           disabled={versions.length === 0}
           data={versions.map((v) => ({
             value: v.id,
-            label: `${v.versionTag}${v.augmentedCount ? ` · +${v.augmentedCount.toLocaleString()} aug` : ''}`,
+            label: `${v.versionTag}${v.preprocessedCount ? ` · ~${v.preprocessedCount.toLocaleString()} pre` : ''}${v.augmentedCount ? ` · +${v.augmentedCount.toLocaleString()} aug` : ''}`,
           }))}
           value={versionId}
           onChange={onVersionChange}
@@ -112,6 +112,7 @@ export function ConfigHeader({
       {selected && (
         <Text size="xs" c="dimmed" mt="xs" className="tnum">
           Training on {selected.versionTag}: {(selected.itemCount ?? 0).toLocaleString()} items
+          {selected.preprocessedCount ? ` (${selected.preprocessedCount.toLocaleString()} preprocessed)` : ''}
           {selected.augmentedCount ? ` (${selected.augmentedCount.toLocaleString()} augmented)` : ''} · #
           {selected.id.slice(0, 8)}
         </Text>

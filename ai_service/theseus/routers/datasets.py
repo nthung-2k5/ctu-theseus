@@ -35,6 +35,17 @@ from theseus.db.models import (
     VisionFeatures,
 )
 from theseus.deps import AnnotationDep, DraftDep, ItemDep, ProjectDep, SessionDep, VersionDep
+from theseus.preprocessing.config import MAX_PREPROCESSED_ITEMS
+from theseus.preprocessing.registry import (
+    PreprocessingConfigError,
+    list_preprocessing,
+)
+from theseus.preprocessing.registry import (
+    describe as describe_preprocessing,
+)
+from theseus.preprocessing.registry import (
+    validate_config as validate_preprocessing_config,
+)
 from theseus.schemas.datasets import (
     AnnotationListResponse,
     AnnotationOut,
@@ -64,6 +75,7 @@ from theseus.schemas.datasets import (
     ItemRow,
     ItemRowWithDuplicate,
     MinMaxAvg,
+    PreprocessingListResponse,
     SetSplitBody,
     SetSplitResponse,
     TabularFeaturesOut,
@@ -83,9 +95,9 @@ from theseus.schemas.datasets import (
 from theseus.schemas.projects import DatasetSplit, VersionOut
 from theseus.services import datasets as svc
 from theseus.services import storage
-from theseus.services.augmentation import delete_augmented_items
 from theseus.services.cleanup import cleanup_version_storage
 from theseus.services.dataset_views import split_counts_for_dataset
+from theseus.services.derived_items import delete_derived_items
 from theseus.services.image_size import read_image_dimensions
 from theseus.services.snapshot import build_snapshot
 from theseus.services.task_registry import get_task_descriptor, is_classification_task
@@ -110,8 +122,11 @@ def _num(value: Any) -> float:
 async def create_version(body: CreateVersionBody, draft: DraftDep, session: SessionDep) -> VersionCreatedResponse:
     """Snapshot the draft current pool membership into a new immutable version (built asynchronously).
 
-    With `augmentation`, the build also materializes augmented copies of the TRAIN split (see
-    services/augmentation.py); validation and test stay original so metrics measure real data.
+    With `preprocessing`, the build first replaces items with a deterministic preprocessed copy for
+    whichever splits each op selects (see services/preprocessing.py). With `augmentation`, the build
+    then also materializes augmented copies of the TRAIN split, made from any preprocessed
+    replacement (see services/augmentation.py); validation and test stay real so metrics measure
+    real data.
     """
     tag = body.version_tag
 
@@ -120,6 +135,31 @@ async def create_version(body: CreateVersionBody, draft: DraftDep, session: Sess
     ).scalar_one()
     if draft_count == 0:
         raise HTTPException(400, "The draft is empty; add items before creating a snapshot")
+
+    preprocessing_config = None
+    if body.preprocessing is not None:
+        try:
+            pre_config = validate_preprocessing_config(get_task_descriptor(draft.project.task), body.preprocessing)
+        except PreprocessingConfigError as e:
+            raise HTTPException(400, str(e)) from None
+        selected_splits = {s for op in pre_config.ops for s in op.splits}
+        selected_count = (
+            await session.execute(
+                sa.select(sa.func.count()).where(
+                    DatasetVersionItem.version_id == draft.draft.id,
+                    DatasetVersionItem.split_type.in_(selected_splits),
+                )
+            )
+        ).scalar_one()
+        if selected_count == 0:
+            raise HTTPException(400, "The draft has no items in the selected splits to preprocess")
+        if selected_count > MAX_PREPROCESSED_ITEMS:
+            raise HTTPException(
+                400,
+                f"{selected_count} items in the selected splits exceeds the limit of "
+                f"{MAX_PREPROCESSED_ITEMS} preprocessed items per snapshot",
+            )
+        preprocessing_config = pre_config.model_dump(by_alias=True, exclude_none=True)
 
     augmentation_config = None
     if body.augmentation is not None:
@@ -145,7 +185,11 @@ async def create_version(body: CreateVersionBody, draft: DraftDep, session: Sess
         augmentation_config = config.model_dump(by_alias=True, exclude_none=True)
 
     version = DatasetVersion(
-        dataset_id=draft.project.id, version_tag=tag, status="building", augmentation_config=augmentation_config
+        dataset_id=draft.project.id,
+        version_tag=tag,
+        status="building",
+        preprocessing_config=preprocessing_config,
+        augmentation_config=augmentation_config,
     )
     session.add(version)
     try:
@@ -194,11 +238,19 @@ async def delete_version(version: VersionDep, session: SessionDep) -> None:
     if version.version_tag is None:
         raise HTTPException(400, "Cannot delete draft version")
     await cleanup_version_storage(version.id, version.version_tag)
-    # Augmented copies belong to this snapshot alone: their rows go with it (membership first, see
-    # delete_augmented_items), unlike pool items which other snapshots and the draft may share.
-    await delete_augmented_items(session, version.id)
+    # Preprocessed replacements and augmented copies belong to this snapshot alone: their rows go
+    # with it (membership first, see delete_derived_items), unlike pool items which other snapshots
+    # and the draft may share.
+    await delete_derived_items(session, version.id)
     await session.delete(version)
     await session.commit()
+
+
+@router.get("/projects/{project_id}/preprocessing", response_model=PreprocessingListResponse)
+async def list_preprocessing_options(project: ProjectDep) -> PreprocessingListResponse:
+    """The preprocessing ops a snapshot of this project can be built with (installed ops that support its task)."""
+    task = get_task_descriptor(project.task)
+    return PreprocessingListResponse(preprocessing=[describe_preprocessing(op) for op in list_preprocessing(task)])
 
 
 @router.get("/projects/{project_id}/augmentations", response_model=AugmentationListResponse)
@@ -264,11 +316,11 @@ async def list_items(
     # over this, so every class count reflects the current split and search whatever class is selected.
     base = [vi.version_id == version.id]
     if origin != "all":
-        # correlate(vi) only: the listing query joins DatasetItem itself, and auto-correlation would
-        # otherwise strip it from this subquery's FROM.
-        is_original = (
-            sa.exists().where(DatasetItem.id == vi.item_id, DatasetItem.source_item_id.is_(None)).correlate(vi)
-        )
+        # "original" here means "not an augmented copy": a preprocessed replacement counts as
+        # original too, since it still stands in for exactly one real item. correlate(vi) only:
+        # the listing query joins DatasetItem itself, and auto-correlation would otherwise strip
+        # it from this subquery's FROM.
+        is_original = sa.exists().where(DatasetItem.id == vi.item_id, DatasetItem.augmentation.is_(None)).correlate(vi)
         base.append(is_original if origin == "original" else ~is_original)
     if split_value:
         base.append(vi.split_type == split_value)
@@ -384,6 +436,7 @@ async def list_items(
                     else None,
                     source_item_id=item.source_item_id,
                     source_external_id=source_names.get(item.source_item_id) if item.source_item_id else None,
+                    preprocessing=item.preprocessing,
                     augmentation=item.augmentation,
                 )
             )
@@ -493,7 +546,7 @@ async def upload_items(
                         sa.select(DatasetItem).where(
                             DatasetItem.dataset_id == project_id,
                             DatasetItem.content_hash == upload.hash,
-                            DatasetItem.source_item_id.is_(None),  # never dedup onto an augmented copy
+                            DatasetItem.source_item_id.is_(None),  # never dedup onto a derived item
                         )
                     )
                 ).scalar_one_or_none()
@@ -547,7 +600,7 @@ async def upload_items(
 @router.delete("/items/{item_id}", status_code=204)
 async def delete_item(item: ItemDep, session: SessionDep) -> None:
     if item.source_item_id is not None:
-        raise HTTPException(400, "Augmented items belong to a snapshot; delete the snapshot instead")
+        raise HTTPException(400, "Derived items belong to a snapshot; delete the snapshot instead")
     await svc.delete_item_from_pool(session, item.id, item.dataset_id)
     await session.commit()
 

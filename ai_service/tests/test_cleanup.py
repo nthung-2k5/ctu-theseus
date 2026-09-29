@@ -25,6 +25,7 @@ async def test_version_cleanup_deletes_snapshot_objects_but_is_a_noop_for_the_dr
         [
             ("file", "theseus-datasets", f"snapshots/{vid}/dataset.parquet"),
             ("file", "theseus-datasets", f"snapshots/{vid}/manifest.json"),
+            ("prefix", "theseus-datasets", f"snapshots/{vid}/preprocessed/"),  # replacements built with the snapshot
             ("prefix", "theseus-datasets", f"snapshots/{vid}/augmented/"),  # copies built with the snapshot
         ]
     )
@@ -40,7 +41,7 @@ async def test_failed_delete_is_swallowed_and_does_not_stop_the_rest(monkeypatch
     monkeypatch.setattr(storage, "delete_file", flaky)
     monkeypatch.setattr(storage, "delete_prefix", flaky)  # same (bucket, key-or-prefix) shape
     await cleanup.cleanup_version_storage(uuid.uuid4(), "v1")  # must not raise
-    assert len(seen) == 3  # parquet, manifest and the augmented prefix were all still attempted
+    assert len(seen) == 4  # parquet, manifest and the preprocessed/augmented prefixes were all still attempted
 
 
 async def _seed_project(s):
@@ -83,9 +84,11 @@ async def test_project_cleanup_covers_pool_snapshots_and_runs(db, calls):
     assert ("prefix", "theseus-training", f"{rid}/results/") in calls
     assert ("prefix", "theseus-training", f"{rid}/evaluation/") in calls
     assert ("prefix", "theseus-models", f"{rid}/") in calls
+    assert ("prefix", "theseus-datasets", f"snapshots/{sid}/preprocessed/") in calls
     assert ("prefix", "theseus-datasets", f"snapshots/{sid}/augmented/") in calls
-    # only the real snapshot has snapshot objects (parquet, manifest, augmented copies); the draft has none
-    assert sum(1 for c in calls if "snapshots/" in str(c[2])) == 3
+    # only the real snapshot has snapshot objects (parquet, manifest, preprocessed/augmented copies);
+    # the draft has none
+    assert sum(1 for c in calls if "snapshots/" in str(c[2])) == 4
 
 
 async def test_run_cleanup_removes_only_that_runs_objects(db, calls):

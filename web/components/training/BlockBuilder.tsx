@@ -101,6 +101,7 @@ export function BlockBuilder({
   const dropoutSpec = backend.params.find((p) => p.name === 'headDropout')
   const freezeSpec = backend.params.find((p) => p.name === 'freezeBackbone')
   const weightsSpec = backend.params.find((p) => p.name === 'useClassWeights')
+  const preprocessing = version?.preprocessingConfig ?? null
   const augmentation = version?.augmentationConfig ?? null
 
   const modelInfo = backend.models.find((m) => m.id === modelId)
@@ -174,7 +175,7 @@ export function BlockBuilder({
   const blocks: BlockKind[] = ORDER.filter(
     (k) =>
       (k === 'preprocess' && preOn) ||
-      (k === 'augment' && !!augmentation) ||
+      (k === 'augment' && !!(augmentation || preprocessing)) ||
       k === 'backbone' ||
       (k === 'head' && !!layersSpec) ||
       (k === 'loss' && lossOn),
@@ -231,19 +232,42 @@ export function BlockBuilder({
         )
       case 'augment':
         return (
-          <div>
-            <Group gap={6}>
-              {augmentation?.ops.map((op) => (
-                <Badge key={op.id} color="grape" tt="none">
-                  {opLabel(op.id)} · {Math.round((op.probability ?? 1) * 100)}%
-                </Badge>
-              ))}
-            </Group>
-            <Text size="xs" c="dimmed" mt={4}>
-              {augmentation?.copiesPerItem ?? 1}× copies of each training item, baked into snapshot{' '}
-              {version?.versionTag}. Change it by building a new snapshot.
+          <Stack gap={6}>
+            {preprocessing && (
+              <div>
+                <Text size="xs" fw={500}>
+                  Preprocessing
+                </Text>
+                <Group gap={6} mt={2}>
+                  {preprocessing.ops.map((op) => (
+                    <Badge key={op.id} color="cyan" tt="none">
+                      {opLabel(op.id)} · {(op.splits ?? []).join('/')}
+                    </Badge>
+                  ))}
+                </Group>
+              </div>
+            )}
+            {augmentation && (
+              <div>
+                <Text size="xs" fw={500}>
+                  Augmentation
+                </Text>
+                <Group gap={6} mt={2}>
+                  {augmentation.ops.map((op) => (
+                    <Badge key={op.id} color="grape" tt="none">
+                      {opLabel(op.id)} · {Math.round((op.probability ?? 1) * 100)}%
+                    </Badge>
+                  ))}
+                </Group>
+                <Text size="xs" c="dimmed" mt={4}>
+                  {augmentation.copiesPerItem ?? 1}× copies of each training item.
+                </Text>
+              </div>
+            )}
+            <Text size="xs" c="dimmed">
+              Baked into snapshot {version?.versionTag}. Change it by building a new snapshot.
             </Text>
-          </div>
+          </Stack>
         )
       case 'backbone':
         return (
@@ -396,8 +420,8 @@ export function BlockBuilder({
               {KIND_LABEL[p.kind]} · {p.label}
             </button>
           ))}
-          {!augmentation && (
-            <Tooltip label="Augmentation is chosen when a snapshot is built" multiline w={200}>
+          {!augmentation && !preprocessing && (
+            <Tooltip label="Preprocessing and augmentation are chosen when a snapshot is built" multiline w={200}>
               <div
                 style={{
                   padding: '5px 8px',

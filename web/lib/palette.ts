@@ -25,6 +25,9 @@ export const PARTITION_COLORS = {
 /** Accent for augmented items/charts. */
 export const AUGMENTED_COLOR = '#a78bfa'
 
+/** Accent for preprocessed items/charts (matches the "cyan" badge color used elsewhere for it). */
+export const PREPROCESSED_COLOR = '#00afef'
+
 /** Ordered categorical palette for multi-series charts. */
 export const CHART_COLORS = ['#00afef', '#f59e0b', '#34d399', '#f472b6', '#a78bfa', '#4a89d1']
 

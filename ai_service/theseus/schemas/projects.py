@@ -11,6 +11,7 @@ from pydantic import Field, field_validator
 
 from theseus.augmentation.config import AugmentationConfig
 from theseus.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType
+from theseus.preprocessing.config import PreprocessingConfig
 from theseus.schemas.common import ApiModel
 
 HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
@@ -47,6 +48,9 @@ class VersionOut(ApiModel):
     class_count: int | None
     failed_message: str | None
     parquet_key: str | None
+    # What the snapshot was built with (None: no preprocessing), and how many items it replaced.
+    preprocessing_config: PreprocessingConfig | None
+    preprocessed_count: int
     # What the snapshot was built with (None: no augmentation), and how many augmented copies it holds.
     augmentation_config: AugmentationConfig | None
     augmented_count: int

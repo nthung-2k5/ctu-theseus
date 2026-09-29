@@ -14,6 +14,7 @@ from theseus.deps import verify_origin
 from theseus.errors import install_error_handlers
 from theseus.export.registry import list_export_formats
 from theseus.lifespan import lifespan
+from theseus.preprocessing.registry import list_preprocessing
 from theseus.routers import (
     api_keys,
     api_v1,
@@ -45,11 +46,12 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     install_error_handlers(app)
-    # Import every export format, augmentation and trainer backend plugin now, so a duplicate id or
-    # a broken plugin module stops the backend at startup instead of failing the first request that
-    # needs it. Import only: no DB, S3 or network (a backend's own heavy ML import is lazy, see
-    # backends/base.py), so this stays safe for the OpenAPI export script.
+    # Import every export format, preprocessing, augmentation and trainer backend plugin now, so a
+    # duplicate id or a broken plugin module stops the backend at startup instead of failing the
+    # first request that needs it. Import only: no DB, S3 or network (a backend's own heavy ML
+    # import is lazy, see backends/base.py), so this stays safe for the OpenAPI export script.
     list_export_formats()
+    list_preprocessing()
     list_augmentations()
     list_backends()
 

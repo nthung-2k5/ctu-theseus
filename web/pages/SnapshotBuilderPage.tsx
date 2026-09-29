@@ -1,7 +1,9 @@
 /**
- * Snapshot builder: split the draft, optionally augment the training split, and freeze the result as
- * an immutable snapshot. Augmented copies become real train-split items of the snapshot (see
- * services/augmentation.py), so the estimate on the right is exactly `train × copies` at most.
+ * Snapshot builder: split the draft, optionally preprocess and/or augment it, and freeze the result
+ * as an immutable snapshot. Preprocessing runs first and REPLACES items in whichever splits its ops
+ * select; augmentation then adds extra train-split copies made from those (possibly preprocessed)
+ * items (see services/preprocessing.py and services/augmentation.py). Only augmentation changes the
+ * item count, so the estimate on the right is exactly `train × copies` at most.
  */
 
 import { Alert, Badge, Button, Group, Paper, Stack, Switch, Table, Text, TextInput } from '@mantine/core'
@@ -14,15 +16,22 @@ import {
   toAugmentationConfig,
 } from '@public/components/dataset/AugmentationConfigForm'
 import { AutoSplitForm } from '@public/components/dataset/AutoSplitForm'
+import {
+  emptyPreprocessingDraft,
+  PreprocessingConfigForm,
+  preprocessingSplits,
+  toPreprocessingConfig,
+} from '@public/components/dataset/PreprocessingConfigForm'
 import { SPLIT_TYPES, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { EmptyState, LinkButton, PageHeader, ProportionBar, SectionLabel } from '@public/components/ui'
 import { apiErrorMessage } from '@public/lib/api/client'
 import {
   getCreateVersionMutationOptions,
   getListAugmentationOptionsQueryOptions,
+  getListPreprocessingOptionsQueryOptions,
 } from '@public/lib/api/generated/datasets/datasets'
 import { SPLIT_COLORS } from '@public/lib/constants'
-import { AUGMENTED_COLOR } from '@public/lib/palette'
+import { AUGMENTED_COLOR, PREPROCESSED_COLOR } from '@public/lib/palette'
 import { invalidateProjectScope, projectDetailQueryOptions, useProjectItems } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
@@ -50,7 +59,15 @@ export function SnapshotBuilderPage() {
     validate: { versionTag: (v) => (v.trim().length > 0 ? null : 'Snapshot tag is required') },
   })
 
-  // Augmentation is chosen here, at snapshot creation: the copies become real train-split items.
+  // Preprocessing and augmentation are both chosen here, at snapshot creation.
+  const { data: preprocessingOptions } = useQuery(getListPreprocessingOptionsQueryOptions(projectId))
+  const preprocessingOps = preprocessingOptions?.preprocessing ?? []
+  const [preprocess, setPreprocess] = useState(false)
+  const [preprocessingDraft, setPreprocessingDraft] = useState(emptyPreprocessingDraft)
+  const preprocessingConfig = preprocess ? toPreprocessingConfig(preprocessingDraft) : undefined
+  const preprocessedSplits = preprocessingConfig ? preprocessingSplits(preprocessingDraft) : new Set<string>()
+
+  // Augmentation copies become real train-split items, made from any preprocessed train item above.
   const { data: augmentationOptions } = useQuery(getListAugmentationOptionsQueryOptions(projectId))
   const augmentations = augmentationOptions?.augmentations ?? []
   const [augment, setAugment] = useState(false)
@@ -66,6 +83,12 @@ export function SnapshotBuilderPage() {
   const counts = draft ? splitCounts(draft) : { train: 0, validation: 0, test: 0 }
   const added = augmentationConfig ? counts.train * augmentationDraft.copiesPerItem : 0
   const grandTotal = counts.train + counts.validation + counts.test + added
+
+  // Section numbers shift depending on which optional sections this project's task actually offers.
+  let sectionN = 2
+  const preprocessSection = preprocessingOps.length > 0 ? sectionN++ : null
+  const augmentSection = augmentations.length > 0 ? sectionN++ : null
+  const resultSection = sectionN
 
   const createVersion = useMutation({
     ...getCreateVersionMutationOptions(),
@@ -103,7 +126,11 @@ export function SnapshotBuilderPage() {
           onSubmit={form.onSubmit((values) =>
             createVersion.mutate({
               projectId,
-              data: { versionTag: values.versionTag, augmentation: augmentationConfig },
+              data: {
+                versionTag: values.versionTag,
+                preprocessing: preprocessingConfig,
+                augmentation: augmentationConfig,
+              },
             }),
           )}
         >
@@ -144,11 +171,33 @@ export function SnapshotBuilderPage() {
                 </Stack>
               </Paper>
 
-              {/* ─── 2 · Augmentation ─── */}
-              {augmentations.length > 0 && (
+              {/* ─── Preprocessing ─── */}
+              {preprocessSection && (
                 <Paper p="md">
                   <Stack gap="sm">
-                    <SectionLabel>2 · Augmentation</SectionLabel>
+                    <SectionLabel>{preprocessSection} · Preprocessing</SectionLabel>
+                    <Switch
+                      label="Preprocess the dataset"
+                      description="Apply a deterministic transform (resize, standardize, ...) to whichever splits you choose. Items are replaced, not added."
+                      checked={preprocess}
+                      onChange={(e) => setPreprocess(e.currentTarget.checked)}
+                    />
+                    {preprocess && (
+                      <PreprocessingConfigForm
+                        options={preprocessingOps}
+                        draft={preprocessingDraft}
+                        onChange={setPreprocessingDraft}
+                      />
+                    )}
+                  </Stack>
+                </Paper>
+              )}
+
+              {/* ─── Augmentation ─── */}
+              {augmentSection && (
+                <Paper p="md">
+                  <Stack gap="sm">
+                    <SectionLabel>{augmentSection} · Augmentation</SectionLabel>
                     <Switch
                       label="Augment the training split"
                       description="Add randomly perturbed copies of every training item. You can browse and filter them on the snapshot page."
@@ -159,6 +208,7 @@ export function SnapshotBuilderPage() {
                       <>
                         <Alert color="blue" p="xs" icon={<MagicWandIcon size={16} />}>
                           Train only: validation and test items are never augmented, so nothing leaks into evaluation.
+                          Copies are made from the preprocessed train item, if you enabled preprocessing above.
                         </Alert>
                         <AugmentationConfigForm
                           options={augmentations}
@@ -173,11 +223,11 @@ export function SnapshotBuilderPage() {
               )}
             </Stack>
 
-            {/* ─── 3 · Result (estimate) ─── */}
+            {/* ─── Result (estimate) ─── */}
             <div>
               <Paper p="md" style={{ position: 'sticky', top: 'calc(48px + var(--mantine-spacing-md))' }}>
                 <Stack gap="sm">
-                  <SectionLabel>{augmentations.length > 0 ? '3' : '2'} · Result (estimate)</SectionLabel>
+                  <SectionLabel>{resultSection} · Result (estimate)</SectionLabel>
 
                   {isEmpty && (
                     <Alert icon={<WarningCircleIcon size={16} />} color="red" p="xs" title="The draft is empty">
@@ -205,6 +255,11 @@ export function SnapshotBuilderPage() {
                             <Text size="sm">{counts[s]}</Text>
                           </Table.Td>
                           <Table.Td ta="right">
+                            {preprocessedSplits.has(s) && (
+                              <Text size="xs" style={{ color: PREPROCESSED_COLOR }}>
+                                ~{counts[s]}
+                              </Text>
+                            )}
                             {s === 'train' && added > 0 && (
                               <Text size="xs" style={{ color: AUGMENTED_COLOR }}>
                                 +{added}
@@ -232,6 +287,11 @@ export function SnapshotBuilderPage() {
                       </Table.Tr>
                     </Table.Tbody>
                   </Table>
+                  {preprocessedSplits.size > 0 && (
+                    <Text size="xs" c="dimmed">
+                      <span style={{ color: PREPROCESSED_COLOR }}>~N</span> preprocessed: replaced, not added.
+                    </Text>
+                  )}
 
                   <ProportionBar
                     segments={[
@@ -254,7 +314,7 @@ export function SnapshotBuilderPage() {
                     type="submit"
                     leftSection={<MagicWandIcon size={14} />}
                     loading={createVersion.isPending}
-                    disabled={isEmpty || (augment && !augmentationConfig)}
+                    disabled={isEmpty || (preprocess && !preprocessingConfig) || (augment && !augmentationConfig)}
                   >
                     Create snapshot
                   </Button>

@@ -5,7 +5,7 @@
 
 import { Badge, Button, Group, Paper, Text, Timeline } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { ArchiveIcon, GitCommitIcon, MagicWandIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react'
+import { ArchiveIcon, GitCommitIcon, MagicWandIcon, PlusIcon, StackIcon, TrashIcon } from '@phosphor-icons/react'
 import { splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { confirmDelete, EmptyState, LinkButton, PageHeader, StatusBadge } from '@public/components/ui'
 import { deleteVersion as deleteVersionRequest } from '@public/lib/api/generated/datasets/datasets'
@@ -111,6 +111,11 @@ export function SnapshotsPage() {
                       </Text>
                       {index === 0 && <Badge color="cyan">latest</Badge>}
                       <StatusBadge value={version.status} colorMap={VERSION_STATUS_COLORS} />
+                      {version.preprocessedCount > 0 && (
+                        <Badge color="cyan" leftSection={<StackIcon size={10} />}>
+                          ~{version.preprocessedCount} preprocessed
+                        </Badge>
+                      )}
                       {version.augmentedCount > 0 && (
                         <Badge color="grape" leftSection={<MagicWandIcon size={10} />}>
                           +{version.augmentedCount} augmented

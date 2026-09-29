@@ -5,7 +5,7 @@
 
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Table, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { ArrowLeftIcon, MagicWandIcon, TrashIcon } from '@phosphor-icons/react'
+import { ArrowLeftIcon, MagicWandIcon, StackIcon, TrashIcon } from '@phosphor-icons/react'
 import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { type ItemOrigin, type ItemSort, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
@@ -37,7 +37,7 @@ import { getRouteApi } from '@tanstack/react-router'
 const routeApi = getRouteApi('/_app/project/$projectId/snapshots/$versionId')
 
 /** "image_horizontal_flip" -> "horizontal flip": the op ids are `<modality>_<name>`. */
-const augmentationLabel = (id: string) => id.split('_').slice(1).join(' ')
+const opLabel = (id: string) => id.split('_').slice(1).join(' ')
 
 const VERSION_STATUS_COLORS: Record<string, string> = { building: 'cyan', ready: 'teal', failed: 'red' }
 
@@ -103,6 +103,7 @@ export function SnapshotDetailPage() {
   }
 
   const counts = splitCounts(version)
+  const preConfig = version.preprocessingConfig
   const config = version.augmentationConfig
   const setSearch = (patch: Record<string, unknown>) => navigate({ search: (prev) => ({ ...prev, ...patch, page: 1 }) })
 
@@ -114,6 +115,11 @@ export function SnapshotDetailPage() {
         badges={
           <>
             <StatusBadge value={version.status} colorMap={VERSION_STATUS_COLORS} />
+            {version.preprocessedCount > 0 && (
+              <Badge color="cyan" leftSection={<StackIcon size={10} />}>
+                preprocessed
+              </Badge>
+            )}
             {version.augmentedCount > 0 && (
               <Badge color="grape" leftSection={<MagicWandIcon size={10} />}>
                 augmented
@@ -145,9 +151,10 @@ export function SnapshotDetailPage() {
         }
       />
 
-      <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">
+      <SimpleGrid cols={{ base: 2, md: 5 }} spacing="sm">
         <StatCard label="Items" value={version.itemCount ?? 0} />
         <StatCard label="Classes" value={version.classCount ?? '—'} />
+        <StatCard label="Preprocessed" value={version.preprocessedCount} />
         <StatCard label="Augmented" value={version.augmentedCount} />
         <StatCard label="Built" value={version.builtAt ? formatDateTime(version.builtAt) : '—'} />
       </SimpleGrid>
@@ -211,6 +218,45 @@ export function SnapshotDetailPage() {
         </Paper>
       </SimpleGrid>
 
+      {preConfig && (
+        <Paper p="md">
+          <Stack gap="xs">
+            <SectionLabel>Preprocessing</SectionLabel>
+            <Alert icon={<StackIcon size={16} />} color="cyan" p="xs">
+              {version.preprocessedCount} item{version.preprocessedCount === 1 ? '' : 's'} were replaced by a
+              preprocessed copy; nothing was added.
+              {preConfig.skippedItems
+                ? ` ${preConfig.skippedItems} item(s) could not be preprocessed and were skipped.`
+                : ''}
+            </Alert>
+            <Table verticalSpacing={4} className="tnum">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Operation</Table.Th>
+                  <Table.Th>Splits</Table.Th>
+                  <Table.Th>Parameters</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {preConfig.ops.map((op) => (
+                  <Table.Tr key={op.id}>
+                    <Table.Td tt="capitalize">{opLabel(op.id)}</Table.Td>
+                    <Table.Td tt="capitalize">{(op.splits ?? []).join(', ')}</Table.Td>
+                    <Table.Td>
+                      <Text size="xs" c="dimmed">
+                        {Object.entries(op.params ?? {})
+                          .map(([k, v]) => `${k}=${String(v)}`)
+                          .join(', ') || '—'}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Stack>
+        </Paper>
+      )}
+
       {config && (
         <Paper p="md">
           <Stack gap="xs">
@@ -232,7 +278,7 @@ export function SnapshotDetailPage() {
               <Table.Tbody>
                 {config.ops.map((op) => (
                   <Table.Tr key={op.id}>
-                    <Table.Td tt="capitalize">{augmentationLabel(op.id)}</Table.Td>
+                    <Table.Td tt="capitalize">{opLabel(op.id)}</Table.Td>
                     <Table.Td ta="right">{Math.round((op.probability ?? 1) * 100)}%</Table.Td>
                     <Table.Td>
                       <Text size="xs" c="dimmed">

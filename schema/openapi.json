@@ -584,7 +584,7 @@
           "datasets"
         ],
         "summary": "Create Version",
-        "description": "Snapshot the draft current pool membership into a new immutable version (built asynchronously).\n\nWith `augmentation`, the build also materializes augmented copies of the TRAIN split (see\nservices/augmentation.py); validation and test stay original so metrics measure real data.",
+        "description": "Snapshot the draft current pool membership into a new immutable version (built asynchronously).\n\nWith `preprocessing`, the build first replaces items with a deterministic preprocessed copy for\nwhichever splits each op selects (see services/preprocessing.py). With `augmentation`, the build\nthen also materializes augmented copies of the TRAIN split, made from any preprocessed\nreplacement (see services/augmentation.py); validation and test stay real so metrics measure\nreal data.",
         "operationId": "create_version",
         "parameters": [
           {
@@ -695,6 +695,50 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_id}/preprocessing": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "List Preprocessing Options",
+        "description": "The preprocessing ops a snapshot of this project can be built with (installed ops that support its task).",
+        "operationId": "list_preprocessing_options",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreprocessingListResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3812,6 +3856,16 @@
             "minLength": 1,
             "title": "Versiontag"
           },
+          "preprocessing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreprocessingConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "augmentation": {
             "anyOf": [
               {
@@ -4989,6 +5043,15 @@
             ],
             "title": "Sourceexternalid"
           },
+          "preprocessing": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preprocessing"
+          },
           "augmentation": {
             "anyOf": [
               {},
@@ -5490,6 +5553,125 @@
         ],
         "title": "PredictResponse",
         "description": "One prediction. `output` is one of the framework-neutral shapes in services/predict.py, told\napart by `kind`: classification | regression | text | tokens."
+      },
+      "PreprocessingConfig": {
+        "properties": {
+          "ops": {
+            "items": {
+              "$ref": "#/components/schemas/PreprocessingOpConfig"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Ops"
+          },
+          "skippedItems": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skippeditems"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ops"
+        ],
+        "title": "PreprocessingConfig",
+        "description": "How to preprocess a snapshot: deterministic ops, each scoped to the splits it replaces."
+      },
+      "PreprocessingInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "modality": {
+            "type": "string",
+            "enum": [
+              "text",
+              "vision",
+              "audio",
+              "tabular"
+            ],
+            "title": "Modality"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/ParamSpec"
+            },
+            "type": "array",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description",
+          "modality",
+          "params"
+        ],
+        "title": "PreprocessingInfo"
+      },
+      "PreprocessingListResponse": {
+        "properties": {
+          "preprocessing": {
+            "items": {
+              "$ref": "#/components/schemas/PreprocessingInfo"
+            },
+            "type": "array",
+            "title": "Preprocessing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "preprocessing"
+        ],
+        "title": "PreprocessingListResponse"
+      },
+      "PreprocessingOpConfig": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "splits": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "train",
+                "validation",
+                "test"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Splits"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "PreprocessingOpConfig"
       },
       "ProjectDetail": {
         "properties": {
@@ -7449,6 +7631,20 @@
             ],
             "title": "Parquetkey"
           },
+          "preprocessingConfig": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreprocessingConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preprocessedCount": {
+            "type": "integer",
+            "title": "Preprocessedcount"
+          },
           "augmentationConfig": {
             "anyOf": [
               {
@@ -7518,6 +7714,8 @@
           "classCount",
           "failedMessage",
           "parquetKey",
+          "preprocessingConfig",
+          "preprocessedCount",
           "augmentationConfig",
           "augmentedCount",
           "builtAt",
@@ -7615,6 +7813,20 @@
             ],
             "title": "Parquetkey"
           },
+          "preprocessingConfig": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreprocessingConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preprocessedCount": {
+            "type": "integer",
+            "title": "Preprocessedcount"
+          },
           "augmentationConfig": {
             "anyOf": [
               {
@@ -7681,6 +7893,8 @@
           "classCount",
           "failedMessage",
           "parquetKey",
+          "preprocessingConfig",
+          "preprocessedCount",
           "augmentationConfig",
           "augmentedCount",
           "builtAt",

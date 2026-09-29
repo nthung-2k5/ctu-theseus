@@ -30,6 +30,7 @@ from theseus.db.models import (
 from theseus.services import augmentation as aug_service
 from theseus.services import snapshot as snap
 from theseus.services import storage
+from theseus.services.derived_items import delete_derived_items
 
 BUCKET = "theseus-datasets"
 TEXT = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"
@@ -186,7 +187,7 @@ async def test_rebuilding_is_deterministic_for_the_same_snapshot(db, s3):
 
     # Same snapshot id, same seeds: run the augmentation phase again on a clean slate.
     async with db() as s:
-        await aug_service.delete_augmented_items(s, version_id)
+        await delete_derived_items(s, version_id)
         await s.commit()
     result = await aug_service.materialize_augmentations(version_id)
     second = sorted(i.content_hash for i, _ in await version_items(db, version_id) if i.source_item_id)
@@ -360,13 +361,13 @@ async def test_a_snapshot_without_augmentation_is_unchanged(db, s3):
     assert s3.deleted_prefixes == []
 
 
-async def test_delete_augmented_items_removes_the_copies_but_never_the_originals(db, s3):
+async def test_delete_derived_items_removes_the_copies_but_never_the_originals(db, s3):
     project_id, version_id, cat, _ = await seed(db, "text_classification", "text", config(("text_word_swap", {})))
     original = await add_item(db, project_id, version_id, "train", cls=cat, text=TEXT)
     await snap.build_snapshot(version_id)
 
     async with db() as s:
-        assert await aug_service.delete_augmented_items(s, version_id) == 2
+        assert await delete_derived_items(s, version_id) == 2
         await s.commit()
     async with db() as s:
         left = (await s.execute(sa.select(DatasetItem.id))).scalars().all()
