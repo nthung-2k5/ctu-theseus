@@ -16,6 +16,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(sa.Text, unique=True)
     password_hash: Mapped[str] = mapped_column(sa.Text)
     role: Mapped[str] = mapped_column(sa.Text, server_default="user")
+    # Set by an admin: the account can no longer sign in or refresh, and its sessions and API keys are revoked.
+    disabled_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at()
     updated_at: Mapped[datetime] = updated_at()
 

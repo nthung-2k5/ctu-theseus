@@ -85,6 +85,15 @@ async def rotate(session: AsyncSession, raw: str) -> tuple[uuid.UUID, str]:
     return row.user_id, new_raw
 
 
+async def revoke_all_for_user(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Sign a user out everywhere (admin action): revoke every live refresh token they hold."""
+    await session.execute(
+        sa.update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=sa.func.now())
+    )
+
+
 async def revoke(session: AsyncSession, raw: str) -> None:
     """Logout: revoke the whole family of the presented token."""
     row = await _find(session, raw)

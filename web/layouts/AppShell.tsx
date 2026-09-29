@@ -26,6 +26,7 @@ import {
   ListIcon,
   MoonIcon,
   PlayIcon,
+  ShieldCheckIcon,
   SignOutIcon,
   StackIcon,
   SunIcon,
@@ -152,6 +153,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
   const { data: user } = useQuery(sessionQueryOptions)
   const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const isAdmin = user?.role === 'admin'
   const toggleColorScheme = () => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')
 
   // AppShell sits above the project route, so it can't read that route's loader — this
@@ -241,6 +243,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Menu.Item leftSection={<GearIcon size={14} />} onClick={() => navigate({ to: '/settings' })}>
                   Settings &amp; API keys
                 </Menu.Item>
+                {isAdmin && (
+                  <Menu.Item leftSection={<ShieldCheckIcon size={14} />} onClick={() => navigate({ to: '/admin' })}>
+                    Administration
+                  </Menu.Item>
+                )}
                 <Menu.Divider />
                 <Menu.Item leftSection={<SignOutIcon size={14} />} color="red" onClick={handleLogout}>
                   Sign out
@@ -262,6 +269,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               onClick={() => navigate({ to: '/projects' })}
               variant="light"
             />
+            {isAdmin && (
+              <NavLink
+                label="Administration"
+                leftSection={<ShieldCheckIcon size={18} />}
+                active={location.pathname === '/admin' || location.pathname.startsWith('/admin/')}
+                onClick={() => navigate({ to: '/admin' })}
+                variant="light"
+              />
+            )}
             {activeProject && (
               <>
                 <SectionLabel px="xs" pt="sm" pb={2} truncate>

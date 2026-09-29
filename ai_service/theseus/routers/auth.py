@@ -54,11 +54,18 @@ def _clear_cookies(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE, path=REFRESH_PATH)
 
 
+def _promote_if_bootstrap_admin(user: User) -> None:
+    """Promote (never demote) an account whose email is listed in THESEUS_ADMIN_EMAILS."""
+    if user.role != "admin" and user.email in get_settings().admin_email_set:
+        user.role = "admin"
+
+
 @router.post("/register", status_code=201, response_model=UserResponse)
 async def register(body: RegisterBody, response: Response, session: SessionDep) -> UserResponse:
     user = User(
         name=body.name.strip(), email=body.email.strip().lower(), password_hash=await hash_password(body.password)
     )
+    _promote_if_bootstrap_admin(user)
     session.add(user)
     try:
         await session.flush()
@@ -79,6 +86,9 @@ async def login(body: LoginBody, response: Response, session: SessionDep) -> Use
     ok = await verify_password(user.password_hash if user else DUMMY_HASH, body.password)
     if user is None or not ok:
         raise HTTPException(401, "Invalid email or password")
+    if user.disabled_at is not None:
+        raise HTTPException(403, "This account has been disabled")
+    _promote_if_bootstrap_admin(user)
     refresh_raw, _ = await refresh_tokens.issue(session, user.id)
     await session.commit()
     _set_cookies(response, user.id, refresh_raw)
@@ -96,6 +106,14 @@ async def refresh_session(request: Request, session: SessionDep) -> Response:
         expired = JSONResponse(envelope(401, "Session expired, please sign in again"), 401)
         _clear_cookies(expired)
         return expired
+    account = await session.get(User, user_id)
+    if account is None or account.disabled_at is not None:
+        # Disabling revokes the refresh tokens, so this is only reachable if one was issued in the race.
+        await refresh_tokens.revoke_all_for_user(session, user_id)
+        await session.commit()
+        disabled = JSONResponse(envelope(401, "Session expired, please sign in again"), 401)
+        _clear_cookies(disabled)
+        return disabled
     await session.commit()
     out = Response(status_code=204)
     _set_cookies(out, user_id, new_raw)

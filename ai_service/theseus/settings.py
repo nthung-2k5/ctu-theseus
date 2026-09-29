@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     cookie_secure_override: bool | None = Field(default=None, validation_alias="COOKIE_SECURE")
     # Extra browser origins allowed to make cookie-authenticated writes (comma separated).
     allowed_origins: str = Field(default="", validation_alias="ALLOWED_ORIGINS")
+    # Emails (comma separated) that are promoted to role=admin when they register or sign in. This is
+    # the only way the first admin comes to exist; promotion never demotes, so removing an email
+    # here does not strip an existing admin (do that from the admin users page).
+    admin_emails: str = Field(default="", validation_alias="THESEUS_ADMIN_EMAILS")
 
     temp_dir: Path = Field(default=Path("/tmp/theseus"), validation_alias="TEMP_DIR")
     inference_model_cache_size: int = Field(default=2, validation_alias="INFERENCE_MODEL_CACHE_SIZE")
@@ -70,6 +74,10 @@ class Settings(BaseSettings):
     @property
     def allowed_origin_list(self) -> list[str]:
         return [o.strip().rstrip("/") for o in self.allowed_origins.split(",") if o.strip()]
+
+    @property
+    def admin_email_set(self) -> frozenset[str]:
+        return frozenset(e.strip().lower() for e in self.admin_emails.split(",") if e.strip())
 
     @property
     def async_database_url(self) -> str:

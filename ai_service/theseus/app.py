@@ -16,6 +16,7 @@ from theseus.export.registry import list_export_formats
 from theseus.lifespan import lifespan
 from theseus.preprocessing.registry import list_preprocessing
 from theseus.routers import (
+    admin,
     api_keys,
     api_v1,
     auth,
@@ -66,6 +67,9 @@ def create_app() -> FastAPI:
     api.include_router(inference.router)
     api.include_router(export.router)
     api.include_router(api_v1.router)
+    # Registered last so the generated OpenAPI contract only gains paths: FastAPI lists them in registration
+    # order, and slotting these in earlier would shift every existing path in the checked-in schema.
+    api.include_router(admin.router)
     app.include_router(api)
     app.include_router(health.router)
     return app

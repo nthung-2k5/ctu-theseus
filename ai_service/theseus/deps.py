@@ -32,6 +32,7 @@ from theseus.db.models import (
     Project,
     Sweep,
     TrainingRun,
+    User,
 )
 from theseus.settings import get_settings
 
@@ -60,6 +61,20 @@ async def current_user_id(request: Request) -> uuid.UUID:
 
 
 UserId = Annotated[uuid.UUID, Depends(current_user_id)]
+
+
+async def require_admin(user_id: UserId, session: SessionDep) -> uuid.UUID:
+    """Guard for /api/admin. The role is read from the database on every call rather than carried in
+    the JWT, so promoting, demoting or disabling someone takes effect on their very next request."""
+    user = await session.get(User, user_id)
+    if user is None or user.disabled_at is not None:
+        raise HTTPException(401, "Invalid or expired session")
+    if user.role != "admin":
+        raise HTTPException(403, "Admin access required")
+    return user_id
+
+
+AdminId = Annotated[uuid.UUID, Depends(require_admin)]
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 

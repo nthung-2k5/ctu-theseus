@@ -100,6 +100,8 @@ const api = await builder
   .withEnvironment('JWT_SECRET', jwtSecret)
   // Only needed if the browser reaches the app through a host the proxy doesn't forward (see verify_origin).
   .withEnvironment('ALLOWED_ORIGINS', process.env.ALLOWED_ORIGINS ?? '')
+  // Comma-separated emails promoted to admin when they register or sign in: how the first admin comes to exist.
+  .withEnvironment('THESEUS_ADMIN_EMAILS', process.env.THESEUS_ADMIN_EMAILS ?? '')
   .waitFor(db)
   .waitFor(rustfs)
   .withBindMount('./schema', '/schema', { isReadOnly: true })
