@@ -19,12 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from theseus import constants as C
 from theseus.backends.base import ConfigError, TrainerBackend
-from theseus.backends.registry import get_backend, trainable_backends
+from theseus.backends.registry import enabled_builtin_models, get_backend, trainable_backends
 from theseus.db.models import DatasetVersion, Sweep, TrainingRun
 from theseus.events import get_event_writer
 from theseus.jobs import abort
 from theseus.jobs.dispatcher import nudge
-from theseus.services import storage
+from theseus.services import plugin_settings, storage
 from theseus.services.snapshot import read_snapshot_manifest
 from theseus.services.sweep import expand_sweep, validate_search_space
 from theseus.services.task_registry import get_task_descriptor
@@ -48,6 +48,29 @@ def default_backend(task: str) -> type[TrainerBackend] | None:
     available backend that supports the task. None if none does."""
     backends = trainable_backends(get_task_descriptor(task))
     return backends[0] if backends else None
+
+
+def _check_builtin_model(backend: type[TrainerBackend], task: str, sel: Any) -> str | None:
+    """Refuse a built-in model an admin switched off, and never default to one.
+
+    When the caller names no model the backend would pick its first, which may be exactly the one an
+    admin disabled, so name the first enabled model instead. Returns an error message, or None.
+    """
+    descriptor = get_task_descriptor(task)
+    models = backend.models(descriptor)
+    if not models:
+        return None
+    if sel.model_id is not None:
+        key = plugin_settings.builtin_model_key(backend.id, sel.model_id)
+        if any(m.id == sel.model_id for m in models) and not plugin_settings.is_enabled("builtin_model", key, task):
+            return f"Model '{sel.model_id}' has been disabled by an administrator"
+        return None
+    enabled = enabled_builtin_models(backend, descriptor)
+    if not enabled:
+        return "Every model for this task has been disabled by an administrator"
+    if enabled[0].id != models[0].id:
+        sel.model_id = enabled[0].id
+    return None
 
 
 async def queue_training(
@@ -81,6 +104,8 @@ async def queue_training(
         backend = default_backend(task)
         if backend is None:
             return QueueError(400, f"No trainer backend is available for task '{task}'")
+    if not plugin_settings.is_enabled("backend", backend.id, task):
+        return QueueError(400, f"Trainer backend '{backend.label}' has been disabled for this task by an administrator")
 
     run_id = new_uuid7()
     loop = asyncio.get_running_loop()
@@ -107,6 +132,8 @@ async def queue_training(
         first = e.errors()[0]
         where = ".".join(str(p) for p in first["loc"])
         return await _record_failure(422, f"Invalid hyperparameter '{where}': {first['msg']}")
+    if (model_error := _check_builtin_model(backend, task, sel)) is not None:
+        return await _record_failure(400, model_error)
     stored_hyperparameters = sel.model_dump(by_alias=True, exclude_none=True)
 
     try:

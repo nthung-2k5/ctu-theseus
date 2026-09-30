@@ -2,10 +2,11 @@ import { Tabs } from '@mantine/core'
 import { PageHeader } from '@public/components/ui'
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 
-type AdminTab = 'users'
+type AdminTab = 'users' | 'plugins'
 
-const TABS: { value: AdminTab; label: string; to: '/admin/users' }[] = [
+const TABS: { value: AdminTab; label: string; to: '/admin/users' | '/admin/plugins' }[] = [
   { value: 'users', label: 'Users', to: '/admin/users' },
+  { value: 'plugins', label: 'Plugins', to: '/admin/plugins' },
 ]
 
 /** Shared frame of every /admin page: the title and the section tabs. Access is enforced by the route's beforeLoad. */

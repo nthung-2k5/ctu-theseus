@@ -81,6 +81,10 @@ async def db(database_url, monkeypatch):
         tables = ", ".join(f'"{t.name}"' for t in base.Base.metadata.sorted_tables)
         await conn.execute(sa.text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     yield base._sessionmaker
+    # Admin plugin switches are process-local state; a test that flipped one must not leak it.
+    from theseus.services import plugin_settings
+
+    plugin_settings.reset()
     await engine.dispose()
     await _kill_stray_connections()
 

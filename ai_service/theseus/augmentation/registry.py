@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from theseus.augmentation.base import Augmentation, _registry
 from theseus.augmentation.config import AugmentationConfig, AugmentationInfo, ParamSpec
 from theseus.params import param_specs as _param_specs
+from theseus.services import plugin_settings
 from theseus.services.task_registry import TaskDescriptor
 
 _MODALITY_ORDER = ("vision", "text", "audio", "tabular")
@@ -18,9 +19,16 @@ def get_augmentation(op_id: str) -> type[Augmentation]:
     return _registry.get(op_id)
 
 
-def list_augmentations(task: TaskDescriptor | None = None) -> list[type[Augmentation]]:
-    """Installed ops, ordered for display; only those supporting `task` when given."""
-    ops = [op for op in _registry.all() if task is None or op.supports(task)]
+def list_augmentations(
+    task: TaskDescriptor | None = None, *, include_disabled: bool = False
+) -> list[type[Augmentation]]:
+    """Installed ops, ordered for display; only those supporting `task` when given, and not switched off by an admin."""
+    ops = [
+        op
+        for op in _registry.all()
+        if (task is None or op.supports(task))
+        and (include_disabled or plugin_settings.is_enabled("augmentation", op.id, task.id if task else None))
+    ]
     return sorted(ops, key=lambda op: (_MODALITY_ORDER.index(op.modality), op.order, op.id))
 
 
@@ -50,6 +58,8 @@ def validate_config(task: TaskDescriptor, config: AugmentationConfig) -> Augment
             raise AugmentationConfigError(f"Unknown augmentation '{op_config.id}'")
         if not op.supports(task):
             raise AugmentationConfigError(f"Augmentation '{op.id}' is not available for {task.label}")
+        if not plugin_settings.is_enabled("augmentation", op.id, task.id):
+            raise AugmentationConfigError(f"Augmentation '{op.id}' has been disabled by an administrator")
         if op.id in seen:
             raise AugmentationConfigError(f"Augmentation '{op.id}' is listed more than once")
         seen.add(op.id)

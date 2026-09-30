@@ -18,7 +18,7 @@ from theseus.events import EventWriter, get_event_bus, set_event_writer, set_log
 from theseus.events.log_handler import install_run_log_handler, uninstall_run_log_handler
 from theseus.jobs.reapers import reaper_loop
 from theseus.jobs.recovery import recover_on_startup
-from theseus.services import storage
+from theseus.services import plugin_settings, storage
 from theseus.settings import get_settings
 from theseus.telemetry import init_telemetry
 
@@ -74,6 +74,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     backend_namespaces = tuple(ns for backend in list_backends() for ns in backend.log_namespaces)
     log_handler = install_run_log_handler(writer, backend_namespaces)
     set_log_handler(log_handler)
+
+    # Admin enable/disable switches must be in place before the first request can consult them.
+    await plugin_settings.load()
 
     # 2. Settle whatever a previous process left in flight, BEFORE anything new is claimed.
     await recover_on_startup()

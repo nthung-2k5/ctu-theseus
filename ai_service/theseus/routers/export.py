@@ -30,7 +30,7 @@ from theseus.schemas.serving import (
     ExportResponse,
     ExportRow,
 )
-from theseus.services import storage
+from theseus.services import plugin_settings, storage
 from theseus.services.task_registry import get_task_descriptor
 
 router = APIRouter(tags=["export"])
@@ -79,6 +79,8 @@ async def create_export(body: CreateExportBody, run: RunDep, session: SessionDep
     project = await session.get(Project, run.project_id)
     if not export_format.supports(get_task_descriptor(project.task)):
         raise HTTPException(400, f"Export format '{body.format}' does not support this project's task")
+    if not plugin_settings.is_enabled("export_format", export_format.id, project.task):
+        raise HTTPException(400, f"Export format '{body.format}' has been disabled by an administrator")
     backend = get_backend(run.backend)
     if export_format.artifact not in backend.artifacts:
         raise HTTPException(400, f"Export format '{body.format}' is not available for a run trained by '{backend.id}'")

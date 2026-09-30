@@ -5,6 +5,7 @@ from pydantic import ValidationError
 from theseus.params import param_specs as _param_specs
 from theseus.preprocessing.base import Preprocessing, _registry
 from theseus.preprocessing.config import ParamSpec, PreprocessingConfig, PreprocessingInfo
+from theseus.services import plugin_settings
 from theseus.services.task_registry import TaskDescriptor
 
 _MODALITY_ORDER = ("vision", "text", "audio", "tabular")
@@ -18,9 +19,16 @@ def get_preprocessing(op_id: str) -> type[Preprocessing]:
     return _registry.get(op_id)
 
 
-def list_preprocessing(task: TaskDescriptor | None = None) -> list[type[Preprocessing]]:
-    """Installed ops, ordered for display; only those supporting `task` when given."""
-    ops = [op for op in _registry.all() if task is None or op.supports(task)]
+def list_preprocessing(
+    task: TaskDescriptor | None = None, *, include_disabled: bool = False
+) -> list[type[Preprocessing]]:
+    """Installed ops, ordered for display; only those supporting `task` when given, and not switched off by an admin."""
+    ops = [
+        op
+        for op in _registry.all()
+        if (task is None or op.supports(task))
+        and (include_disabled or plugin_settings.is_enabled("preprocessing", op.id, task.id if task else None))
+    ]
     return sorted(ops, key=lambda op: (_MODALITY_ORDER.index(op.modality), op.order, op.id))
 
 
@@ -50,6 +58,8 @@ def validate_config(task: TaskDescriptor, config: PreprocessingConfig) -> Prepro
             raise PreprocessingConfigError(f"Unknown preprocessing op '{op_config.id}'")
         if not op.supports(task):
             raise PreprocessingConfigError(f"Preprocessing op '{op.id}' is not available for {task.label}")
+        if not plugin_settings.is_enabled("preprocessing", op.id, task.id):
+            raise PreprocessingConfigError(f"Preprocessing op '{op.id}' has been disabled by an administrator")
         if op.id in seen:
             raise PreprocessingConfigError(f"Preprocessing op '{op.id}' is listed more than once")
         seen.add(op.id)

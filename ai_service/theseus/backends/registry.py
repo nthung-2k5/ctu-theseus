@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from theseus.backends.base import ModelChoice, TrainerBackend, _registry
 from theseus.schemas.common import ParamSpec
+from theseus.services import plugin_settings
 from theseus.services.task_registry import TASK_REGISTRY, TaskDescriptor
 
 
@@ -22,8 +23,16 @@ def list_backends() -> list[type[TrainerBackend]]:
 
 
 def trainable_backends(task: TaskDescriptor) -> list[type[TrainerBackend]]:
-    """Installed, available backends that can train this task. What the create-run UI offers."""
-    return [b for b in list_backends() if b.available() is None and b.supports(task)]
+    """Installed, available backends that can train this task. What the create-run UI offers.
+
+    A backend an admin switched off for this task is left out. That only stops NEW runs: a finished
+    run is still loaded, served and exported through `get_backend`, which is not filtered.
+    """
+    return [
+        b
+        for b in list_backends()
+        if b.available() is None and b.supports(task) and plugin_settings.is_enabled("backend", b.id, task.id)
+    ]
 
 
 @dataclass
@@ -49,6 +58,15 @@ class BackendInfo:
     params: list[ParamSpec] = field(default_factory=list)
 
 
+def enabled_builtin_models(backend: type[TrainerBackend], task: TaskDescriptor) -> list[ModelChoice]:
+    """The backend's built-in models for `task` that an admin has not switched off."""
+    return [
+        m
+        for m in backend.models(task)
+        if plugin_settings.is_enabled("builtin_model", plugin_settings.builtin_model_key(backend.id, m.id), task.id)
+    ]
+
+
 def _model_param_name(backend: type[TrainerBackend]) -> str:
     field_info = backend.Hyperparameters.model_fields["model_id"]
     return field_info.alias or "modelId"
@@ -62,8 +80,16 @@ def describe(backend: type[TrainerBackend], task: TaskDescriptor | None = None) 
         description=backend.description,
         available=reason is None,
         unavailable_reason=reason,
-        supported_tasks=[t.id for t in TASK_REGISTRY.values() if backend.supports(t)],
-        models=backend.models(task) if task is not None else [],
+        # Minus what an admin switched off (the whole task, or this backend for it), so the project
+        # picker only offers tasks that can actually be created and trained.
+        supported_tasks=[
+            t.id
+            for t in TASK_REGISTRY.values()
+            if backend.supports(t)
+            and plugin_settings.is_enabled("task", t.id)
+            and plugin_settings.is_enabled("backend", backend.id, t.id)
+        ],
+        models=enabled_builtin_models(backend, task) if task is not None else [],
         model_param_name=_model_param_name(backend),
         params=backend.hyperparameter_specs(task) if task is not None else [],
     )

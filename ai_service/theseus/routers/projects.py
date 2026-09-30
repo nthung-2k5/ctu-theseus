@@ -21,6 +21,7 @@ from theseus.schemas.projects import (
     ProjectSummary,
     UpdateProjectBody,
 )
+from theseus.services import plugin_settings
 from theseus.services.cleanup import cleanup_project_storage
 from theseus.services.dataset_views import split_counts_for_dataset, version_with_counts
 from theseus.services.task_registry import get_task_descriptor, task_to_modality
@@ -113,6 +114,9 @@ async def get_project(project: ProjectDep, session: SessionDep) -> ProjectDetail
 @router.post("", response_model=ProjectResponse)
 async def create_project(body: CreateProjectBody, user_id: UserId, session: SessionDep) -> ProjectResponse:
     descriptor = get_task_descriptor(body.task)
+    # Only NEW projects are blocked: a project already on a task an admin later disables keeps working.
+    if not plugin_settings.is_enabled("task", body.task):
+        raise HTTPException(422, f'Task "{body.task}" has been disabled by an administrator.')
     if not trainable_backends(descriptor):
         raise HTTPException(422, f'Task "{body.task}" is not yet trainable ({descriptor.status}).')
 

@@ -1,5 +1,6 @@
 import { AdminLayout } from '@public/layouts/AdminLayout'
 import { sessionQueryOptions } from '@public/lib/auth'
+import { PluginsPage } from '@public/pages/admin/PluginsPage'
 import { UsersPage } from '@public/pages/admin/UsersPage'
 import { createRoute, redirect } from '@tanstack/react-router'
 import { appRoute } from './app.route'
@@ -30,4 +31,10 @@ export const adminUsersRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: '/users',
   component: UsersPage,
+})
+
+export const adminPluginsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/plugins',
+  component: PluginsPage,
 })

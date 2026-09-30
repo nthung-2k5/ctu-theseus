@@ -2957,6 +2957,88 @@
           }
         }
       }
+    },
+    "/api/admin/plugins": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Plugins",
+        "operationId": "admin_list_plugins",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/plugins/{kind}/{plugin_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Set Plugin",
+        "operationId": "admin_set_plugin",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "plugin_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plugin Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPluginBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5908,6 +5990,130 @@
         "title": "ParamSpec",
         "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `theseus.params`."
       },
+      "PluginEntry": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "default": true
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailablereason"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/PluginTaskState"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "label",
+          "enabled",
+          "tasks"
+        ],
+        "title": "PluginEntry"
+      },
+      "PluginListResponse": {
+        "properties": {
+          "plugins": {
+            "items": {
+              "$ref": "#/components/schemas/PluginEntry"
+            },
+            "type": "array",
+            "title": "Plugins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugins"
+        ],
+        "title": "PluginListResponse"
+      },
+      "PluginResponse": {
+        "properties": {
+          "plugin": {
+            "$ref": "#/components/schemas/PluginEntry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plugin"
+        ],
+        "title": "PluginResponse"
+      },
+      "PluginTaskState": {
+        "properties": {
+          "task": {
+            "type": "string",
+            "title": "Task"
+          },
+          "taskLabel": {
+            "type": "string",
+            "title": "Tasklabel"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "overridden": {
+            "type": "boolean",
+            "title": "Overridden"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task",
+          "taskLabel",
+          "enabled",
+          "overridden"
+        ],
+        "title": "PluginTaskState"
+      },
       "PredictResponse": {
         "properties": {
           "output": {
@@ -6982,6 +7188,37 @@
         ],
         "title": "SaveClassesBody",
         "description": "The whole desired class list. Active classes missing from it are deleted."
+      },
+      "SetPluginBody": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SetPluginBody"
       },
       "SetSplitBody": {
         "properties": {
