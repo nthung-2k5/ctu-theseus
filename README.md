@@ -49,13 +49,15 @@ are the only schema.
 bus, the API-key rate limiter, the loaded-model cache and the GPU all assume it, and forking after
 a CUDA context exists is not survivable. Never run it with `--reload`, gunicorn or multiple workers.
 
-**Jobs.** The domain tables are the queue: `training_runs` and `model_exports` carry `attempt`,
+**Jobs.** The domain tables are the queue: `training_runs`, `model_exports` and `custom_models` carry `attempt`,
 `max_attempts`, `available_at`, `claimed_by`, `lease_expires_at` and `last_error`. A dispatcher
 claims work with `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)` and runs it on a lane
-with its own executor: `train` (one at a time) and `export` (two). The house rule is that **the
+with its own executor: `train` (one at a time), `export` (two) and `validate` (one, for bring-your-own
+model checks). The house rule is that **the
 status column is the lock**: every transition is a guarded compare-and-swap
 (`UPDATE ... WHERE status = ... RETURNING`), and zero rows means someone else got there first.
-Training is never retried; export is (3 attempts, 30 s apart).
+Training is never retried; export is (3 attempts, 30 s apart); validation retries only an unexpected
+error such as a network failure (3 attempts), never a model that is simply not acceptable.
 
 **Inference is not a job.** A prediction runs inside the request that asked for it and its result is
 the response (`services/inference.py`): nothing is queued, stored or polled. At most
@@ -65,9 +67,9 @@ drops that request (the client retries). Batch scoring works the same way: the C
 scored CSV comes back.
 
 **Restarts.** On startup, before the dispatcher runs, a recovery pass fails any `running` training
-run ("Server restarted during training") and re-queues `running` exports. A restart therefore ends
-in-flight training. A reaper loop also fails a training run whose heartbeat stops (a hung thread)
-and reclaims expired export leases.
+run ("Server restarted during training") and re-queues `running` exports and `validating` custom
+models. A restart therefore ends in-flight training. A reaper loop also fails a training run whose
+heartbeat stops (a hung thread) and reclaims expired export and validation leases.
 
 **Run events and live updates.** Metrics, status changes and log lines are appended to `run_events`
 by a single writer task (a `BIGSERIAL` is not commit-ordered, so concurrent writers would let a
@@ -104,7 +106,7 @@ already evaluated.
 
 ### S3 key layout
 
-Four buckets (`ai_service/theseus/services/storage.py`), all content-addressed where it matters:
+Three buckets (`ai_service/theseus/services/storage.py`), content-addressed where it matters:
 
 ```
 theseus-datasets/
@@ -123,6 +125,7 @@ theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for devkit verify scripts
+  custom/{modelId}/bundle.zip                a bring-your-own model upload (or model.safetensors)
 ```
 
 Dataset pool uploads are deduplicated per-project by sha256: the same file uploaded twice
@@ -214,6 +217,68 @@ uncompressed), uploads, and records `ready` or `failed` with a checksum. Both fi
 are compare-and-swap on status, so a stale result never overwrites a row that startup recovery has
 already re-queued. Templates ship as package data under `theseus/export/templates/`.
 
+### Administration
+
+`users.role` is `user` or `admin`. There is no admin UI to create the first one: list emails in
+`THESEUS_ADMIN_EMAILS` (comma separated) and an account with that email becomes an admin when it
+registers or signs in. That only ever **promotes**; removing an email does not demote anyone (do that
+from Administration > Users). Every `/api/admin/**` route sits behind `require_admin`, which reads the
+role from the database on each request rather than trusting the JWT, so a promotion, demotion or
+disable takes effect on the very next request. Disabling an account revokes its refresh tokens and API
+keys and blocks sign-in; an access token already issued lives out its 15-minute lifetime. The API
+refuses to demote or disable yourself or the last active admin.
+
+Admins can switch trainer backends, built-in models, export formats, preprocessing and augmentation
+ops, and whole tasks on or off, globally or for one task (`plugin_settings`). No row means enabled, so
+an install with no overrides behaves as it always did, and a task's own setting beats the "all tasks"
+one. The registries stay immutable after startup: the switches are a filter that listings and
+validation apply through `services/plugin_settings.is_enabled`, a synchronous lookup in a process-local
+snapshot (loaded at startup, replaced after every admin write; sound because the service is one
+process). A switch only stops **new** use: existing projects, runs and queued exports keep working
+(`find_export_format` and `get_backend` are deliberately not filtered). Admins also see every user's
+runs and exports and the state of the job queues (Administration > Jobs).
+
+### Bring your own model
+
+A user can train on a model the platform did not ship: a public **Hugging Face Hub** reference, or
+**uploaded weights**. A custom model (`custom_models`) is **global** (no owner: an admin adds it for
+everyone) or **private** to its owner, and lists the tasks it is offered for. It is addressed as
+`custom:{uuid}` in the hyperparameter the backend names for its model choice (`encoderId` for Ludwig),
+so it shares the picker with the built-ins. `services/model_catalog.py` decides who sees what; someone
+else's private model is indistinguishable from one that does not exist.
+
+Lifecycle: `pending_upload → uploaded → validating → ready | failed`. A Hub model starts at `uploaded`;
+an upload waits for the browser to PUT the file straight to object storage through a presigned URL
+(`POST /api/models/{id}/upload-url`, then `/finalize`), so gigabytes never pass through the API. The
+`validate` lane (`jobs/validate_model.py`) then pins a Hub model to a commit sha (or hashes an upload),
+runs the generic file checks and the backend's own (`TrainerBackend.validate_custom_model`), and marks
+it `ready`. A model that is not acceptable fails immediately with a message the user can act on.
+
+What is refused, because the files came from a user or a Hub author (`services/custom_models.py`):
+pickle-based weights and any code (`.bin`, `.pt`, `.pkl`, `.py`, ...; use `.safetensors`), symlinks,
+paths that climb out of the folder, models that need `trust_remote_code` (`auto_map`), private or gated
+Hub repos, and anything over `MAX_CUSTOM_MODEL_BYTES` (default 5 GiB, the S3 single-PUT limit), before
+and after decompression.
+
+A trainer backend reads a custom model from a local directory whose path is written into the compiled
+config, so the path is deterministic (model id + pinned revision or checksum) and
+`services/run_models.ensure_run_custom_model` recreates the files before a run trains, is loaded for
+inference, or is converted for export, even after a restart wiped the temp directory. An uploaded
+bundle is re-checked against its recorded sha256 when it is put back. A Hub model is re-fetched at
+its pinned commit, which needs the Hub to be reachable. `training_runs.custom_model_id` is
+`ON DELETE RESTRICT`: deleting a model that any run used **archives** it (hidden, files kept) so those
+runs keep loading and exporting.
+
+A backend opts in by implementing `custom_model_kinds(task)`, `validate_custom_model` and the
+`custom` argument of `compile`; one that does none of this offers no custom models. Ludwig offers
+`hf_transformer` (text classification, through `auto_transformer`), `hf_causal_lm` (the four generative
+text tasks, as the `base_model`), `hf_vision` (image classification: any `transformers` vision backbone as
+`config.json` + `.safetensors`, through this backend's own `hf_vision` Ludwig encoder in
+`backends/ludwig/encoders.py`; a CLIP-style checkpoint with a text tower is refused) and, experimentally,
+`timm_image` (image tasks, Hub only, needs the `timm` package installed, and fetches weights by name so it
+cannot be pinned). "Any architecture" means any `transformers` architecture: a model that needs its own Python
+code is deliberately not supported, because loading it would run the uploader's code on the server.
+
 ## Local development
 
 Requires [Bun](https://bun.sh), [uv](https://docs.astral.sh/uv/), Docker, and the
@@ -270,9 +335,10 @@ apphost.mts               Aspire AppHost, the only place resources are provision
 schema/                   constants.json (shared), openapi.json + task_registry.json (generated)
 ai_service/               The backend (FastAPI + Ludwig); see ai_service/README.md
   theseus/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
-                          inference, export, api_keys, api_v1)
-  theseus/services/       task_registry (source of truth), ludwig_config, snapshot, sweep, ...
-  theseus/jobs/           queue, dispatcher, lanes, train/export, recovery, reapers
+                          inference, export, api_keys, api_v1, models, admin/)
+  theseus/services/       task_registry (source of truth), ludwig_config, snapshot, sweep,
+                          plugin_settings, model_catalog, custom_models, ...
+  theseus/jobs/           queue, dispatcher, lanes, train/export/validate_model, recovery, reapers
   theseus/events/         run-event writer, in-process bus, SSE stream, log capture
   theseus/export/         devkit/app bundle assembly + templates
   theseus/db/, migrations/  SQLAlchemy models + Alembic
@@ -282,4 +348,6 @@ web/                      React SPA
   routes/, pages/         TanStack Router route tree (code-based) and one component per route
   components/dataset/     Per-modality labeling UI (vision grid, text list, audio list, CSV importer)
   components/ui/          Shared design-system primitives (PageHeader, EmptyState, DataTable, ...)
+  components/models/      Bring-your-own model table, add form and file upload (My models + admin)
+  pages/admin/            Administration: users, models, plugins & availability
 ```

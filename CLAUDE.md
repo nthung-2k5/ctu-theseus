@@ -20,6 +20,12 @@ cd ai_service && uv run pytest               # pytest, ai_service/tests/** (need
 bunx biome check .                           # lint/format from repo root
 ```
 
+**Never run two pytest sessions against the same database at once.** Each session drops and recreates
+`TEST_DATABASE_URI`'s database and kills other connections to it, so a second concurrent session (or a run you
+thought had died) produces `connection was closed in the middle of operation` and foreign-key failures that
+look like real bugs. Give a second session its own database name in `TEST_DATABASE_URI`, and on Windows check
+for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native processes).
+
 ## Conventions specific to this repo
 
 - **No C#.** The Aspire AppHost is TypeScript (`apphost.mts`). If you're tempted to look for
@@ -85,6 +91,22 @@ bunx biome check .                           # lint/format from repo root
     `snapshots/{versionId}/augmented/`, pool dedup lookups must filter `source_item_id IS NULL`, and
     they are deleted with their snapshot (`services/derived_items.delete_derived_items`). Neither is
     replayed at inference or export time yet — a trained model only ever sees what the snapshot froze.
+- **Admin switches are a filter, not a registry change.** `services/plugin_settings.is_enabled(kind, id, task)`
+  is how a disabled backend, built-in model, export format, preprocessing/augmentation op or task is hidden and
+  refused. Apply it in **listings** and in **validation of new work**, never in a lookup that runs work that
+  already exists (`find_export_format`, `get_backend`): switching something off must only stop new use. No row
+  means enabled, and a task-scoped row beats the all-tasks row. The snapshot is process-local, which is sound
+  only because the service is one process.
+- **Bring-your-own models have one door.** Who may see or use a custom model is decided in
+  `services/model_catalog.py` (global or owner-only, `ready`, enabled, not archived, kind offered for the task),
+  and ownership of the row in `services/custom_model_ops.py` (someone else's id is a 404, never a 403). Never
+  trust a `custom:{uuid}` id from a request: `model_catalog.resolve` it. Files are only ever put on disk by
+  `services/custom_models.ensure_local` / `import_upload` (deterministic path, sha256 re-check, no pickles or
+  code, no symlinks or zip-slip), and every place that trains, loads or exports a run calls
+  `services/run_models.ensure_run_custom_model` first. What a model *is* (backend, kind, source, revision,
+  checksum) is immutable after creation, and `training_runs.custom_model_id` is `ON DELETE RESTRICT`: a model a
+  run used is archived, not deleted. A backend opts in via `custom_model_kinds`, `validate_custom_model` and the
+  `custom` argument of `compile` (passed only when set, so a backend that predates it still compiles).
 - **Job handlers must stay fast and idempotent.** `theseus/jobs/dispatcher.py` claims work off the
   domain tables themselves (`training_runs`, `model_exports` — see
   `README.md`'s "Jobs" section) with a guarded compare-and-swap
