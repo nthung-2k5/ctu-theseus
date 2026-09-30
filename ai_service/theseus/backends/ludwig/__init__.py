@@ -21,6 +21,8 @@ from typing import Any
 import pandas as pd
 
 from theseus.backends.base import (
+    CustomModelKind,
+    CustomModelRef,
     EvalResult,
     LoadedModel,
     ModelChoice,
@@ -31,7 +33,7 @@ from theseus.backends.ludwig.artifacts import ARTIFACTS
 from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
 from theseus.backends.ludwig.compile import hyperparameter_specs as _hyperparameter_specs
 from theseus.backends.ludwig.manifest import METADATA_FILENAME
-from theseus.backends.ludwig.tasks import LUDWIG_TASKS
+from theseus.backends.ludwig.tasks import LUDWIG_TASKS, custom_kinds_for
 from theseus.schemas.common import ParamSpec
 from theseus.services.task_registry import SnapshotContext, TaskDescriptor
 
@@ -69,8 +71,24 @@ class LudwigBackend(TrainerBackend):
         return _hyperparameter_specs(task)
 
     @classmethod
-    def compile(cls, task: TaskDescriptor, ctx: SnapshotContext, hp: LudwigHyperparameters) -> dict[str, Any]:
-        return compile_ludwig_config(task, ctx, hp)
+    def custom_model_kinds(cls, task: TaskDescriptor) -> list[CustomModelKind]:
+        return custom_kinds_for(task.id)
+
+    @classmethod
+    def validate_custom_model(cls, task: TaskDescriptor, ref: CustomModelRef) -> None:
+        from theseus.backends.ludwig.custom import validate_custom_model as _validate
+
+        _validate(task, ref)
+
+    @classmethod
+    def compile(
+        cls,
+        task: TaskDescriptor,
+        ctx: SnapshotContext,
+        hp: LudwigHyperparameters,
+        custom: CustomModelRef | None = None,
+    ) -> dict[str, Any]:
+        return compile_ludwig_config(task, ctx, hp, custom)
 
     @classmethod
     def train(cls, run: TrainContext) -> LoadedModel:

@@ -25,6 +25,7 @@ from theseus.routers import (
     export,
     health,
     inference,
+    models,
     projects,
     sweeps,
     training,
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     api.include_router(api_v1.router)
     # Registered last so the generated OpenAPI contract only gains paths: FastAPI lists them in registration
     # order, and slotting these in earlier would shift every existing path in the checked-in schema.
+    api.include_router(models.router)
     api.include_router(admin.router)
     app.include_router(api)
     app.include_router(health.router)

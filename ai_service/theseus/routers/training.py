@@ -11,12 +11,14 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
 
 from theseus import constants as C
-from theseus.backends.registry import describe, list_backends
+from theseus.backends.registry import describe, find_backend, list_backends, model_param_name
 from theseus.db.models import (
+    CustomModel,
     Dataset,
     DatasetItem,
     DatasetVersion,
     LabelClass,
+    Project,
     RunEvaluation,
     TextFeatures,
     TrainingMetric,
@@ -48,7 +50,7 @@ from theseus.schemas.training import (
     TrainingBackendListResponse,
     TrainingBackendOut,
 )
-from theseus.services import storage
+from theseus.services import model_catalog, storage
 from theseus.services.cleanup import cleanup_run_storage
 from theseus.services.task_registry import get_task_descriptor
 from theseus.services.training import QueueError, queue_training
@@ -86,15 +88,21 @@ async def list_training_backends() -> TrainingBackendListResponse:
 
 
 @router.get("/projects/{project_id}/training-backends", response_model=TrainingBackendListResponse)
-async def list_project_training_backends(project: ProjectDep) -> TrainingBackendListResponse:
+async def list_project_training_backends(project: ProjectDep, session: SessionDep) -> TrainingBackendListResponse:
     """Backends that can train this project's task, with their models and hyperparameters — what
-    the create-run / create-sweep panel renders. Only available backends are included."""
+    the create-run / create-sweep panel renders. Only available backends are included.
+
+    A backend's models are its built-ins (minus what an admin switched off) plus the custom models the
+    project's owner may use: their own private ones and the global ones an admin made available."""
     task = get_task_descriptor(project.task)
-    return TrainingBackendListResponse(
-        backends=[
-            _backend_out(describe(b, task)) for b in list_backends() if b.available() is None and b.supports(task)
-        ]
-    )
+    backends = []
+    for b in list_backends():
+        if b.available() is not None or not b.supports(task):
+            continue
+        info = describe(b, task)
+        info.models = await model_catalog.list_models(session, project.user_id, task, b)
+        backends.append(_backend_out(info))
+    return TrainingBackendListResponse(backends=backends)
 
 
 @router.get("/projects/{project_id}/runs", response_model=RunListResponse)
@@ -113,6 +121,20 @@ async def list_runs(project: ProjectDep, session: SessionDep) -> RunListResponse
         item.evaluation = _brief(evaluation)
         runs.append(item)
     return RunListResponse(runs=runs)
+
+
+async def _model_label(session: SessionDep, run: TrainingRun) -> str | None:
+    """What to call the model a run used: a custom model's name, else the built-in's label."""
+    if run.custom_model_id is not None:
+        custom = await session.get(CustomModel, run.custom_model_id)
+        return custom.name if custom is not None else None
+    backend = find_backend(run.backend)
+    model_id = (run.hyperparameters or {}).get(model_param_name(backend)) if backend is not None else None
+    if backend is None or not model_id:
+        return None
+    project = await session.get(Project, run.project_id)
+    known = {m.id: m.label for m in backend.models(get_task_descriptor(project.task))}
+    return known.get(model_id, model_id)
 
 
 @router.get("/runs/{run_id}", response_model=RunDetailResponse)
@@ -134,7 +156,10 @@ async def get_run(run: RunDep, session: SessionDep) -> RunDetailResponse:
         id=run.id,
         name=run.name,
         status=run.status,
+        backend=run.backend,
         hyperparameters=run.hyperparameters,
+        custom_model_id=run.custom_model_id,
+        model_label=await _model_label(session, run),
         failed_message=run.failed_message,
         started_at=run.started_at,
         completed_at=run.completed_at,

@@ -12,6 +12,10 @@ imports every plugin package just to read `id`/`label`/`available()`, and the AP
 importable without a GPU runtime present. Import heavy dependencies inside the classmethod bodies
 that need them (see `theseus/backends/ludwig/__init__.py` for the pattern).
 
+A backend may also accept bring-your-own models: declare the kinds it understands in
+`custom_model_kinds(task)`, check an uploaded/referenced one in `validate_custom_model`, and honour the
+`custom` argument of `compile`. A backend that does none of this simply offers no custom models.
+
 Two invariants every backend must honor, carried over from the Ludwig-only code this replaces:
 
   * `OutputSpec.labels` (classification class names, in the model's OWN index order) must come
@@ -67,6 +71,49 @@ class ModelChoice(BaseModel):
     label: str
     description: str = ""
     pretrained: bool = False
+    # Where it comes from: shipped with the backend, an admin's global custom model, or the requesting
+    # user's own private one. Custom models use the id "custom:{uuid}".
+    source: Literal["builtin", "global", "private"] = "builtin"
+    # The custom-model kind (`CustomModelKind.id`); None for a built-in.
+    kind: str | None = None
+
+
+class CustomModelKind(BaseModel):
+    """One sort of bring-your-own model a backend can train on, for a task (e.g. a Hugging Face
+    transformer for text classification). Shown in the "add a model" form and used to validate it."""
+
+    id: str
+    label: str
+    description: str = ""
+    modality: str
+    # Where its weights may come from: a Hub reference, an uploaded bundle, or both.
+    source_kinds: list[Literal["hub", "upload"]]
+    status: Literal["stable", "experimental"] = "stable"
+    # None when this kind can be used right now, else a user-facing reason (e.g. an optional
+    # dependency that is not installed).
+    unavailable_reason: str | None = None
+    # False for a kind whose framework fetches its own weights by name at train/load time, so there are
+    # no files to pin, download or put at `CustomModelRef.local_path`. It then gives up the revision pin.
+    materialize: bool = True
+
+
+class CustomModelRef(BaseModel):
+    """A resolved bring-your-own model, as handed to `TrainerBackend.compile` and `validate_custom_model`.
+
+    `local_path` is a deterministic location (see services/custom_models.py) that is written into the
+    compiled config; the files are put there before training and again before a trained model is
+    loaded, so the path a run was trained against is always the one it is served from.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    kind: str
+    source_kind: Literal["hub", "upload"]
+    source_ref: str | None = None
+    revision: str | None = None
+    local_path: str
+    spec: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -212,11 +259,29 @@ class TrainerBackend(ABC):
         return [p for p in param_specs(cls.Hyperparameters, strict=False) if p.name != "modelId"]
 
     @classmethod
+    def custom_model_kinds(cls, task: TaskDescriptor) -> list[CustomModelKind]:
+        """The bring-your-own model kinds this backend can train for `task`. Default: none."""
+        return []
+
+    @classmethod
+    def validate_custom_model(cls, task: TaskDescriptor, ref: CustomModelRef) -> None:
+        """Check that the files at `ref.local_path` really are a usable model of `ref.kind` for `task`
+        (runs in the validation job, after the generic file checks). Raise `ConfigError` with a
+        user-facing message if not. Default: accept."""
+        return None
+
+    @classmethod
     @abstractmethod
-    def compile(cls, task: TaskDescriptor, ctx: SnapshotContext, hp: HyperparamsBase) -> dict[str, Any]:
+    def compile(
+        cls, task: TaskDescriptor, ctx: SnapshotContext, hp: HyperparamsBase, custom: CustomModelRef | None = None
+    ) -> dict[str, Any]:
         """Turn a task descriptor, snapshot context and validated hyperparameters into this
         backend's own training config (opaque outside the backend; stored verbatim as
-        `training_runs.config`). Raises `ConfigError` for a user-correctable problem."""
+        `training_runs.config`). Raises `ConfigError` for a user-correctable problem.
+
+        `custom` is passed (and only then) when the run trains on a bring-your-own model instead of a
+        built-in; `hp.model_id` is then that model's "custom:{uuid}" id, which the backend must not try
+        to look up in its own catalog."""
 
     @classmethod
     @abstractmethod
@@ -261,6 +326,8 @@ __all__ = [
     "ARTIFACT_FILENAMES",
     "Artifact",
     "ConfigError",
+    "CustomModelKind",
+    "CustomModelRef",
     "EvalResult",
     "HyperparamsBase",
     "LoadedModel",

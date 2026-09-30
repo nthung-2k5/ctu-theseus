@@ -2,6 +2,7 @@
 
 from theseus.db.models.admin import PluginSetting
 from theseus.db.models.auth import ApiKey, RefreshToken, User
+from theseus.db.models.custom_model import CustomModel
 from theseus.db.models.dataset import (
     Annotation,
     AudioFeatures,
@@ -19,7 +20,7 @@ from theseus.db.models.serving import ModelExport
 from theseus.db.models.training import RunEvaluation, RunEvent, Sweep, TrainingMetric, TrainingRun
 
 __all__ = [
-    "Annotation", "ApiKey", "AudioFeatures", "Dataset", "DatasetItem", "DatasetVersion",
+    "Annotation", "ApiKey", "AudioFeatures", "CustomModel", "Dataset", "DatasetItem", "DatasetVersion",
     "DatasetVersionItem", "LabelClass", "ModelExport", "PluginSetting", "Project", "RefreshToken",
     "RunEvaluation", "RunEvent", "Sweep", "TabularFeatures", "TextFeatures", "TrainingMetric",
     "TrainingRun", "User", "VisionFeatures",

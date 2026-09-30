@@ -1666,7 +1666,7 @@
           "training"
         ],
         "summary": "List Project Training Backends",
-        "description": "Backends that can train this project's task, with their models and hyperparameters — what\nthe create-run / create-sweep panel renders. Only available backends are included.",
+        "description": "Backends that can train this project's task, with their models and hyperparameters — what\nthe create-run / create-sweep panel renders. Only available backends are included.\n\nA backend's models are its built-ins (minus what an admin switched off) plus the custom models the\nproject's owner may use: their own private ones and the global ones an admin made available.",
         "operationId": "list_project_training_backends",
         "parameters": [
           {
@@ -2689,6 +2689,322 @@
         }
       }
     },
+    "/api/models/kinds": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "List Custom Model Kinds",
+        "description": "What can be added, per backend and task: the options of the \"add a model\" form.",
+        "operationId": "list_custom_model_kinds",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelKindListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "List My Models",
+        "operationId": "list_my_models",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Create My Model",
+        "operationId": "create_my_model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomModelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{model_id}": {
+      "patch": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Update My Model",
+        "operationId": "update_my_model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCustomModelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Delete My Model",
+        "operationId": "delete_my_model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteCustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{model_id}/upload-url": {
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Request Model Upload Url",
+        "description": "A short-lived presigned PUT URL: the browser uploads the weights straight to object storage.",
+        "operationId": "request_model_upload_url",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadUrlBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{model_id}/finalize": {
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Finalize Model Upload",
+        "operationId": "finalize_model_upload",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/models/{model_id}/retry": {
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Retry Model Validation",
+        "operationId": "retry_model_validation",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/users": {
       "get": {
         "tags": [
@@ -3023,6 +3339,373 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PluginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/models": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Models",
+        "operationId": "admin_list_models",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(global|private)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(pending_upload|uploaded|validating|ready|failed)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Archived"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Create Model",
+        "description": "Create a GLOBAL model, available to every user.",
+        "operationId": "admin_create_model",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomModelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/models/{model_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Update Model",
+        "operationId": "admin_update_model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCustomModelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Delete Model",
+        "operationId": "admin_delete_model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteCustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/models/{model_id}/upload-url": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Model Upload Url",
+        "operationId": "admin_model_upload_url",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadUrlBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadUrlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/models/{model_id}/finalize": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Finalize Model Upload",
+        "operationId": "admin_finalize_model_upload",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/models/{model_id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Retry Model Validation",
+        "operationId": "admin_retry_model_validation",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomModelResponse"
                 }
               }
             }
@@ -4134,6 +4817,71 @@
         ],
         "title": "CreateClassBody"
       },
+      "CreateCustomModelBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Description",
+            "default": ""
+          },
+          "backend": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Backend"
+          },
+          "kind": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind"
+          },
+          "sourceKind": {
+            "type": "string",
+            "enum": [
+              "hub",
+              "upload"
+            ],
+            "title": "Sourcekind"
+          },
+          "sourceRef": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceref"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "backend",
+          "kind",
+          "sourceKind",
+          "tasks"
+        ],
+        "title": "CreateCustomModelBody"
+      },
       "CreateExportBody": {
         "properties": {
           "format": {
@@ -4367,6 +5115,294 @@
         ],
         "title": "CreatedApiKey"
       },
+      "CustomModelKindListResponse": {
+        "properties": {
+          "kinds": {
+            "items": {
+              "$ref": "#/components/schemas/CustomModelKindOut"
+            },
+            "type": "array",
+            "title": "Kinds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kinds"
+        ],
+        "title": "CustomModelKindListResponse"
+      },
+      "CustomModelKindOut": {
+        "properties": {
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "backendLabel": {
+            "type": "string",
+            "title": "Backendlabel"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "modality": {
+            "type": "string",
+            "title": "Modality"
+          },
+          "sourceKinds": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "hub",
+                "upload"
+              ]
+            },
+            "type": "array",
+            "title": "Sourcekinds"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "experimental"
+            ],
+            "title": "Status"
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailablereason"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "backend",
+          "backendLabel",
+          "id",
+          "label",
+          "description",
+          "modality",
+          "sourceKinds",
+          "status",
+          "unavailableReason",
+          "tasks"
+        ],
+        "title": "CustomModelKindOut",
+        "description": "One sort of custom model a backend accepts, with the tasks it can be used for."
+      },
+      "CustomModelListResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/CustomModelOut"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "models"
+        ],
+        "title": "CustomModelListResponse"
+      },
+      "CustomModelOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "sourceKind": {
+            "type": "string",
+            "enum": [
+              "hub",
+              "upload"
+            ],
+            "title": "Sourcekind"
+          },
+          "sourceRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceref"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sizeBytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizebytes"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "lastError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasterror"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "global",
+              "private"
+            ],
+            "title": "Scope"
+          },
+          "ownerUserId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owneruserid"
+          },
+          "ownerEmail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owneremail"
+          },
+          "runCount": {
+            "type": "integer",
+            "title": "Runcount"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "backend",
+          "kind",
+          "sourceKind",
+          "sourceRef",
+          "revision",
+          "sizeBytes",
+          "tasks",
+          "status",
+          "lastError",
+          "enabled",
+          "archived",
+          "scope",
+          "ownerUserId",
+          "runCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "CustomModelOut"
+      },
+      "CustomModelResponse": {
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/CustomModelOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "title": "CustomModelResponse"
+      },
       "DatasetHealth": {
         "properties": {
           "itemCount": {
@@ -4569,6 +5605,24 @@
           "itemCount"
         ],
         "title": "DatasetSplit"
+      },
+      "DeleteCustomModelResponse": {
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "title": "Deleted"
+          },
+          "archived": {
+            "type": "boolean",
+            "title": "Archived"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted",
+          "archived"
+        ],
+        "title": "DeleteCustomModelResponse"
       },
       "DeleteItemsBody": {
         "properties": {
@@ -5876,6 +6930,27 @@
           "pretrained": {
             "type": "boolean",
             "title": "Pretrained"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "builtin",
+              "global",
+              "private"
+            ],
+            "title": "Source",
+            "default": "builtin"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           }
         },
         "type": "object",
@@ -6619,8 +7694,35 @@
             ],
             "title": "Status"
           },
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
           "hyperparameters": {
             "title": "Hyperparameters"
+          },
+          "customModelId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custommodelid"
+          },
+          "modelLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modellabel"
           },
           "failedMessage": {
             "anyOf": [
@@ -6678,6 +7780,7 @@
           "id",
           "name",
           "status",
+          "backend",
           "hyperparameters",
           "failedMessage",
           "startedAt",
@@ -7954,6 +9057,63 @@
         "type": "object",
         "title": "UpdateClassBody"
       },
+      "UpdateCustomModelBody": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "tasks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tasks"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "UpdateCustomModelBody"
+      },
       "UpdateProjectBody": {
         "properties": {
           "name": {
@@ -8065,6 +9225,64 @@
         ],
         "title": "UploadResult",
         "description": "One file outcome, in the same {status, value | reason} shape the gateway returned."
+      },
+      "UploadUrlBody": {
+        "properties": {
+          "filename": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Filename"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Sizebytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "filename",
+          "sizeBytes"
+        ],
+        "title": "UploadUrlBody"
+      },
+      "UploadUrlResponse": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "method": {
+            "type": "string",
+            "const": "PUT",
+            "title": "Method",
+            "default": "PUT"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          },
+          "maxBytes": {
+            "type": "integer",
+            "title": "Maxbytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "key",
+          "headers",
+          "maxBytes"
+        ],
+        "title": "UploadUrlResponse"
       },
       "UserOut": {
         "properties": {

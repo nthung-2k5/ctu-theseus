@@ -19,6 +19,7 @@ theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for verify scripts
+  custom/{modelId}/bundle.zip                a bring-your-own model upload (or model.safetensors), see custom_models.py
 """
 
 import hashlib
@@ -154,6 +155,17 @@ def s3fs_path(bucket: str, key: str) -> str:
 
 
 # -- Object operations -----------------------------------------------------------------------
+
+
+def get_upload_url(bucket: str, key: str, expires_in: int = 3600, content_type: str | None = None) -> str:
+    """A time-limited presigned PUT URL, so the BROWSER can upload a large file straight to object storage
+    instead of streaming it through this process. Signed against `s3_public_endpoint` for the same reason as
+    `get_download_url`. The client must send the same Content-Type it was signed with."""
+    params: dict[str, Any] = {"Bucket": bucket, "Key": key}
+    if content_type:
+        params["ContentType"] = content_type
+    client = s3(get_settings().s3_public_endpoint)  # None falls back to s3_endpoint
+    return client.generate_presigned_url("put_object", Params=params, ExpiresIn=expires_in)
 
 
 def get_download_url(bucket: str, key: str, expires_in: int = 3600) -> str:

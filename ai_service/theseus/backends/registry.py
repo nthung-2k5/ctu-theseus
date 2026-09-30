@@ -67,7 +67,8 @@ def enabled_builtin_models(backend: type[TrainerBackend], task: TaskDescriptor) 
     ]
 
 
-def _model_param_name(backend: type[TrainerBackend]) -> str:
+def model_param_name(backend: type[TrainerBackend]) -> str:
+    """The hyperparameters key a backend's model choice goes under (see `BackendInfo.model_param_name`)."""
     field_info = backend.Hyperparameters.model_fields["model_id"]
     return field_info.alias or "modelId"
 
@@ -90,6 +91,6 @@ def describe(backend: type[TrainerBackend], task: TaskDescriptor | None = None) 
             and plugin_settings.is_enabled("backend", backend.id, t.id)
         ],
         models=enabled_builtin_models(backend, task) if task is not None else [],
-        model_param_name=_model_param_name(backend),
+        model_param_name=model_param_name(backend),
         params=backend.hyperparameter_specs(task) if task is not None else [],
     )

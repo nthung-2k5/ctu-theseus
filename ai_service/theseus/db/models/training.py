@@ -63,6 +63,11 @@ class TrainingRun(JobColumns, Base):
     # A trainer backend plugin id (theseus/backends/), free text like exports.format.
     backend: Mapped[str] = mapped_column(sa.String(64), default="ludwig", server_default="ludwig")
     hyperparameters: Mapped[Any] = mapped_column(JSONB)
+    # Set when the run trained on a bring-your-own model. RESTRICT, so a model any run used can only be
+    # archived (see routers/models.py), never removed out from under that run.
+    custom_model_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("custom_models.id", ondelete="RESTRICT"), index=True
+    )
     # The exact compiled config this backend produced, for reproducibility. Opaque outside the
     # backend that wrote it (see TrainerBackend.compile).
     config: Mapped[Any | None] = mapped_column(JSONB)

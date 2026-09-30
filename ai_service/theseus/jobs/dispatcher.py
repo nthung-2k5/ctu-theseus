@@ -1,6 +1,6 @@
 """Lane loops: claim queued jobs from Postgres and run them in this process.
 
-Three lanes (see executors.py): train (1 at a time, GPU), export (2), inference (N). Each lane
+Lanes (see executors.py): train (1 at a time, GPU), export (2), validate (1, custom models), inference (N). Each lane
 loop does, in this order:
 
     acquire a lane slot  ->  claim one job  ->  run it  ->  release the slot
@@ -206,9 +206,12 @@ def nudge(lane_name: str) -> None:
 
 def build_default_lanes() -> list[Lane]:
     """The real lanes. Imported lazily because train/export pull in torch and Ludwig."""
-    from theseus.jobs import export, train
+    from theseus.jobs import export, train, validate_model
 
     return [
         Lane("train", queue.TRAIN, 1, train.run_train, train.handle_failure),
         Lane("export", queue.EXPORT, 2, export.run_export, export.handle_failure, renew_lease=True),
+        Lane(
+            "validate", queue.VALIDATE, 1, validate_model.run_validate, validate_model.handle_failure, renew_lease=True
+        ),
     ]

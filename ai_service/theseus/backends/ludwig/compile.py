@@ -13,8 +13,16 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from theseus import constants as C
-from theseus.backends.base import ConfigError, HyperparamsBase
-from theseus.backends.ludwig.tasks import LUDWIG_OPTIMIZER_TYPES, LUDWIG_TASKS, EncoderChoice
+from theseus.backends.base import ConfigError, CustomModelRef, HyperparamsBase
+from theseus.backends.ludwig.tasks import (
+    HF_CAUSAL_LM,
+    HF_TRANSFORMER,
+    LUDWIG_OPTIMIZER_TYPES,
+    LUDWIG_TASKS,
+    TIMM_IMAGE,
+    EncoderChoice,
+    custom_kinds_for,
+)
 from theseus.schemas.common import ParamSpec
 from theseus.services.task_registry import SnapshotContext, TaskDescriptor
 
@@ -114,6 +122,9 @@ class _Preprocessing(BaseModel):
 
 class LudwigConfig(BaseModel):
     model_type: Literal["ecd", "llm"]
+    # The LLM base model. Declared so `model_dump` keeps it: unknown keys are dropped, and a missing
+    # base_model makes Ludwig reject an llm config.
+    base_model: str | None = None
     input_features: list[_InputFeature] = Field(min_length=1)
     output_features: list[_OutputFeature] = Field(min_length=1)
     combiner: _Combiner | None = None
@@ -126,7 +137,10 @@ class LudwigConfig(BaseModel):
 
 
 def compile_ludwig_config(
-    task: TaskDescriptor, ctx: SnapshotContext, hp: LudwigHyperparameters | None = None
+    task: TaskDescriptor,
+    ctx: SnapshotContext,
+    hp: LudwigHyperparameters | None = None,
+    custom: CustomModelRef | None = None,
 ) -> dict[str, Any]:
     sel = hp or LudwigHyperparameters()
     spec = LUDWIG_TASKS.get(task.id)
@@ -134,15 +148,26 @@ def compile_ludwig_config(
         raise ConfigError(f'Task "{task.id}" has no Ludwig backend (status: {task.status})')
     knobs = spec.trainer_knobs
 
-    if sel.freeze_backbone and not any(e.pretrained for e in spec.encoders):
-        raise ConfigError(f'Task "{task.id}" has no pretrained backbone to freeze')
+    if custom is None and sel.model_id and sel.model_id.startswith(CUSTOM_MODEL_PREFIX):
+        raise ConfigError(f'Custom model "{sel.model_id}" was not resolved (it may have been removed or disabled)')
+    if custom is not None:
+        _check_custom_kind(task.id, custom)
+    if sel.freeze_backbone:
+        if custom is not None and custom.kind == HF_CAUSAL_LM:
+            # A language model is fine-tuned whole; there is no separate encoder whose weights could be held fixed.
+            raise ConfigError("Freezing the backbone does not apply to a language model base model")
+        # A custom encoder is always pretrained, so it can be frozen wherever the built-in catalog could not.
+        if custom is None and not any(e.pretrained for e in spec.encoders):
+            raise ConfigError(f'Task "{task.id}" has no pretrained backbone to freeze')
     combiner = _head_combiner(sel, task.id, spec.model_type)
 
     declared = copy.deepcopy(spec.input_features)
     if declared:
         input_features = [
             _with_sequence_length(
-                _with_image_resize(_with_encoder(f, spec.encoders, sel.model_id, sel.freeze_backbone), sel.image_size),
+                _with_image_resize(
+                    _with_encoder(f, spec.encoders, sel.model_id, sel.freeze_backbone, custom), sel.image_size
+                ),
                 sel.max_sequence_length,
             )
             for f in declared
@@ -176,6 +201,9 @@ def compile_ludwig_config(
 
     config = {
         "model_type": spec.model_type,
+        # An LLM task fine-tunes its base model directly: it has no encoder to swap, so the custom
+        # model is the base_model. (An LLM task offers no built-in models, so without one it stays unset.)
+        **({"base_model": custom.local_path} if custom is not None and custom.kind == HF_CAUSAL_LM else {}),
         "input_features": input_features,
         "output_features": output_features,
         **({"combiner": combiner} if combiner else {}),
@@ -194,9 +222,37 @@ def serialize_ludwig_config(config: dict[str, Any]) -> str:
     return yaml.safe_dump(config, sort_keys=False)
 
 
+# Every custom model's id in `hyperparameters.encoderId`, e.g. "custom:0192...". See services/model_catalog.py.
+CUSTOM_MODEL_PREFIX = "custom:"
+
+
+def _check_custom_kind(task_id: str, custom: CustomModelRef) -> None:
+    if custom.kind not in {k.id for k in custom_kinds_for(task_id)}:
+        raise ConfigError(f'A "{custom.kind}" custom model cannot be used for task "{task_id}"')
+
+
+def _custom_encoder(custom: CustomModelRef, freeze: bool | None) -> dict[str, Any] | None:
+    """The Ludwig encoder block for a custom model, or None when the kind is not an encoder swap."""
+    trainable = {"trainable": False} if freeze else {}
+    if custom.kind == HF_TRANSFORMER:
+        # auto_transformer always loads pretrained weights, from a local directory here.
+        return {"type": "auto_transformer", "pretrained_model_name_or_path": custom.local_path, **trainable}
+    if custom.kind == TIMM_IMAGE:
+        return {"type": "timm", "model_name": custom.source_ref, "use_pretrained": True, **trainable}
+    return None
+
+
 def _with_encoder(
-    feature: dict[str, Any], encoders: list[EncoderChoice], model_id: str | None, freeze: bool | None = None
+    feature: dict[str, Any],
+    encoders: list[EncoderChoice],
+    model_id: str | None,
+    freeze: bool | None = None,
+    custom: CustomModelRef | None = None,
 ) -> dict[str, Any]:
+    if custom is not None:
+        # Bypass the built-in catalog entirely: the model id is "custom:{uuid}", not one of its entries.
+        encoder = _custom_encoder(custom, freeze)
+        return feature if encoder is None or feature.get("encoder") else {**feature, "encoder": encoder}
     if feature.get("encoder") or not encoders:
         return feature
     if model_id:

@@ -1,7 +1,7 @@
 """Periodic housekeeping, one loop, one function per concern (each independently testable).
 
   stale_runs               a running run with no event for a long time -> failed (hung training thread)
-  expired_leases           export jobs whose worker stopped renewing -> re-queued or failed
+  expired_leases           export and custom-model validation jobs whose worker stopped renewing -> re-queued or failed
   event_retention          old log rows and old run events
   rate_limit               expired API-key rate-limit windows
 
@@ -54,6 +54,7 @@ async def stale_runs(timeout_seconds: int | None = None) -> int:
 
 async def expired_leases() -> int:
     ids = await queue.requeue_expired(queue.EXPORT, {"failed_message": "The export worker stopped responding"})
+    ids += await queue.requeue_expired(queue.VALIDATE)
     return len(ids)
 
 

@@ -20,11 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from theseus import constants as C
 from theseus.backends.base import ConfigError, TrainerBackend
 from theseus.backends.registry import enabled_builtin_models, get_backend, trainable_backends
-from theseus.db.models import DatasetVersion, Sweep, TrainingRun
+from theseus.db.models import DatasetVersion, Project, Sweep, TrainingRun
 from theseus.events import get_event_writer
 from theseus.jobs import abort
 from theseus.jobs.dispatcher import nudge
-from theseus.services import plugin_settings, storage
+from theseus.services import model_catalog, plugin_settings, storage
 from theseus.services.snapshot import read_snapshot_manifest
 from theseus.services.sweep import expand_sweep, validate_search_space
 from theseus.services.task_registry import get_task_descriptor
@@ -132,13 +132,25 @@ async def queue_training(
         first = e.errors()[0]
         where = ".".join(str(p) for p in first["loc"])
         return await _record_failure(422, f"Invalid hyperparameter '{where}': {first['msg']}")
-    if (model_error := _check_builtin_model(backend, task, sel)) is not None:
+    custom_row = custom_ref = None
+    if model_catalog.is_custom_id(sel.model_id):
+        # The project's owner is who trains: their private models and the global ones are visible to them.
+        project = await session.get(Project, project_id)
+        try:
+            custom_row, custom_ref = await model_catalog.resolve(
+                session, project.user_id, get_task_descriptor(task), backend, sel.model_id
+            )
+        except model_catalog.ModelNotAvailable as e:
+            return await _record_failure(400, str(e))
+    elif (model_error := _check_builtin_model(backend, task, sel)) is not None:
         return await _record_failure(400, model_error)
     stored_hyperparameters = sel.model_dump(by_alias=True, exclude_none=True)
 
     try:
         ctx = await read_snapshot_manifest(dataset_version_id)
-        config = backend.compile(get_task_descriptor(task), ctx, sel)
+        # `custom` is only passed for a custom model, so a backend that predates the argument still compiles.
+        compile_extra = {"custom": custom_ref} if custom_ref is not None else {}
+        config = backend.compile(get_task_descriptor(task), ctx, sel, **compile_extra)
         config_yaml = yaml.safe_dump(config, sort_keys=False)
     except (ConfigError, ValueError, KeyError) as e:
         return await _record_failure(400, f"Failed to compile {backend.label} config: {e}")
@@ -151,7 +163,7 @@ async def queue_training(
     run = TrainingRun(
         id=run_id, project_id=project_id, name=name, dataset_version_id=dataset_version_id, backend=backend.id,
         sweep_id=sweep_id, trial_index=trial_index, hyperparameters=stored_hyperparameters, config=config,
-        config_key=config_key, status="queued",
+        config_key=config_key, status="queued", custom_model_id=custom_row.id if custom_row else None,
     )  # fmt: skip
     session.add(run)
     await session.commit()

@@ -12,6 +12,7 @@ from theseus.backends.base import LoadedModel
 from theseus.backends.registry import get_backend
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import TrainingRun
+from theseus.services.run_models import ensure_run_custom_model
 from theseus.services.storage import cleanup_temp, download_model, find_model_dir
 from theseus.settings import get_settings
 
@@ -85,6 +86,9 @@ class ModelCache:
                 # next call (this run or another) retries from scratch,
                 # instead of a broken load sticking around as a false hit.
                 backend_id = await resolve_backend(run_id)
+                # A run trained on a custom model saved a path to its files: put them back first, even
+                # after a restart cleared the temp directory.
+                await ensure_run_custom_model(run_id)
                 model = await asyncio.to_thread(self._load_sync, run_id, backend_id)
 
             self._models[run_id] = model

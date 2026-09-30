@@ -18,7 +18,7 @@ from typing import Any
 import sqlalchemy as sa
 
 from theseus.db.base import get_sessionmaker
-from theseus.db.models import ModelExport, TrainingRun
+from theseus.db.models import CustomModel, ModelExport, TrainingRun
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,8 @@ class JobKind:
 
 TRAIN = JobKind("train", TrainingRun, "queued", ("running",), "running", "failed")
 EXPORT = JobKind("export", ModelExport, "pending", ("converting", "assembling"), "converting", "failed")
+# A bring-your-own model is validated (pinned, fetched, checked) before anyone can train on it.
+VALIDATE = JobKind("validate", CustomModel, "uploaded", ("validating",), "validating", "failed")
 
 
 async def claim_one(kind: JobKind, worker_id: str, lease_seconds: int) -> uuid.UUID | None:

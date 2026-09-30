@@ -10,6 +10,8 @@ is marked in-flight in the database is definitely not running any more.
   export     converting/assembling -> pending (assembly rewrites the same S3 keys, so re-running
              is idempotent), or failed once attempts are exhausted.
   snapshot   building -> failed (the parquet build is in-process and cannot resume).
+  custom model  validating -> uploaded (validation is idempotent: it re-downloads and re-checks), or failed
+             once attempts are exhausted.
 
 This also retires the old heartbeat/ack_wait drift bug: the reaper and JetStream used to disagree
 about when a silent run was dead, letting a run flip failed -> running -> succeeded.
@@ -21,7 +23,7 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 
 from theseus.db.base import get_sessionmaker
-from theseus.db.models import DatasetVersion, ModelExport, TrainingRun
+from theseus.db.models import CustomModel, DatasetVersion, ModelExport, TrainingRun
 from theseus.events import get_event_writer
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,8 @@ class RecoveryReport:
     exports_requeued: int = 0
     exports_failed: int = 0
     snapshots_failed: int = 0
+    models_requeued: int = 0
+    models_failed: int = 0
 
 
 async def recover_on_startup() -> RecoveryReport:
@@ -115,6 +119,38 @@ async def recover_on_startup() -> RecoveryReport:
             .all()
         )
         report.snapshots_failed = len(snapshots)
+
+        requeued_models = (
+            (
+                await s.execute(
+                    sa.update(CustomModel)
+                    .where(CustomModel.status == "validating", CustomModel.attempt < CustomModel.max_attempts)
+                    .values(
+                        status="uploaded",
+                        claimed_by=None,
+                        lease_expires_at=None,
+                        available_at=sa.func.now(),
+                        last_error=RESTART_MESSAGE,
+                    )  # fmt: skip
+                    .returning(CustomModel.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        failed_models = (
+            (
+                await s.execute(
+                    sa.update(CustomModel)
+                    .where(CustomModel.status == "validating")
+                    .values(status="failed", claimed_by=None, lease_expires_at=None, last_error=RESTART_MESSAGE)
+                    .returning(CustomModel.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        report.models_requeued, report.models_failed = len(requeued_models), len(failed_models)
         await s.commit()
 
     logger.info("Startup recovery: %s", report)

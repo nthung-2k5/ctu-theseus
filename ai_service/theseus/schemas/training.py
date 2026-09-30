@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -24,6 +24,10 @@ class ModelChoiceOut(ApiModel):
     label: str
     description: str
     pretrained: bool
+    # builtin | global (an admin's custom model) | private (the caller's own custom model)
+    source: Literal["builtin", "global", "private"] = "builtin"
+    # The custom-model kind; None for a built-in.
+    kind: str | None = None
 
 
 class TrainingBackendOut(ApiModel):
@@ -125,7 +129,14 @@ class RunDetail(ApiModel):
     id: uuid.UUID
     name: str
     status: TrainingStatus
+    # The trainer backend plugin id this run trained with.
+    backend: str
     hyperparameters: Any
+    # Set when the run trained on a bring-your-own model.
+    custom_model_id: uuid.UUID | None = None
+    # A person-readable name for the model the run used: a custom model's name (even one since archived), or
+    # the built-in model's label. None when the run named no model (the backend's default was used).
+    model_label: str | None = None
     failed_message: str | None
     started_at: datetime | None
     completed_at: datetime | None

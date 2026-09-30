@@ -5,6 +5,7 @@ in a pool that also serves every S3 call, parquet read and password hash in the 
 
   train      1 thread   the GPU is singular
   export     2 threads  preserves the old MAX_CONCURRENCY=2; zlib releases the GIL, so threads suffice
+  validate   1 thread   custom model checks download and unpack multi-GB bundles: one at a time, off the S3 pool
 """
 
 import asyncio
@@ -16,6 +17,7 @@ from typing import Any
 
 train_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="train")
 export_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="export")
+validate_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="validate")
 
 
 async def run_in_executor[T](executor: Executor | None, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:

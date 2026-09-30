@@ -33,6 +33,7 @@ from theseus.export.registry import find_export_format
 from theseus.jobs import queue
 from theseus.jobs.executors import export_executor, run_in_executor
 from theseus.services import storage
+from theseus.services.run_models import ensure_run_custom_model
 from theseus.settings import get_settings
 
 logger = logging.getLogger("theseus.jobs.export")
@@ -141,6 +142,8 @@ async def run_export(export_id: uuid.UUID) -> None:
         None, storage.file_exists, C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename)
     ):
         dataset_key = storage.snapshot_parquet_key(str(run.dataset_version_id))
+        # Loading the model re-reads a custom model's files from the path the run was trained with.
+        await ensure_run_custom_model(run.id)
         await run_in_executor(
             export_executor, _convert, run_id, backend, export_format.artifact, dataset_key, str(export_id)
         )

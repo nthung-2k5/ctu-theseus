@@ -33,6 +33,7 @@ from theseus.events.log_handler import current_run_id
 from theseus.jobs import abort
 from theseus.jobs.executors import run_in_executor, train_executor
 from theseus.services import storage
+from theseus.services.run_models import ensure_run_custom_model
 from theseus.settings import get_settings
 
 logger = logging.getLogger("theseus.jobs.train")
@@ -158,6 +159,9 @@ async def run_train(run_id: uuid.UUID) -> None:
             _check_abort=lambda: _check_abort(rid, abort_event),
             _report=lambda epoch, split, metrics: writer.metric(rid, epoch, split, metrics),
         )
+
+        # A custom model's files live at the path the compiled config names; make sure they are there.
+        await ensure_run_custom_model(run_id)
 
         with tracer.start_as_current_span(f"{backend.id}.train"):
             model = await run_in_executor(train_executor, backend.train, ctx)

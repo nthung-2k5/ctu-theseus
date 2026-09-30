@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     temp_dir: Path = Field(default=Path("/tmp/theseus"), validation_alias="TEMP_DIR")
     inference_model_cache_size: int = Field(default=2, validation_alias="INFERENCE_MODEL_CACHE_SIZE")
     inference_timeout_seconds: int = Field(default=600, validation_alias="INFERENCE_TIMEOUT_SECONDS")
+    # Largest bring-your-own model bundle, uploaded or fetched from the Hub. The browser uploads with a single
+    # presigned PUT, which S3 caps at 5 GiB, so that is also the default.
+    max_custom_model_bytes: int = Field(default=5 * 2**30, validation_alias="MAX_CUSTOM_MODEL_BYTES")
 
     port: int = Field(default=8000, validation_alias="PORT")
 

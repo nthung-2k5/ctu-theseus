@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from theseus.backends.base import CustomModelKind
 from theseus.db.enums import ProjectTask
 from theseus.services.task_registry import CLASS, IMAGE_PATH
 
@@ -190,6 +191,68 @@ LUDWIG_TASKS: dict[str, LudwigTaskSpec] = {
     "audio_captioning": _file_caption_spec("audio_path", "caption", "audio", AUDIO_ENCODERS),
     "automatic_speech_recognition": _file_caption_spec("audio_path", "transcript", "audio", AUDIO_ENCODERS),
 }
+
+# -- Bring-your-own model kinds ----------------------------------------------------------------
+
+HF_TRANSFORMER = "hf_transformer"
+HF_CAUSAL_LM = "hf_causal_lm"
+TIMM_IMAGE = "timm_image"
+
+_LLM_TASKS = ("text_generation", "summarization", "sequence_to_sequence", "question_answering")
+
+
+def _timm_unavailable_reason() -> str | None:
+    import importlib.util
+
+    if importlib.util.find_spec("timm") is None:
+        return "The 'timm' package is not installed on this server"
+    return None
+
+
+def custom_kinds_for(task_id: str) -> list[CustomModelKind]:
+    """The bring-your-own model kinds Ludwig can train for `task_id`.
+
+    Text classification takes any Hugging Face encoder through Ludwig's `auto_transformer`, and the
+    generative text tasks take a causal language model as `base_model`. Both work from a Hub reference
+    or an uploaded bundle. Images use Ludwig's `timm` encoder, which fetches a timm model by name, so it
+    is Hub-only, has no files of its own to pin, and is experimental.
+    """
+    if task_id == "text_classification":
+        return [
+            CustomModelKind(
+                id=HF_TRANSFORMER,
+                label="Hugging Face encoder",
+                description="A BERT-style encoder (safetensors weights with config.json and tokenizer files).",
+                modality="text",
+                source_kinds=["hub", "upload"],
+            )
+        ]
+    if task_id in _LLM_TASKS:
+        return [
+            CustomModelKind(
+                id=HF_CAUSAL_LM,
+                label="Hugging Face causal LM",
+                description="A decoder-only language model, fine-tuned as the base model.",
+                modality="text",
+                source_kinds=["hub", "upload"],
+            )
+        ]
+    if task_id in ("image_classification", "image_captioning"):
+        return [
+            CustomModelKind(
+                id=TIMM_IMAGE,
+                label="timm image model",
+                description="A model from the timm library, by name (e.g. resnet50.a1_in1k). Weights are fetched "
+                "by timm when a run trains or loads, so they are not pinned to a revision.",
+                modality="vision",
+                source_kinds=["hub"],
+                status="experimental",
+                unavailable_reason=_timm_unavailable_reason(),
+                materialize=False,
+            )
+        ]
+    return []
+
 
 # Sanity: every key above is a real project task.
 assert set(LUDWIG_TASKS) <= set(ProjectTask.__args__)  # type: ignore[attr-defined]
