@@ -3722,10 +3722,538 @@
           }
         }
       }
+    },
+    "/api/admin/runs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Runs",
+        "operationId": "admin_list_runs",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(queued|running|succeeded|failed|canceled)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Part of the owner's email",
+              "title": "User"
+            },
+            "description": "Part of the owner's email"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminRunListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/runs/{run_id}/cancel": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Cancel Run",
+        "description": "Stop someone's queued or running training run, the same way its owner would.",
+        "operationId": "admin_cancel_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/exports": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Exports",
+        "operationId": "admin_list_exports",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(pending|converting|assembling|ready|failed)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "user",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Part of the owner's email",
+              "title": "User"
+            },
+            "description": "Part of the owner's email"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminExportListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/exports/{export_id}/requeue": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Requeue Export",
+        "description": "Give a failed export a fresh set of attempts. Only a `failed` export can be requeued: the status\ncolumn is the lock, so this is a compare-and-swap and a row that just moved on is left alone.",
+        "operationId": "admin_requeue_export",
+        "parameters": [
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Export Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/system": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin System",
+        "operationId": "admin_system",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AdminExportListResponse": {
+        "properties": {
+          "exports": {
+            "items": {
+              "$ref": "#/components/schemas/AdminExportOut"
+            },
+            "type": "array",
+            "title": "Exports"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exports",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "AdminExportListResponse"
+      },
+      "AdminExportOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "runId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Runid"
+          },
+          "runName": {
+            "type": "string",
+            "title": "Runname"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "ownerEmail": {
+            "type": "string",
+            "title": "Owneremail"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "title": "Maxattempts"
+          },
+          "failedMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failedmessage"
+          },
+          "lastError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasterror"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "readyAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readyat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "runId",
+          "runName",
+          "format",
+          "status",
+          "ownerEmail",
+          "attempt",
+          "maxAttempts",
+          "failedMessage",
+          "lastError",
+          "createdAt",
+          "readyAt"
+        ],
+        "title": "AdminExportOut"
+      },
+      "AdminRunListResponse": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/AdminRunOut"
+            },
+            "type": "array",
+            "title": "Runs"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs",
+          "total",
+          "page",
+          "pageSize"
+        ],
+        "title": "AdminRunListResponse"
+      },
+      "AdminRunOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Projectid"
+          },
+          "projectName": {
+            "type": "string",
+            "title": "Projectname"
+          },
+          "task": {
+            "type": "string",
+            "title": "Task"
+          },
+          "ownerEmail": {
+            "type": "string",
+            "title": "Owneremail"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "failedMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failedmessage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "projectId",
+          "projectName",
+          "task",
+          "ownerEmail",
+          "backend",
+          "createdAt",
+          "startedAt",
+          "completedAt",
+          "failedMessage"
+        ],
+        "title": "AdminRunOut"
+      },
       "AdminUserListResponse": {
         "properties": {
           "users": {
@@ -4450,6 +4978,41 @@
           "updated"
         ],
         "title": "AutoSplitResponse"
+      },
+      "BackendStatusOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "unavailableReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailablereason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "available",
+          "unavailableReason"
+        ],
+        "title": "BackendStatusOut"
       },
       "Body_run_batch_inference": {
         "properties": {
@@ -6825,6 +7388,53 @@
         ],
         "title": "LabelClassOut"
       },
+      "LaneOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "queued",
+          "running",
+          "capacity"
+        ],
+        "title": "LaneOut"
+      },
       "LoginBody": {
         "properties": {
           "email": {
@@ -8663,6 +9273,87 @@
           "completedAt"
         ],
         "title": "SweepTrial"
+      },
+      "SystemCounts": {
+        "properties": {
+          "users": {
+            "type": "integer",
+            "title": "Users"
+          },
+          "admins": {
+            "type": "integer",
+            "title": "Admins"
+          },
+          "disabledUsers": {
+            "type": "integer",
+            "title": "Disabledusers"
+          },
+          "projects": {
+            "type": "integer",
+            "title": "Projects"
+          },
+          "runs": {
+            "type": "integer",
+            "title": "Runs"
+          },
+          "activeRuns": {
+            "type": "integer",
+            "title": "Activeruns"
+          },
+          "exports": {
+            "type": "integer",
+            "title": "Exports"
+          },
+          "customModels": {
+            "type": "integer",
+            "title": "Custommodels"
+          },
+          "customModelBytes": {
+            "type": "integer",
+            "title": "Custommodelbytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "users",
+          "admins",
+          "disabledUsers",
+          "projects",
+          "runs",
+          "activeRuns",
+          "exports",
+          "customModels",
+          "customModelBytes"
+        ],
+        "title": "SystemCounts"
+      },
+      "SystemResponse": {
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/SystemCounts"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/LaneOut"
+            },
+            "type": "array",
+            "title": "Lanes"
+          },
+          "backends": {
+            "items": {
+              "$ref": "#/components/schemas/BackendStatusOut"
+            },
+            "type": "array",
+            "title": "Backends"
+          }
+        },
+        "type": "object",
+        "required": [
+          "counts",
+          "lanes",
+          "backends"
+        ],
+        "title": "SystemResponse"
       },
       "TabularFeaturesIn": {
         "properties": {

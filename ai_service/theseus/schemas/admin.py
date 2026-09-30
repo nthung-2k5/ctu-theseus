@@ -71,3 +71,83 @@ class SetPluginBody(ApiModel):
 
 class PluginResponse(ApiModel):
     plugin: PluginEntry
+
+
+class AdminRunOut(ApiModel):
+    id: uuid.UUID
+    name: str
+    status: str
+    project_id: uuid.UUID
+    project_name: str
+    task: str
+    owner_email: str
+    backend: str
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    failed_message: str | None
+
+
+class AdminRunListResponse(ApiModel):
+    runs: list[AdminRunOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminExportOut(ApiModel):
+    id: uuid.UUID
+    run_id: uuid.UUID
+    run_name: str
+    format: str
+    status: str
+    owner_email: str
+    attempt: int
+    max_attempts: int
+    failed_message: str | None
+    last_error: str | None
+    created_at: datetime
+    ready_at: datetime | None
+
+
+class AdminExportListResponse(ApiModel):
+    exports: list[AdminExportOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class LaneOut(ApiModel):
+    # train | export | validate
+    name: str
+    label: str
+    # Waiting to be claimed.
+    queued: int
+    # In flight right now / how many may run at once. None when no dispatcher is running (never in production).
+    running: int | None
+    capacity: int | None
+
+
+class BackendStatusOut(ApiModel):
+    id: str
+    label: str
+    available: bool
+    unavailable_reason: str | None
+
+
+class SystemCounts(ApiModel):
+    users: int
+    admins: int
+    disabled_users: int
+    projects: int
+    runs: int
+    active_runs: int
+    exports: int
+    custom_models: int
+    custom_model_bytes: int
+
+
+class SystemResponse(ApiModel):
+    counts: SystemCounts
+    lanes: list[LaneOut]
+    backends: list[BackendStatusOut]

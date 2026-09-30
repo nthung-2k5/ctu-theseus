@@ -1,6 +1,8 @@
 import { AdminLayout } from '@public/layouts/AdminLayout'
 import { sessionQueryOptions } from '@public/lib/auth'
+import { JobsPage } from '@public/pages/admin/JobsPage'
 import { AdminModelsPage } from '@public/pages/admin/ModelsPage'
+import { OverviewPage } from '@public/pages/admin/OverviewPage'
 import { PluginsPage } from '@public/pages/admin/PluginsPage'
 import { UsersPage } from '@public/pages/admin/UsersPage'
 import { createRoute, redirect } from '@tanstack/react-router'
@@ -23,9 +25,13 @@ export const adminRoute = createRoute({
 export const adminIndexRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: '/',
-  beforeLoad: () => {
-    throw redirect({ to: '/admin/users' })
-  },
+  component: OverviewPage,
+})
+
+export const adminJobsRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/jobs',
+  component: JobsPage,
 })
 
 export const adminUsersRoute = createRoute({

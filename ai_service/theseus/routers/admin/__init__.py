@@ -8,9 +8,11 @@ one carries an `admin_` prefix to stay unique across routers.
 from fastapi import APIRouter, Depends
 
 from theseus.deps import require_admin
-from theseus.routers.admin import models, plugins, users
+from theseus.routers.admin import jobs, models, plugins, system, users
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 router.include_router(users.router)
 router.include_router(plugins.router)
 router.include_router(models.router)
+router.include_router(jobs.router)
+router.include_router(system.router)
