@@ -17,11 +17,20 @@ const SPLIT_SERIES: Record<SplitType, { color: string; strokeDasharray?: string 
 
 const fmt = (v: number | null | undefined, digits = 4) => (v == null ? '—' : v.toFixed(digits))
 
+const PRIORITY = ['loss', 'accuracy']
+
+/** `class.accuracy` -> `accuracy`: Ludwig namespaces per-output-feature metrics as `{feature}.{metric}`. */
+const baseName = (name: string) => name.slice(name.lastIndexOf('.') + 1)
+
+/** The metric named `base` (`loss`, `accuracy`): unprefixed if the backend reports it so, else the first feature's. */
+function findMetric(names: string[], base: string): string | undefined {
+  return names.find((n) => n === base) ?? names.find((n) => baseName(n) === base)
+}
+
 /** Pick up to four metrics to chart: loss first, then accuracy, then whatever else the backend reported. */
 function chartedMetrics(names: string[]): string[] {
-  const order = ['loss', 'accuracy']
-  const first = order.filter((n) => names.includes(n))
-  return [...first, ...names.filter((n) => !order.includes(n))].slice(0, 4)
+  const first = PRIORITY.flatMap((base) => names.filter((n) => baseName(n) === base))
+  return [...first, ...names.filter((n) => !first.includes(n))].slice(0, 4)
 }
 
 export function RunLivePage() {
@@ -35,6 +44,7 @@ export function RunLivePage() {
 
   const failure = live.failedMessage ?? detail?.run.failedMessage ?? run.failedMessage
   const shown = chartedMetrics(metrics.metricNames)
+  const accuracyMetric = findMetric(metrics.metricNames, 'accuracy')
 
   return (
     <div className="flex flex-col gap-3">
@@ -66,7 +76,11 @@ export function RunLivePage() {
         <KpiTile label="Train loss" value={fmt(metrics.latest('train', 'loss'))} color={SERIES_COLORS.train} />
         <KpiTile label="Val loss" value={fmt(metrics.latest('validation', 'loss'))} color={SERIES_COLORS.validation} />
         <KpiTile label="Best val loss" value={fmt(metrics.best('validation', 'loss'))} />
-        <KpiTile label="Val accuracy" value={fmt(metrics.latest('validation', 'accuracy'))} color={SERIES_COLORS.f1} />
+        <KpiTile
+          label="Val accuracy"
+          value={fmt(accuracyMetric ? metrics.latest('validation', accuracyMetric) : null)}
+          color={SERIES_COLORS.f1}
+        />
         <KpiTile label="Epochs done" value={String(currentEpoch)} />
       </SimpleGrid>
 
