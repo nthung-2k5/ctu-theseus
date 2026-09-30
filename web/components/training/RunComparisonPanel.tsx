@@ -8,6 +8,7 @@
 import { LineChart } from '@mantine/charts'
 import { Badge, Group, MultiSelect, Paper, SegmentedControl, Select, Table, Text } from '@mantine/core'
 import { EmptyState, SectionLabel, StatusBadge } from '@public/components/ui'
+import { useModelParamNames } from '@public/lib/models'
 import { CHART_COLORS } from '@public/lib/palette'
 import { trainingRunDetailQueryOptions, useTrainingRunDetail } from '@public/lib/queries'
 import type { SplitType, TrainingRunSummary } from '@public/store/types'
@@ -22,7 +23,18 @@ function formatHyperparamValue(value: unknown): string {
   return String(value)
 }
 
-function ComparisonRow({ run, color, isCurrent }: { run: TrainingRunSummary; color: string; isCurrent: boolean }) {
+function ComparisonRow({
+  run,
+  color,
+  isCurrent,
+  modelKeys,
+}: {
+  run: TrainingRunSummary
+  color: string
+  isCurrent: boolean
+  /** Hyperparameter keys that hold the model choice; shown as the model's name rather than as a knob. */
+  modelKeys: ReadonlySet<string>
+}) {
   const { data } = useTrainingRunDetail(run.id, true)
   const hyperparameters = (data?.run.hyperparameters ?? null) as Record<string, unknown> | null
   const best = run.evaluation?.status === 'success' ? run.evaluation : null
@@ -46,10 +58,12 @@ function ComparisonRow({ run, color, isCurrent }: { run: TrainingRunSummary; col
       <Table.Td>
         <Text size="xs" c="dimmed" maw={320}>
           {hyperparameters
-            ? Object.entries(hyperparameters)
-                .filter(([key]) => key !== 'encoderId')
-                .map(([key, value]) => `${key}: ${formatHyperparamValue(value)}`)
-                .join(' · ')
+            ? [
+                ...(data?.run.modelLabel ? [`model: ${data.run.modelLabel}`] : []),
+                ...Object.entries(hyperparameters)
+                  .filter(([key]) => !modelKeys.has(key))
+                  .map(([key, value]) => `${key}: ${formatHyperparamValue(value)}`),
+              ].join(' · ')
             : '—'}
         </Text>
       </Table.Td>
@@ -58,17 +72,20 @@ function ComparisonRow({ run, color, isCurrent }: { run: TrainingRunSummary; col
 }
 
 export function RunComparisonPanel({
+  projectId,
   runs,
   selectedIds,
   onSelectedChange,
   currentRunId,
 }: {
+  projectId: string
   /** Every run that can be compared. */
   runs: TrainingRunSummary[]
   selectedIds: string[]
   onSelectedChange: (ids: string[]) => void
   currentRunId?: string
 }) {
+  const modelKeys = useModelParamNames(projectId)
   const [metric, setMetric] = useState('loss')
   const [split, setSplit] = useState<SplitType>('validation')
   const selected = selectedIds.map((id) => runs.find((r) => r.id === id)).filter((r): r is TrainingRunSummary => !!r)
@@ -176,7 +193,13 @@ export function RunComparisonPanel({
               </Table.Thead>
               <Table.Tbody>
                 {selected.map((run) => (
-                  <ComparisonRow key={run.id} run={run} color={colorFor(run.id)} isCurrent={run.id === currentRunId} />
+                  <ComparisonRow
+                    key={run.id}
+                    run={run}
+                    color={colorFor(run.id)}
+                    isCurrent={run.id === currentRunId}
+                    modelKeys={modelKeys}
+                  />
                 ))}
               </Table.Tbody>
             </Table>

@@ -6,6 +6,13 @@ import { useState } from 'react'
 
 type BlockKind = 'preprocess' | 'augment' | 'backbone' | 'head' | 'loss'
 
+/** Where a model comes from, in the order the picker lists them. */
+const MODEL_SOURCES = [
+  { source: 'builtin', label: 'Built-in' },
+  { source: 'global', label: 'Shared by your organization' },
+  { source: 'private', label: 'My models' },
+] as const
+
 const KIND_COLOR: Record<BlockKind, string> = {
   preprocess: 'gray',
   augment: 'grape',
@@ -105,6 +112,16 @@ export function BlockBuilder({
   const augmentation = version?.augmentationConfig ?? null
 
   const modelInfo = backend.models.find((m) => m.id === modelId)
+  // Built-in models first, then an administrator's shared ones, then the user's own. With no custom
+  // models the picker stays the flat list it always was.
+  const modelGroups = MODEL_SOURCES.map((s) => ({
+    group: s.label,
+    items: backend.models
+      .filter((m) => (m.source ?? 'builtin') === s.source)
+      .map((m) => ({ value: m.id, label: m.label })),
+  })).filter((g) => g.items.length > 0)
+  const modelOptions =
+    modelGroups.length > 1 ? modelGroups : backend.models.map((m) => ({ value: m.id, label: m.label }))
   const preOn = !!pre && values[pre.spec.name] != null
   const headLayers = Number(values.headLayers ?? 0)
   const lossOn = !!weightsSpec && values.useClassWeights === true
@@ -279,13 +296,20 @@ export function BlockBuilder({
                 aria-label="Model"
                 allowDeselect={false}
                 searchable
-                data={backend.models.map((m) => ({ value: m.id, label: m.label }))}
+                data={modelOptions}
                 value={modelId}
                 onChange={(v) => v && changeModel(v)}
               />
-              <Text size="xs" c="dimmed" maw={420} pt={6}>
-                {modelInfo?.description}
-              </Text>
+              <Group gap={6} align="flex-start" wrap="nowrap" pt={6}>
+                {modelInfo && modelInfo.source !== undefined && modelInfo.source !== 'builtin' && (
+                  <Badge size="xs" variant="light" color={modelInfo.source === 'private' ? 'grape' : 'blue'}>
+                    {modelInfo.source === 'private' ? 'my model' : 'shared'}
+                  </Badge>
+                )}
+                <Text size="xs" c="dimmed" maw={420}>
+                  {modelInfo?.description}
+                </Text>
+              </Group>
             </Group>
             {freezeSpec && (
               <Tooltip

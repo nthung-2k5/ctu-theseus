@@ -8,7 +8,7 @@
 
 import { Badge, Group, Paper, SimpleGrid, Skeleton, Stack, Table, Text } from '@mantine/core'
 import { SectionLabel, StatusBadge } from '@public/components/ui'
-import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
+import { useModelParamNames } from '@public/lib/models'
 import { useTrainingRunDetail } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectTask, TrainingRunSummary } from '@public/store/types'
@@ -78,14 +78,11 @@ export function RunOverviewPanel({
   // Not gated on run status — hyperparameters are fixed at queue time.
   const { data, isLoading } = useTrainingRunDetail(run.id, true)
   const hyperparameters = (data?.run.hyperparameters ?? null) as Record<string, unknown> | null
-  // Model choices are per trainer backend now (GET /training-backends), not a static per-task
-  // list — a run's own model id might belong to any of the backends this project could train with.
-  const { data: backendsData } = useListProjectTrainingBackends(projectId)
-  const models = backendsData?.backends.flatMap((b) => b.models) ?? []
-
+  // The server names the model a run used (a custom model's name even after it was archived, which the
+  // picker would no longer list). The task label stands in for a run that named no model.
+  const modelKeys = useModelParamNames(projectId)
   const descriptor = getTaskDescriptor(task)
-  const encoderId = hyperparameters?.encoderId as string | undefined
-  const modelLabel = encoderId ? (models.find((m) => m.id === encoderId)?.label ?? encoderId) : descriptor.label
+  const modelLabel = data?.run.modelLabel ?? descriptor.label
 
   const isActive = run.status === 'running' || run.status === 'queued'
   const startedAt = run.startedAt ? new Date(run.startedAt) : null
@@ -95,7 +92,7 @@ export function RunOverviewPanel({
   const durationEnd = completedAt ?? (isActive ? new Date() : null)
   const duration = startedAt && durationEnd ? formatDuration(durationEnd.getTime() - startedAt.getTime()) : null
 
-  const configEntries = hyperparameters ? Object.entries(hyperparameters).filter(([key]) => key !== 'encoderId') : []
+  const configEntries = hyperparameters ? Object.entries(hyperparameters).filter(([key]) => !modelKeys.has(key)) : []
 
   return (
     <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">

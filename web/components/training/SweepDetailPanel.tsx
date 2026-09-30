@@ -13,6 +13,7 @@ import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon, StopIcon, TrophyIcon } from '@phosphor-icons/react'
 import { EmptyState, QueryBoundary, StatusBadge } from '@public/components/ui'
 import { cancelSweep as cancelSweepRequest } from '@public/lib/api/generated/sweeps/sweeps'
+import { useModelParamNames } from '@public/lib/models'
 import { sweepDetailQueryOptions, useSweepDetail } from '@public/lib/queries'
 import type { SweepSearchSpace, SweepTrial } from '@public/store/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -38,10 +39,12 @@ function trialHeadlineMetric(trial: SweepTrial): number | null {
 }
 
 export function SweepDetailPanel({
+  projectId,
   sweepId,
   onBack,
   onOpenRun,
 }: {
+  projectId: string
   sweepId: string
   onBack: () => void
   onOpenRun: (runId: string) => void
@@ -65,8 +68,10 @@ export function SweepDetailPanel({
   const trials: SweepTrial[] = data?.trials ?? []
   const searchSpace = (sweep?.searchSpace ?? {}) as SweepSearchSpace
 
-  // Only a numeric knob can drive a scatter x-axis — encoderId is categorical.
-  const numericKnobs = Object.keys(searchSpace).filter((key) => key !== 'encoderId')
+  // Only a numeric knob can drive a scatter x-axis; the model choice (whatever key the backend names it
+  // under) is categorical.
+  const modelKeys = useModelParamNames(projectId)
+  const numericKnobs = Object.keys(searchSpace).filter((key) => !modelKeys.has(key))
   const effectiveKnob = scatterKnob && numericKnobs.includes(scatterKnob) ? scatterKnob : (numericKnobs[0] ?? null)
 
   const bestTrialId = useMemo(() => {

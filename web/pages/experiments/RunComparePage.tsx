@@ -18,6 +18,7 @@ export function RunComparePage() {
 
   return (
     <RunComparisonPanel
+      projectId={projectId}
       runs={runs}
       selectedIds={selectedIds}
       currentRunId={run.id}

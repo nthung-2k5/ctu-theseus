@@ -2,10 +2,11 @@ import { Tabs } from '@mantine/core'
 import { PageHeader } from '@public/components/ui'
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 
-type AdminTab = 'users' | 'plugins'
+type AdminTab = 'users' | 'models' | 'plugins'
 
-const TABS: { value: AdminTab; label: string; to: '/admin/users' | '/admin/plugins' }[] = [
+const TABS: { value: AdminTab; label: string; to: '/admin/users' | '/admin/models' | '/admin/plugins' }[] = [
   { value: 'users', label: 'Users', to: '/admin/users' },
+  { value: 'models', label: 'Models', to: '/admin/models' },
   { value: 'plugins', label: 'Plugins', to: '/admin/plugins' },
 ]
 

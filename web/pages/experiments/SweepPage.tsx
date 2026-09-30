@@ -24,6 +24,7 @@ export function SweepPage() {
         }
       />
       <SweepDetailPanel
+        projectId={projectId}
         sweepId={sweepId}
         onBack={back}
         onOpenRun={(runId) => navigate({ to: '/project/$projectId/experiments/$runId', params: { projectId, runId } })}

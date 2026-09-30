@@ -19,6 +19,7 @@ import {
   ArchiveIcon,
   BrainIcon,
   CaretDownIcon,
+  CubeIcon,
   DatabaseIcon,
   ExportIcon,
   FoldersIcon,
@@ -240,6 +241,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Menu.Item leftSection={<FoldersIcon size={14} />} onClick={() => navigate({ to: '/projects' })}>
                   All projects
                 </Menu.Item>
+                <Menu.Item leftSection={<CubeIcon size={14} />} onClick={() => navigate({ to: '/models' })}>
+                  My models
+                </Menu.Item>
                 <Menu.Item leftSection={<GearIcon size={14} />} onClick={() => navigate({ to: '/settings' })}>
                   Settings &amp; API keys
                 </Menu.Item>
@@ -267,6 +271,13 @@ export function AppShell({ children }: { children: ReactNode }) {
               leftSection={<FoldersIcon size={18} />}
               active={location.pathname === '/projects' || location.pathname === '/projects/'}
               onClick={() => navigate({ to: '/projects' })}
+              variant="light"
+            />
+            <NavLink
+              label="My models"
+              leftSection={<CubeIcon size={18} />}
+              active={location.pathname === '/models' || location.pathname.startsWith('/models/')}
+              onClick={() => navigate({ to: '/models' })}
               variant="light"
             />
             {isAdmin && (

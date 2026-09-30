@@ -1,6 +1,6 @@
 import { rootRoute } from './__root'
-import { adminIndexRoute, adminPluginsRoute, adminRoute, adminUsersRoute } from './admin.route'
-import { apiKeysRoute, appRoute, dashboardRoute, settingsRoute } from './app.route'
+import { adminIndexRoute, adminModelsRoute, adminPluginsRoute, adminRoute, adminUsersRoute } from './admin.route'
+import { apiKeysRoute, appRoute, dashboardRoute, modelsRoute, settingsRoute } from './app.route'
 import { guestRoute, landingRoute, loginRoute, registerRoute } from './guest.route'
 import {
   classesRoute,
@@ -50,8 +50,8 @@ const projectTree = projectRoute.addChildren([
   legacyTrainingRoute,
 ])
 
-const adminTree = adminRoute.addChildren([adminIndexRoute, adminUsersRoute, adminPluginsRoute])
+const adminTree = adminRoute.addChildren([adminIndexRoute, adminUsersRoute, adminModelsRoute, adminPluginsRoute])
 
-const appTree = appRoute.addChildren([dashboardRoute, settingsRoute, apiKeysRoute, adminTree, projectTree])
+const appTree = appRoute.addChildren([dashboardRoute, modelsRoute, settingsRoute, apiKeysRoute, adminTree, projectTree])
 
 export const routeTree = rootRoute.addChildren([landingRoute, registerRoute, guestTree, appTree])
