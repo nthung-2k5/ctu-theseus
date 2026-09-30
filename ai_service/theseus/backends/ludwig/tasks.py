@@ -196,6 +196,7 @@ LUDWIG_TASKS: dict[str, LudwigTaskSpec] = {
 
 HF_TRANSFORMER = "hf_transformer"
 HF_CAUSAL_LM = "hf_causal_lm"
+HF_VISION = "hf_vision"
 TIMM_IMAGE = "timm_image"
 
 _LLM_TASKS = ("text_generation", "summarization", "sequence_to_sequence", "question_answering")
@@ -213,9 +214,10 @@ def custom_kinds_for(task_id: str) -> list[CustomModelKind]:
     """The bring-your-own model kinds Ludwig can train for `task_id`.
 
     Text classification takes any Hugging Face encoder through Ludwig's `auto_transformer`, and the
-    generative text tasks take a causal language model as `base_model`. Both work from a Hub reference
-    or an uploaded bundle. Images use Ludwig's `timm` encoder, which fetches a timm model by name, so it
-    is Hub-only, has no files of its own to pin, and is experimental.
+    generative text tasks take a causal language model as `base_model`. Image classification takes any
+    Hugging Face vision backbone through this backend's own `hf_vision` encoder (see encoders.py). All three
+    work from a Hub reference or an uploaded bundle. Images can also use Ludwig's `timm` encoder, which
+    fetches a timm model by name, so it is Hub-only, has no files of its own to pin, and is experimental.
     """
     if task_id == "text_classification":
         return [
@@ -237,21 +239,33 @@ def custom_kinds_for(task_id: str) -> list[CustomModelKind]:
                 source_kinds=["hub", "upload"],
             )
         ]
-    if task_id in ("image_classification", "image_captioning"):
-        return [
-            CustomModelKind(
-                id=TIMM_IMAGE,
-                label="timm image model",
-                description="A model from the timm library, by name (e.g. resnet50.a1_in1k). Weights are fetched "
-                "by timm when a run trains or loads, so they are not pinned to a revision.",
-                modality="vision",
-                source_kinds=["hub"],
-                status="experimental",
-                unavailable_reason=_timm_unavailable_reason(),
-                materialize=False,
-            )
-        ]
+    hf_vision = CustomModelKind(
+        id=HF_VISION,
+        label="Hugging Face vision model",
+        description="Any transformers vision backbone (ViT, Swin, DeiT, BEiT, ConvNeXt, ...) as config.json plus "
+        ".safetensors weights. A vision-only checkpoint: CLIP-style models that also carry a text tower are refused.",
+        modality="vision",
+        source_kinds=["hub", "upload"],
+    )
+    if task_id == "image_classification":
+        return [hf_vision, _timm_kind()]
+    if task_id == "image_captioning":
+        return [_timm_kind()]
     return []
+
+
+def _timm_kind() -> CustomModelKind:
+    return CustomModelKind(
+        id=TIMM_IMAGE,
+        label="timm image model",
+        description="A model from the timm library, by name (e.g. resnet50.a1_in1k). Weights are fetched "
+        "by timm when a run trains or loads, so they are not pinned to a revision.",
+        modality="vision",
+        source_kinds=["hub"],
+        status="experimental",
+        unavailable_reason=_timm_unavailable_reason(),
+        materialize=False,
+    )
 
 
 # Sanity: every key above is a real project task.

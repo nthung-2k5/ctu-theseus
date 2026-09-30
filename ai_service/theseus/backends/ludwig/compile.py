@@ -17,6 +17,7 @@ from theseus.backends.base import ConfigError, CustomModelRef, HyperparamsBase
 from theseus.backends.ludwig.tasks import (
     HF_CAUSAL_LM,
     HF_TRANSFORMER,
+    HF_VISION,
     LUDWIG_OPTIMIZER_TYPES,
     LUDWIG_TASKS,
     TIMM_IMAGE,
@@ -237,6 +238,9 @@ def _custom_encoder(custom: CustomModelRef, freeze: bool | None) -> dict[str, An
     if custom.kind == HF_TRANSFORMER:
         # auto_transformer always loads pretrained weights, from a local directory here.
         return {"type": "auto_transformer", "pretrained_model_name_or_path": custom.local_path, **trainable}
+    if custom.kind == HF_VISION:
+        # This backend's own encoder (backends/ludwig/encoders.py), which loads any transformers vision model.
+        return {"type": "hf_vision", "pretrained_model_name_or_path": custom.local_path, **trainable}
     if custom.kind == TIMM_IMAGE:
         return {"type": "timm", "model_name": custom.source_ref, "use_pretrained": True, **trainable}
     return None

@@ -14,6 +14,7 @@ from ludwig.callbacks import Callback
 from opentelemetry import trace
 
 from theseus.backends.base import TrainContext
+from theseus.backends.ludwig import encoders as _encoders  # noqa: F401  registers this backend's Ludwig encoders
 from theseus.backends.ludwig.model import LudwigLoadedModel
 
 tracer = trace.get_tracer("theseus")

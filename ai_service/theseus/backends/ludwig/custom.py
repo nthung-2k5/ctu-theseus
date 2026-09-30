@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from theseus.backends.base import ConfigError, CustomModelRef
-from theseus.backends.ludwig.tasks import HF_CAUSAL_LM, HF_TRANSFORMER, TIMM_IMAGE, custom_kinds_for
+from theseus.backends.ludwig.tasks import HF_CAUSAL_LM, HF_TRANSFORMER, HF_VISION, TIMM_IMAGE, custom_kinds_for
 from theseus.services.task_registry import TaskDescriptor
 
 # A decoder-only model's `architectures` entry, e.g. LlamaForCausalLM or GPT2LMHeadModel.
@@ -23,6 +23,9 @@ def validate_custom_model(task: TaskDescriptor, ref: CustomModelRef) -> None:
         _validate_timm(ref)
     elif ref.kind in (HF_TRANSFORMER, HF_CAUSAL_LM):
         _validate_hf(ref)
+    elif ref.kind == HF_VISION:
+        _validate_hf(ref)
+        _validate_hf_vision(ref)
     else:
         raise ConfigError(f'Unknown custom model kind "{ref.kind}"')
 
@@ -38,6 +41,32 @@ def _validate_timm(ref: CustomModelRef) -> None:
     architecture = ref.source_ref.split(".", 1)[0]
     if not timm.is_model(architecture):
         raise ConfigError(f'"{architecture}" is not a timm architecture')
+
+
+def _validate_hf_vision(ref: CustomModelRef) -> None:
+    """Refuse what cannot be an image backbone, and prove the rest can be by building the very encoder
+    training will use and running one blank image through it. That catches the cases a config check cannot:
+    a text model, or a family whose output is not something `hf_vision` can pool into one vector per image."""
+    config = json.loads((Path(ref.local_path) / "config.json").read_text(encoding="utf-8"))
+    if "vision_config" in config and "text_config" in config:
+        raise ConfigError(
+            "This checkpoint has both a vision and a text tower (a CLIP-style model). "
+            "Upload the vision-only checkpoint (e.g. the vision model on its own)"
+        )
+    # Imported here, not at module level: this pulls in ludwig and torch, and only a vision model needs them.
+    from theseus.backends.ludwig.encoders import HFVisionEncoder
+
+    try:
+        encoder = HFVisionEncoder(pretrained_model_name_or_path=ref.local_path)
+    except Exception as e:  # noqa: BLE001  any failure here means the model cannot serve as a backbone
+        raise ConfigError(f"This model cannot be loaded as an image backbone: {_first_line(e)}") from None
+    if encoder.output_shape[0] <= 0:
+        raise ConfigError("This model produced no image features")
+
+
+def _first_line(error: Exception) -> str:
+    text = str(error).strip() or type(error).__name__
+    return text.splitlines()[0][:300]
 
 
 def _validate_hf(ref: CustomModelRef) -> None:

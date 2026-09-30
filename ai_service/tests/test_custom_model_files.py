@@ -261,3 +261,78 @@ class TestCompileCustom:
     def test_the_head_options_still_apply(self):
         config = compile_custom("text_classification", ref("hf_transformer", "/m/bert"), headLayers=2)
         assert config["combiner"]["num_fc_layers"] == 2
+
+
+# -- Hugging Face vision models (hf_vision) ----------------------------------------------------
+
+
+def write_tiny_vit(root: Path) -> Path:
+    from transformers import ViTConfig, ViTModel
+
+    ViTModel(
+        ViTConfig(
+            image_size=32,
+            patch_size=8,
+            hidden_size=16,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=32,
+            num_channels=3,
+        )  # fmt: skip
+    ).save_pretrained(root)
+    return root
+
+
+class TestHfVision:
+    image = get_task_descriptor("image_classification")
+
+    def test_it_is_offered_for_image_classification_only(self):
+        from theseus.backends.ludwig.tasks import custom_kinds_for
+
+        assert "hf_vision" in {k.id for k in custom_kinds_for("image_classification")}
+        for task in ("image_captioning", "text_classification", "text_generation", "tabular_classification"):
+            assert "hf_vision" not in {k.id for k in custom_kinds_for(task)}, task
+
+    def test_it_compiles_to_the_backends_own_encoder(self):
+        config = compile_custom("image_classification", ref("hf_vision", "/m/vit"), freezeBackbone=True, imageSize=224)
+        feature = config["input_features"][0]
+        assert feature["encoder"] == {
+            "type": "hf_vision",
+            "pretrained_model_name_or_path": "/m/vit",
+            "trainable": False,
+        }
+        assert feature["preprocessing"] == {"height": 224, "width": 224}
+
+    def test_it_is_refused_for_a_task_that_does_not_offer_it(self):
+        with pytest.raises(ConfigError, match="cannot be used for task"):
+            compile_custom("text_classification", ref("hf_vision", "/m/vit"))
+
+    def test_a_real_vision_backbone_passes(self, tmp_path):
+        validate_custom_model(self.image, ref("hf_vision", str(write_tiny_vit(tmp_path))))
+
+    def test_a_text_model_is_not_an_image_backbone(self, tmp_path):
+        from transformers import BertConfig, BertModel
+
+        BertModel(
+            BertConfig(hidden_size=16, num_hidden_layers=1, num_attention_heads=2, intermediate_size=32)
+        ).save_pretrained(tmp_path)
+        with pytest.raises(ConfigError, match="cannot be loaded as an image backbone"):
+            validate_custom_model(self.image, ref("hf_vision", str(tmp_path)))
+
+    def test_a_checkpoint_with_a_text_tower_is_refused_with_advice(self, tmp_path):
+        write_hf_model(tmp_path, model_type="clip", extra_config={"vision_config": {}, "text_config": {}})
+        with pytest.raises(ConfigError, match="vision-only checkpoint"):
+            validate_custom_model(self.image, ref("hf_vision", str(tmp_path)))
+
+    def test_the_generic_folder_rules_still_apply(self, tmp_path):
+        vit = write_tiny_vit(tmp_path / "vit")
+        (vit / "model.safetensors").unlink()
+        with pytest.raises(ConfigError, match="safetensors"):
+            validate_custom_model(self.image, ref("hf_vision", str(vit)))
+        with pytest.raises(ConfigError, match="no config.json"):
+            validate_custom_model(self.image, ref("hf_vision", str(tmp_path / "empty")))
+        remote = write_tiny_vit(tmp_path / "remote")
+        config = json.loads((remote / "config.json").read_text())
+        (remote / "config.json").write_text(json.dumps({**config, "auto_map": {"AutoModel": "x.Y"}}))
+        with pytest.raises(ConfigError, match="custom code"):
+            validate_custom_model(self.image, ref("hf_vision", str(remote)))
