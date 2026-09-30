@@ -1,16 +1,15 @@
 """Run one training job: dispatch to the run's trainer backend, live progress, cancel, evaluation
-report, log upload.
+report.
 
 Framework-neutral since trainer backends became a plugin system: everything here is common to any
-backend (Ludwig or otherwise) — the run lifecycle, abort registration, log attach/detach/upload,
-and the evaluation report upload. What changed relative to the pre-plugin worker still applies:
+backend (Ludwig or otherwise) — the run lifecycle, abort registration and
+the evaluation report upload. What changed relative to the pre-plugin worker still applies:
 
   * Progress goes straight to the event writer (a thread-safe queue put) instead of a
     run_coroutine_threadsafe(...).result(timeout=5) round trip per publish.
   * Abort is a threading.Event check (see abort.py), not a JetStream KV read with a 5 s timeout.
   * There is no redelivery, so no on_permanent_failure callback and no "do not publish failed on
     every retry" dance: the run either finishes here or fails here, exactly once.
-  * Log streaming uses the contextvar-scoped handler, not a handler on the root logger.
 """
 
 import logging
@@ -28,8 +27,7 @@ from theseus.backends.base import LoadedModel, TrainContext
 from theseus.backends.registry import get_backend
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import RunEvaluation, TrainingRun
-from theseus.events import get_event_writer, get_log_handler
-from theseus.events.log_handler import current_run_id
+from theseus.events import get_event_writer
 from theseus.jobs import abort
 from theseus.jobs.executors import run_in_executor, train_executor
 from theseus.services import storage
@@ -110,13 +108,9 @@ async def _evaluate(backend, model: LoadedModel, run_id: uuid.UUID, dataset_path
 async def run_train(run_id: uuid.UUID) -> None:
     """Run a claimed training job to a terminal status. Never raises."""
     writer = get_event_writer()
-    handler = get_log_handler()
     rid = str(run_id)
-    loop_token = current_run_id.set(rid)
     # Register the abort Event BEFORE reading the DB cancel flag (see abort.py for why the order matters).
     abort_event = abort.register(rid)
-    log_path = get_settings().temp_dir / "logs" / f"{rid}.log"
-    handler.attach(rid, log_path)
     try:
         run = await _load_run(run_id)
         if run is None:
@@ -183,16 +177,6 @@ async def run_train(run_id: uuid.UUID) -> None:
         writer.status(rid, "failed", f"{type(e).__name__}: {e}")
     finally:
         abort.unregister(rid)
-        handler.detach(rid)
-        current_run_id.reset(loop_token)
-        if log_path.exists():
-            try:
-                await run_in_executor(
-                    None, storage.upload_file, C.BUCKET_TRAINING, storage.training_logs_key(rid), str(log_path)
-                )
-            except Exception:
-                logger.warning("Failed to upload the training log for run %s", rid, exc_info=True)
-            log_path.unlink(missing_ok=True)
 
 
 def _check_abort(run_id: str, abort_event) -> None:

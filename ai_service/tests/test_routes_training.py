@@ -344,19 +344,6 @@ async def test_evaluation_errors_are_404_without_a_successful_report(client, new
     assert (await c.get(f"/api/runs/{run['id']}/evaluation/errors")).status_code == 404
 
 
-async def test_logs_redirect_to_a_presigned_url_or_404(client, new_user, db, fake_s3):
-    c = await new_user()
-    p = await project(c)
-    vid = await ready_version(db, fake_s3, p["id"])
-    run = (await c.post(f"/api/projects/{p['id']}/train", json={"name": "r", "datasetVersionId": vid})).json()["run"]
-    assert (await c.get(f"/api/runs/{run['id']}/logs")).status_code == 404
-    fake_s3[("theseus-training", f"{run['id']}/logs/train.log")] = b"log"
-    r = await c.get(f"/api/runs/{run['id']}/logs", follow_redirects=False)
-    assert (
-        r.status_code == 302 and r.headers["location"] == f"https://s3.test/theseus-training/{run['id']}/logs/train.log"
-    )
-
-
 # -- Sweeps ----------------------------------------------------------------------------------
 
 

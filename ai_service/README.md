@@ -30,7 +30,7 @@ Environment (Aspire injects all of these; `theseus/settings.py` is the reference
 | `JWT_SECRET` | signs access tokens |
 | `ALLOWED_ORIGINS` | extra origins allowed to make cookie-authenticated writes |
 | `ENVIRONMENT` | `production` requires the values above explicitly and makes cookies Secure |
-| `COOKIE_SECURE`, `PORT`, `TEMP_DIR`, `INFERENCE_*`, `JOB_*`, `RUN_LOG_MAX_ROWS` | tuning |
+| `COOKIE_SECURE`, `PORT`, `TEMP_DIR`, `INFERENCE_*`, `JOB_*` | tuning |
 
 **Run exactly one process.** No `--reload`, no `--workers`, no gunicorn: `theseus.lifespan`
 refuses to start otherwise. Event fanout, the GPU lanes, the model cache, the rate limiter and the

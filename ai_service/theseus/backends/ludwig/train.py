@@ -7,6 +7,7 @@ exposes no finer hook), not a JetStream KV read.
 """
 
 import logging
+import time
 from typing import Any
 
 from ludwig.api import LudwigModel
@@ -19,6 +20,10 @@ from theseus.backends.ludwig import encoders as _encoders  # noqa: F401  registe
 from theseus.backends.ludwig.model import LudwigLoadedModel
 
 tracer = trace.get_tracer("theseus")
+
+# The run is presumed hung when it goes `run_heartbeat_timeout_seconds` (15 min) without a heartbeat, and epoch
+# boundaries alone can be further apart than that on a large dataset. Beat from the finer hooks too, this often.
+HEARTBEAT_EVERY_SECONDS = 10.0
 
 
 def _extract_metrics(feature_metrics: dict[str, dict[str, list[Any]]]) -> dict[str, float]:
@@ -43,6 +48,26 @@ class TrainingProgressCallback(Callback):
 
     def __init__(self, run: TrainContext) -> None:
         self.run = run
+        self._last_beat = 0.0
+
+    def _beat(self) -> None:
+        """Heartbeat at most every HEARTBEAT_EVERY_SECONDS, so calling it per batch stays cheap."""
+        now = time.monotonic()
+        if now - self._last_beat >= HEARTBEAT_EVERY_SECONDS:
+            self._last_beat = now
+            self.run.heartbeat()
+
+    def on_preprocess_end(self, *args, **kwargs):
+        self._beat()
+
+    def on_train_start(self, *args, **kwargs):
+        self._beat()
+
+    def on_batch_end(self, *args, **kwargs):
+        self._beat()
+
+    def on_eval_end(self, *args, **kwargs):
+        self._beat()
 
     def on_epoch_start(self, trainer, progress_tracker, save_path, **kwargs):
         # Epoch-end events can be minutes apart on large datasets; this keeps the run looking alive.

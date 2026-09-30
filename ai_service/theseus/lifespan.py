@@ -14,8 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from theseus.db.base import dispose_engine
-from theseus.events import EventWriter, get_event_bus, set_event_writer, set_log_handler
-from theseus.events.log_handler import install_run_log_handler, uninstall_run_log_handler
+from theseus.events import EventWriter, get_event_bus, set_event_writer
 from theseus.jobs.reapers import reaper_loop
 from theseus.jobs.recovery import recover_on_startup
 from theseus.services import plugin_settings, storage
@@ -63,17 +62,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, storage.ensure_buckets)
 
-    # 1. The single event writer and the contextvar-scoped training log handler. Trainer backend
-    #    packages have no ludwig/torch import at their own module level (see backends/base.py), so
-    #    listing them to collect their logger namespaces is cheap here.
-    from theseus.backends.registry import list_backends
-
+    # 1. The single event writer.
     writer = EventWriter(get_event_bus())
     await writer.start()
     set_event_writer(writer)
-    backend_namespaces = tuple(ns for backend in list_backends() for ns in backend.log_namespaces)
-    log_handler = install_run_log_handler(writer, backend_namespaces)
-    set_log_handler(log_handler)
 
     # Admin enable/disable switches must be in place before the first request can consult them.
     await plugin_settings.load()
@@ -99,7 +91,5 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await dispatcher.stop()
         set_dispatcher(None)
         await writer.stop()
-        uninstall_run_log_handler(log_handler)
-        set_log_handler(None)
         set_event_writer(None)
         await dispose_engine()

@@ -44,7 +44,6 @@ class LudwigBackend(TrainerBackend):
     description = "Declarative deep-learning training (torch-backed): the default for stable and experimental tasks."
     Hyperparameters = LudwigHyperparameters
     artifacts = ARTIFACTS
-    log_namespaces = ("ludwig",)
     metadata_filename = METADATA_FILENAME
 
     @classmethod

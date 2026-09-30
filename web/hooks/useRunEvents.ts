@@ -1,7 +1,6 @@
 /**
  * Live training console — subscribes to GET /api/runs/:runId/events (SSE)
- * and reduces the event stream into chart-ready metric series and a capped
- * log ring buffer.
+ * and reduces the event stream into status and chart-ready metric series.
  *
  * Reconnect/replay is handled by the browser's native EventSource: it
  * remembers the last event id and sends it back as `Last-Event-ID` on
@@ -23,17 +22,10 @@ type RunEvent =
       split: 'train' | 'validation' | 'test'
       metrics: Record<string, number>
     }
-  | { kind: 'log'; runId: string; ts: string; level: 'info' | 'warn' | 'error'; line: string }
 
 export interface MetricPoint {
   epoch: number
   [seriesKey: string]: number
-}
-
-export interface LogLine {
-  ts: string
-  level: 'info' | 'warn' | 'error'
-  line: string
 }
 
 export interface RunEventsState {
@@ -41,15 +33,13 @@ export interface RunEventsState {
   failedMessage: string | null
   /** One point per epoch, columns named `${split}.${metricName}` for @mantine/charts. */
   metricPoints: MetricPoint[]
-  logs: LogLine[]
   isConnected: boolean
 }
 
-const MAX_LOG_LINES = 2000
 const TERMINAL_STATUSES = new Set<TrainingStatus>(['succeeded', 'failed', 'canceled'])
 
 /**
- * Stream a run's live status/metric/log events. Pass `active` so a
+ * Stream a run's live status/metric events. Pass `active` so a
  * finished run doesn't open a connection at all.
  */
 export function useRunEvents(runId: string | undefined, active: boolean, onTerminal?: () => void) {
@@ -57,7 +47,6 @@ export function useRunEvents(runId: string | undefined, active: boolean, onTermi
     status: null,
     failedMessage: null,
     metricPoints: [],
-    logs: [],
     isConnected: false,
   })
   const onTerminalRef = useRef(onTerminal)
@@ -66,7 +55,7 @@ export function useRunEvents(runId: string | undefined, active: boolean, onTermi
   useEffect(() => {
     if (!runId || !active) return
 
-    setState({ status: null, failedMessage: null, metricPoints: [], logs: [], isConnected: false })
+    setState({ status: null, failedMessage: null, metricPoints: [], isConnected: false })
 
     const source = new EventSource(`/api/runs/${runId}/events`, { withCredentials: true })
 
@@ -103,18 +92,12 @@ export function useRunEvents(runId: string | undefined, active: boolean, onTermi
             }
             return { ...s, metricPoints: points }
           }
-          case 'log': {
-            const logs = [...s.logs, { ts: event.ts, level: event.level, line: event.line }]
-            if (logs.length > MAX_LOG_LINES) logs.splice(0, logs.length - MAX_LOG_LINES)
-            return { ...s, logs }
-          }
         }
       })
     }
 
     source.addEventListener('status', handleEvent)
     source.addEventListener('metric', handleEvent)
-    source.addEventListener('log', handleEvent)
 
     return () => {
       source.close()

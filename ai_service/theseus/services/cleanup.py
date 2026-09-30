@@ -52,7 +52,8 @@ def _run_steps(run_id: uuid.UUID | str) -> list[tuple[Callable[..., Any], tuple]
     return [
         (storage.delete_file, (C.BUCKET_TRAINING, storage.training_config_key(r))),
         (storage.delete_prefix, (C.BUCKET_TRAINING, storage.training_results_prefix(r))),
-        (storage.delete_file, (C.BUCKET_TRAINING, storage.training_logs_key(r))),
+        # Runs made before run logs were removed still have {runId}/logs/train.log in S3.
+        (storage.delete_prefix, (C.BUCKET_TRAINING, f"{r}/logs/")),
         (storage.delete_prefix, (C.BUCKET_TRAINING, storage.evaluation_prefix(r))),
         # Covers model.{format}, expected.json and bundles/*.zip in one sweep.
         (storage.delete_prefix, (C.BUCKET_MODELS, f"{r}/")),
@@ -67,7 +68,7 @@ async def cleanup_version_storage(version_id: uuid.UUID | str, version_tag: str 
 
 
 async def cleanup_run_storage(run_id: uuid.UUID | str) -> None:
-    """Delete one training run S3 objects: config, results, logs and exports."""
+    """Delete one training run S3 objects: config, results, evaluation and exports."""
     await _run(_run_steps(run_id))
 
 

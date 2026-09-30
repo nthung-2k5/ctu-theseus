@@ -38,13 +38,12 @@ from theseus.db.base import get_sessionmaker
 from theseus.db.enums import TERMINAL_RUN_STATUSES
 from theseus.db.models import RunEvent, TrainingMetric, TrainingRun
 from theseus.events.bus import RunEventBus
-from theseus.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_MIN_INTERVAL_SECONDS = 15.0
 BATCH_MAX = 200
-# Log lines are coalesced into one transaction for up to this long.
+# Events are coalesced into one transaction for up to this long.
 BATCH_WINDOW_SECONDS = 0.05
 
 
@@ -71,13 +70,11 @@ def _finite(metrics: dict[str, float]) -> dict[str, float]:
 
 
 class EventWriter:
-    def __init__(self, bus: RunEventBus, *, log_cap: int | None = None) -> None:
+    def __init__(self, bus: RunEventBus) -> None:
         self._bus = bus
-        self._log_cap = log_cap if log_cap is not None else get_settings().run_log_max_rows
         self._loop: asyncio.AbstractEventLoop | None = None
         self._queue: asyncio.Queue[_Event | _Touch | _Flush] | None = None
         self._task: asyncio.Task | None = None
-        self._log_counts: dict[str, int] = {}
         self._last_heartbeat: dict[str, float] = {}
 
     # -- Lifecycle ---------------------------------------------------------------------------
@@ -116,9 +113,6 @@ class EventWriter:
 
     def metric(self, run_id: uuid.UUID | str, epoch: int, split: str, metrics: dict[str, float]) -> None:
         self._put(_Event(str(run_id), "metric", {"epoch": epoch, "split": split, "metrics": metrics}))
-
-    def log(self, run_id: uuid.UUID | str, level: str, line: str) -> None:
-        self._put(_Event(str(run_id), "log", {"level": level, "line": line}))
 
     def touch(self, run_id: uuid.UUID | str) -> None:
         """Bump the run heartbeat without recording an event."""
@@ -179,7 +173,6 @@ class EventWriter:
             self._bus.publish(run_id, event)
             if event["payload"]["kind"] == "status" and event["payload"]["status"] in TERMINAL_RUN_STATUSES:
                 otel.training_run_terminal_count.add(1, {"status": event["payload"]["status"]})
-                self._log_counts.pop(run_id, None)
                 self._last_heartbeat.pop(run_id, None)
 
         for item in batch:
@@ -272,25 +265,10 @@ class EventWriter:
             }
             return [await self._insert(s, ev.run_id, "metric", now, payload)]
 
-        if ev.kind == "log":
-            count = self._log_counts.get(ev.run_id, 0) + 1
-            self._log_counts[ev.run_id] = count
-            await self._maybe_heartbeat(s, ev.run_id)
-            if count > self._log_cap + 1:
-                return []
-            if count == self._log_cap + 1:
-                line = (
-                    f"Live log stream truncated after {self._log_cap} lines. "
-                    "The complete log is still written to the run logs download."
-                )
-                ev = _Event(ev.run_id, "log", {"level": "warn", "line": line})
-            payload = {"kind": "log", "runId": ev.run_id, "ts": now.isoformat(), **ev.body}
-            return [await self._insert(s, ev.run_id, "log", now, payload)]
-
         raise ValueError(f"Unknown run event kind: {ev.kind}")
 
     async def _maybe_heartbeat(self, s: AsyncSession, run_id: str) -> None:
-        """Throttled: a chatty log stream must not become 10 UPDATEs/sec on one training_runs row."""
+        """Throttled: a per-batch touch must not become dozens of UPDATEs/sec on one training_runs row."""
         mono = time.monotonic()
         if mono - self._last_heartbeat.get(run_id, -1e9) < HEARTBEAT_MIN_INTERVAL_SECONDS:
             return

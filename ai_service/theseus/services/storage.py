@@ -12,7 +12,6 @@ theseus-datasets/
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config
   {runId}/results/                           Ludwig output tree (incl. training_set_metadata.json)
-  {runId}/logs/train.log
   {runId}/evaluation/report.json             bounded evaluation report
   {runId}/evaluation/predictions.parquet     full per-row predictions
 theseus-models/
@@ -118,10 +117,6 @@ def training_config_key(run_id: str) -> str:
 
 def training_results_prefix(run_id: str) -> str:
     return f"{run_id}/results/"
-
-
-def training_logs_key(run_id: str) -> str:
-    return f"{run_id}/logs/train.log"
 
 
 def evaluation_prefix(run_id: str) -> str:

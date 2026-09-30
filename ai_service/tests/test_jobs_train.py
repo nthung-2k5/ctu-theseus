@@ -1,4 +1,4 @@
-"""The generic training job engine: run lifecycle, progress, abort, evaluation, log upload —
+"""The generic training job engine: run lifecycle, progress, abort, evaluation —
 everything in jobs/train.py that has nothing to do with which backend is training.
 
 Exercised against a FAKE trainer backend (registered for this module only) rather than Ludwig, so
@@ -7,7 +7,6 @@ _extract_metrics, LudwigLoadedModel construction) is tested in test_ludwig_train
 """
 
 import asyncio
-import logging
 import threading
 from types import SimpleNamespace
 
@@ -18,16 +17,12 @@ import sqlalchemy as sa
 from theseus.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
 from theseus.backends.base import _registry as backend_registry
 from theseus.db.models import RunEvaluation, RunEvent, TrainingMetric, TrainingRun
-from theseus.events import InProcessRunEventBus, set_event_writer, set_log_handler
-from theseus.events.log_handler import current_run_id, install_run_log_handler, uninstall_run_log_handler
+from theseus.events import InProcessRunEventBus, set_event_writer
 from theseus.events.writer import EventWriter
 from theseus.jobs import abort
 from theseus.jobs import train as train_job
 from theseus.services import storage
 from theseus.settings import get_settings
-
-FAKE_LOG_NAMESPACE = "theseus.tests.fake_backend"
-fake_logger = logging.getLogger(FAKE_LOG_NAMESPACE)
 
 
 class FakeLoadedModel(LoadedModel):
@@ -82,10 +77,9 @@ class FakeBackend(TrainerBackend):
 
     @classmethod
     def train(cls, run: TrainContext) -> LoadedModel:
-        instance = SimpleNamespace(seen_run_id=current_run_id.get(), trained_epochs=0)
+        instance = SimpleNamespace(trained_epochs=0)
         cls.instances.append(instance)
         for epoch in range(1, cls.epochs + 1):
-            fake_logger.info("Starting epoch %d", epoch)
             run.check_abort()
             run.heartbeat()
             if cls.fail_with:
@@ -138,8 +132,6 @@ async def env(db, monkeypatch, tmp_path, make_run):
     writer = EventWriter(bus)
     await writer.start()
     set_event_writer(writer)
-    handler = install_run_log_handler(writer, (FAKE_LOG_NAMESPACE,))
-    set_log_handler(handler)
 
     uploads: dict[str, str] = {}
     json_uploads: dict[str, object] = {}
@@ -156,8 +148,6 @@ async def env(db, monkeypatch, tmp_path, make_run):
     yield SimpleNamespace(writer=writer, uploads=uploads, json_uploads=json_uploads, make_run=_make_run, frame=frame)
 
     await writer.stop()
-    uninstall_run_log_handler(handler)
-    set_log_handler(None)
     set_event_writer(None)
     backend_registry.unregister("fake")
 
@@ -175,7 +165,7 @@ async def events(db, rid, kind=None):
         return [(k, p) for k, p in (await s.execute(q)).all()]
 
 
-async def test_a_successful_run_reports_progress_evaluates_and_uploads_its_log(db, env):
+async def test_a_successful_run_reports_progress_and_evaluates(db, env):
     rid = await env.make_run(status="running")
     await train_job.run_train(rid)
     await env.writer.flush()
@@ -196,27 +186,10 @@ async def test_a_successful_run_reports_progress_evaluates_and_uploads_its_log(d
     assert env.frame.written_to.endswith(f"{rid}/evaluation/predictions.parquet")
 
 
-async def test_the_run_context_reaches_the_training_thread_and_streams_its_logs(db, env):
-    rid = await env.make_run(status="running")
-    await train_job.run_train(rid)
-    await env.writer.flush()
-
-    assert FakeBackend.instances[0].seen_run_id == str(rid)  # copied into the training thread
-    lines = [p["line"] for _, p in await events(db, rid, "log")]
-    assert sum("Starting epoch" in ln for ln in lines) == 3  # logged from the backend's namespace
-    log_key = f"{rid}/logs/train.log"
-    assert log_key in env.uploads and env.uploads[log_key].count("Starting epoch") == 3
-    assert not (get_settings().temp_dir / "logs" / f"{rid}.log").exists()  # local copy removed
-    assert current_run_id.get() is None  # the context var does not leak out of the job
-
-
-async def test_a_run_never_leaks_its_abort_registration_or_log_file_handle(db, env):
+async def test_a_run_never_leaks_its_abort_registration(db, env):
     rid = await env.make_run(status="running")
     await train_job.run_train(rid)
     assert not abort.is_registered(str(rid))
-    from theseus.events import get_log_handler
-
-    assert str(rid) not in get_log_handler()._files
 
 
 async def test_a_failing_evaluation_never_fails_a_run_that_trained_fine(db, env, monkeypatch):
@@ -244,7 +217,7 @@ async def test_nothing_to_evaluate_skips_the_report_but_the_run_still_succeeds(d
         assert (await s.execute(sa.select(sa.func.count()).select_from(RunEvaluation))).scalar_one() == 0
 
 
-async def test_a_training_error_fails_the_run_once_with_its_message_and_still_uploads_the_log(db, env):
+async def test_a_training_error_fails_the_run_once_with_its_message(db, env):
     FakeBackend.fail_with = RuntimeError("CUDA out of memory")
     rid = await env.make_run(status="running")
     await train_job.run_train(rid)  # must not raise
@@ -253,7 +226,6 @@ async def test_a_training_error_fails_the_run_once_with_its_message_and_still_up
     run = await run_row(db, rid)
     assert run.status == "failed" and run.failed_message == "RuntimeError: CUDA out of memory"
     assert [p["status"] for _, p in await events(db, rid, "status")] == ["running", "failed"]
-    assert f"{rid}/logs/train.log" in env.uploads
     async with db() as s:
         assert (await s.execute(sa.select(sa.func.count()).select_from(RunEvaluation))).scalar_one() == 0
 
@@ -303,4 +275,3 @@ async def test_cancel_mid_training_stops_at_the_next_epoch_boundary_and_ends_can
     assert [p["status"] for _, p in await events(db, rid, "status")] == ["running", "canceled"]  # exactly one terminal
     async with db() as s:
         assert (await s.execute(sa.select(sa.func.count()).select_from(RunEvaluation))).scalar_one() == 0
-    assert f"{rid}/logs/train.log" in env.uploads

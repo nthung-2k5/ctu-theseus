@@ -8,7 +8,6 @@ import { RunConfigPage } from '@public/pages/experiments/RunConfigPage'
 import { RunEvaluationPage } from '@public/pages/experiments/RunEvaluationPage'
 import { RunLayout } from '@public/pages/experiments/RunLayout'
 import { RunLivePage } from '@public/pages/experiments/RunLivePage'
-import { RunLogsPage } from '@public/pages/experiments/RunLogsPage'
 import { SweepPage } from '@public/pages/experiments/SweepPage'
 import { ExportPage } from '@public/pages/export/ExportPage'
 import { ExportRunPage } from '@public/pages/export/ExportRunPage'
@@ -157,7 +156,6 @@ export const runRoute = createRoute({
 })
 
 export const runLiveRoute = createRoute({ getParentRoute: () => runRoute, path: '/', component: RunLivePage })
-export const runLogsRoute = createRoute({ getParentRoute: () => runRoute, path: '/logs', component: RunLogsPage })
 export const runEvaluationRoute = createRoute({
   getParentRoute: () => runRoute,
   path: '/evaluation',

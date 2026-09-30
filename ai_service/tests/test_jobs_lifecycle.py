@@ -159,13 +159,10 @@ async def test_stale_run_reaper_fails_only_running_runs_that_have_gone_silent(db
     assert (await one(db, TrainingRun, queued)).status == "queued"
 
 
-async def test_event_retention_drops_old_logs_of_finished_runs_and_very_old_events(db, writer, make_run):
+async def test_event_retention_drops_very_old_events(db, writer, make_run):
     rid = await make_run(status="succeeded")
     async with db() as s:
-        await s.execute(
-            sa.update(TrainingRun).where(TrainingRun.id == rid).values(completed_at=sa.func.now() - timedelta(days=2))
-        )
-        for kind, age_days in (("log", 0), ("status", 0), ("metric", 8)):
+        for kind, age_days in (("status", 0), ("metric", 8)):
             await s.execute(
                 sa.insert(RunEvent).values(
                     run_id=rid, kind=kind, ts=sa.func.now() - timedelta(days=age_days), payload={"kind": kind}
@@ -173,7 +170,7 @@ async def test_event_retention_drops_old_logs_of_finished_runs_and_very_old_even
             )
         await s.commit()
 
-    assert await reapers.event_retention() == 2  # the log (run finished >24h ago) and the 8-day-old metric
+    assert await reapers.event_retention() == 1  # the 8-day-old metric
     async with db() as s:
         kinds = (await s.execute(sa.select(RunEvent.kind))).scalars().all()
     assert kinds == ["status"]

@@ -2,7 +2,7 @@
 
   stale_runs               a running run with no event for a long time -> failed (hung training thread)
   expired_leases           export and custom-model validation jobs whose worker stopped renewing -> re-queued or failed
-  event_retention          old log rows and old run events
+  event_retention          old run events
   rate_limit               expired API-key rate-limit windows
 
 A run marked failed by stale_runs whose training thread is genuinely wedged still occupies the
@@ -25,7 +25,6 @@ from theseus.settings import get_settings
 logger = logging.getLogger(__name__)
 
 REAP_INTERVAL_SECONDS = 60.0
-LOG_RETENTION_AFTER_TERMINAL = "24 hours"
 EVENT_RETENTION = "7 days"
 
 
@@ -60,21 +59,11 @@ async def expired_leases() -> int:
 
 async def event_retention() -> int:
     async with get_sessionmaker()() as s:
-        logs = await s.execute(
-            sa.delete(RunEvent).where(
-                RunEvent.kind == "log",
-                RunEvent.run_id.in_(
-                    sa.select(TrainingRun.id).where(
-                        TrainingRun.completed_at < sa.func.now() - sa.text(f"interval '{LOG_RETENTION_AFTER_TERMINAL}'")
-                    )
-                ),
-            )
-        )
         old = await s.execute(
             sa.delete(RunEvent).where(RunEvent.ts < sa.func.now() - sa.text(f"interval '{EVENT_RETENTION}'"))
         )
         await s.commit()
-    return (logs.rowcount or 0) + (old.rowcount or 0)
+    return old.rowcount or 0
 
 
 async def sweep_rate_limits() -> int:

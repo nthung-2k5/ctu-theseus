@@ -1,6 +1,5 @@
-"""Training runs: list / start / cancel / delete, live events (SSE), evaluation and logs."""
+"""Training runs: list / start / cancel / delete, live events (SSE) and evaluation."""
 
-import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -8,7 +7,7 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from theseus import constants as C
 from theseus.backends.registry import describe, find_backend, list_backends, model_param_name
@@ -256,7 +255,7 @@ def _sse(event: dict) -> str:
 
 @router.get("/runs/{run_id}/events", include_in_schema=False)
 async def stream_events(run: RunDep, session: SessionDep, request: Request) -> StreamingResponse:
-    """status / metric / log events, replayable through the standard Last-Event-ID reconnect header.
+    """status / metric events, replayable through the standard Last-Event-ID reconnect header.
 
     The SSE id is the run_events.seq. Documented here rather than in OpenAPI: browsers consume it
     with a native EventSource, which no generated client can model.
@@ -281,7 +280,7 @@ async def stream_events(run: RunDep, session: SessionDep, request: Request) -> S
     )
 
 
-# -- Evaluation and logs ---------------------------------------------------------------------
+# -- Evaluation ---------------------------------------------------------------------
 
 
 @router.get("/runs/{run_id}/evaluation", response_model=EvaluationResponse)
@@ -346,13 +345,3 @@ async def get_run_evaluation_errors(
             )
         )
     return EvaluationErrorsResponse(errors=out, total=total, page=page, per_page=ERRORS_PER_PAGE)
-
-
-@router.get("/runs/{run_id}/logs", include_in_schema=False)
-async def download_run_logs(run: RunDep) -> RedirectResponse:
-    """302 to a presigned URL for the full training log (uploaded whether or not a console was open)."""
-    key = storage.training_logs_key(str(run.id))
-    exists = await asyncio.get_running_loop().run_in_executor(None, storage.file_exists, C.BUCKET_TRAINING, key)
-    if not exists:
-        raise HTTPException(404, "No log file for this run")
-    return RedirectResponse(storage.get_download_url(C.BUCKET_TRAINING, key), status_code=302)

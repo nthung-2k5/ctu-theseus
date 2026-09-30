@@ -1,6 +1,4 @@
 import asyncio
-import contextvars
-import logging
 import math
 import threading
 
@@ -10,7 +8,6 @@ import sqlalchemy as sa
 from theseus.db.models import RunEvent, TrainingMetric, TrainingRun
 from theseus.events import bus as bus_module
 from theseus.events.bus import InProcessRunEventBus
-from theseus.events.log_handler import RunLogHandler, current_run_id, install_run_log_handler, uninstall_run_log_handler
 from theseus.events.stream import stream_run_events
 from theseus.events.writer import EventWriter
 
@@ -22,7 +19,7 @@ async def bus():
 
 @pytest.fixture
 async def writer(db, bus):
-    w = EventWriter(bus, log_cap=5)
+    w = EventWriter(bus)
     await w.start()
     yield w
     await w.stop()
@@ -128,20 +125,19 @@ async def test_non_finite_metrics_are_dropped_not_written(db, writer, make_run):
     assert ev.payload["metrics"] == {"accuracy": 0.8}
 
 
-# -- Logs ------------------------------------------------------------------------------------
+# -- Heartbeat -------------------------------------------------------------------------------
 
 
-async def test_log_stream_is_capped_with_one_truncation_notice_and_heartbeat_is_throttled(db, writer, make_run):
+async def test_touch_bumps_the_heartbeat_without_recording_an_event(db, writer, make_run):
     rid = await make_run(status="running")
-    for i in range(9):
-        writer.log(rid, "info", f"line {i}")
+    assert (await run_row(db, rid)).heartbeat_at is None
+
+    for _ in range(20):  # a per-batch touch is throttled to one UPDATE, not twenty
+        writer.touch(rid)
     await writer.flush()
 
-    logs = await events(db, rid, "log")
-    assert len(logs) == 5 + 1  # cap + one notice, the remaining lines are dropped
-    assert logs[-1].payload["level"] == "warn" and "truncated" in logs[-1].payload["line"]
-    assert [e.payload["line"] for e in logs[:5]] == [f"line {i}" for i in range(5)]
     assert (await run_row(db, rid)).heartbeat_at is not None
+    assert await events(db, rid) == []
 
 
 # -- Ordering and publishing -----------------------------------------------------------------
@@ -186,7 +182,7 @@ async def test_writer_survives_an_event_for_a_missing_run(db, writer, make_run):
     import uuid
 
     good = await make_run(status="running")
-    writer.log(uuid.uuid4(), "info", "orphan line")  # FK violation
+    writer.metric(uuid.uuid4(), 1, "train", {"loss": 0.5})  # FK violation
     writer.status(good, "succeeded")
     await writer.flush()
     assert (await run_row(db, good)).status == "succeeded"
@@ -273,81 +269,3 @@ async def test_a_subscriber_that_falls_behind_is_closed_not_fed_lossy_data(bus, 
         bus.publish("r", {"seq": i})
     assert sub.closed and bus.subscriber_count("r") == 0
     assert (await sub.queue.get()) is bus_module.CLOSED
-
-
-# -- Log handler -----------------------------------------------------------------------------
-
-
-class FakeWriter:
-    def __init__(self):
-        self.lines: list[tuple[str, str, str]] = []
-
-    def log(self, run_id, level, line):
-        self.lines.append((run_id, level, line))
-
-
-@pytest.fixture
-def handler():
-    fw = FakeWriter()
-    # "ludwig" stands in for a trainer backend's log_namespaces (lifespan.py installs these for
-    # every installed backend; this fixture predates backends being pluggable).
-    h = install_run_log_handler(fw, ("ludwig",))  # type: ignore[arg-type]
-    yield h, fw
-    uninstall_run_log_handler(h)
-
-
-def test_handler_only_acts_inside_a_run_context_and_only_on_its_namespaces(handler):
-    h, fw = handler
-    log = logging.getLogger("ludwig.trainers.trainer")
-    log.info("no run context")
-    assert fw.lines == []
-
-    token = current_run_id.set("run-1")
-    try:
-        log.info("epoch 1 done")
-        logging.getLogger("theseus.jobs.train").warning("careful")
-        logging.getLogger("uvicorn.access").info("GET /health")  # must never be captured
-        logging.getLogger("botocore").info("noise")
-    finally:
-        current_run_id.reset(token)
-
-    assert [(r, lvl, "epoch 1 done" in ln or "careful" in ln) for r, lvl, ln in fw.lines] == [
-        ("run-1", "info", True),
-        ("run-1", "warn", True),
-    ]
-
-
-def test_handler_follows_the_context_into_a_thread_and_keeps_runs_separate(handler):
-    h, fw = handler
-
-    def train(run_id):
-        token = current_run_id.set(run_id)
-        try:
-            ctx = contextvars.copy_context()
-            t = threading.Thread(target=ctx.run, args=(logging.getLogger("ludwig.x").info, f"from {run_id}"))
-            t.start()
-            t.join()
-        finally:
-            current_run_id.reset(token)
-
-    train("a")
-    train("b")
-    assert sorted((r, ln.split(": ")[-1]) for r, _, ln in fw.lines) == [("a", "from a"), ("b", "from b")]
-
-
-def test_handler_tees_every_line_to_the_run_file_even_when_the_live_stream_is_throttled(handler, tmp_path):
-    h, fw = handler
-    path = tmp_path / "run.log"
-    h.attach("r1", path)
-    token = current_run_id.set("r1")
-    try:
-        for i in range(500):  # far above the burst allowance
-            logging.getLogger("ludwig.x").info("line %d", i)
-    finally:
-        current_run_id.reset(token)
-        h.detach("r1")
-
-    assert len(path.read_text().splitlines()) == 500  # the file is complete
-    streamed = [ln for _, _, ln in fw.lines if "line " in ln]
-    assert 0 < len(streamed) < 500  # the live stream was throttled
-    assert isinstance(h, RunLogHandler)

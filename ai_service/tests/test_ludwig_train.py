@@ -118,6 +118,28 @@ def test_check_abort_raising_stops_training_immediately():
     assert FakeModel.instances[0].trained_epochs == 0  # aborted before epoch 1 finished
 
 
+def test_finer_hooks_keep_the_run_alive_between_epochs_but_heartbeat_at_most_every_few_seconds(monkeypatch):
+    """With no log stream, a long epoch (or preprocessing) would otherwise look hung to the stale-run reaper."""
+    now = {"t": 1000.0}
+    monkeypatch.setattr(train_mod.time, "monotonic", lambda: now["t"])
+    ctx, calls = _ctx()
+    cb = train_mod.TrainingProgressCallback(ctx)
+
+    cb.on_preprocess_end()
+    for _ in range(500):  # a chatty per-batch hook inside one 10 s window
+        cb.on_batch_end(None, None, None)
+    assert calls.heartbeats == 1
+
+    now["t"] += train_mod.HEARTBEAT_EVERY_SECONDS
+    cb.on_batch_end(None, None, None)
+    cb.on_eval_end(None, None, None)
+    assert calls.heartbeats == 2
+
+    now["t"] += train_mod.HEARTBEAT_EVERY_SECONDS
+    cb.on_train_start(None, None, None)
+    assert calls.heartbeats == 3
+
+
 def test_metric_extraction_prefixes_output_features_but_not_the_combined_aggregate():
     out = train_mod._extract_metrics(
         {"combined": {"loss": [Metric(0.1), Metric(0.2)]}, "label": {"accuracy": [Metric(0.9)], "empty": []}}

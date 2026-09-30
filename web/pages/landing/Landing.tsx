@@ -38,7 +38,7 @@ const STEPS = [
   {
     icon: BrainIcon,
     title: 'Train',
-    text: 'Launch runs or hyper-parameter sweeps and watch curves and logs stream live.',
+    text: 'Launch runs or hyper-parameter sweeps and watch curves stream live.',
   },
   {
     icon: ExportIcon,

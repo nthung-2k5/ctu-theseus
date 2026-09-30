@@ -22,7 +22,7 @@ import { getRouteApi, Outlet, useLocation, useNavigate } from '@tanstack/react-r
 
 const routeApi = getRouteApi('/_app/project/$projectId/experiments/$runId')
 
-const TABS = ['live', 'logs', 'evaluation', 'compare', 'config'] as const
+const TABS = ['live', 'evaluation', 'compare', 'config'] as const
 type RunTab = (typeof TABS)[number]
 
 /**
@@ -92,8 +92,6 @@ export function RunLayout() {
   const goToTab = (tab: string | null) => {
     const params = { projectId, runId }
     switch (tab) {
-      case 'logs':
-        return navigate({ to: '/project/$projectId/experiments/$runId/logs', params })
       case 'evaluation':
         return navigate({ to: '/project/$projectId/experiments/$runId/evaluation', params })
       case 'compare':
@@ -180,7 +178,6 @@ export function RunLayout() {
         <Tabs value={activeTab} onChange={goToTab}>
           <Tabs.List>
             <Tabs.Tab value="live">Live</Tabs.Tab>
-            <Tabs.Tab value="logs">Logs</Tabs.Tab>
             <Tabs.Tab
               value="evaluation"
               disabled={!succeeded}

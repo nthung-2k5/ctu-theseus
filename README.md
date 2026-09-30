@@ -71,13 +71,12 @@ run ("Server restarted during training") and re-queues `running` exports and `va
 models. A restart therefore ends in-flight training. A reaper loop also fails a training run whose
 heartbeat stops (a hung thread) and reclaims expired export and validation leases.
 
-**Run events and live updates.** Metrics, status changes and log lines are appended to `run_events`
+**Run events and live updates.** Metrics and status changes are appended to `run_events`
 by a single writer task (a `BIGSERIAL` is not commit-ordered, so concurrent writers would let a
 reconnecting client skip events). The same transaction updates the projection
 (`training_runs.status`, `training_metrics`, `run_evaluations`). `GET /api/runs/{id}/events`
 streams them over SSE with `Last-Event-ID` replay: subscribe, then read the backlog, then go live.
-Log lines are only captured from the `ludwig` and `theseus.jobs` loggers and are capped per run
-(`RUN_LOG_MAX_ROWS`); the full log also goes to S3.
+Training output is not captured: runs have no log stream, log file or Logs tab.
 
 **Cancel.** `training_runs.cancel_requested_at` is the durable record; an in-process
 `threading.Event` is what the training thread polls each epoch. A run stops via `TrainingAborted`,
@@ -119,7 +118,6 @@ theseus-datasets/
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config
   {runId}/results/                           Ludwig's own output tree (incl. training_set_metadata.json)
-  {runId}/logs/train.log
 
 theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
@@ -339,7 +337,7 @@ ai_service/               The backend (FastAPI + Ludwig); see ai_service/README.
   theseus/services/       task_registry (source of truth), ludwig_config, snapshot, sweep,
                           plugin_settings, model_catalog, custom_models, ...
   theseus/jobs/           queue, dispatcher, lanes, train/export/validate_model, recovery, reapers
-  theseus/events/         run-event writer, in-process bus, SSE stream, log capture
+  theseus/events/         run-event writer, in-process bus, SSE stream
   theseus/export/         devkit/app bundle assembly + templates
   theseus/db/, migrations/  SQLAlchemy models + Alembic
 web/                      React SPA

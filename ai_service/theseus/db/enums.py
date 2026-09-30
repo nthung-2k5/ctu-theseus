@@ -26,6 +26,6 @@ EvaluationStatus = Literal["success", "failed"]
 SweepStrategy = Literal["grid", "random"]
 SweepStatus = Literal["running", "completed", "canceled"]
 # Only what the browser consumes. Export and evaluation state live in their own tables.
-RunEventKind = Literal["status", "metric", "log"]
+RunEventKind = Literal["status", "metric"]
 
 TERMINAL_RUN_STATUSES: tuple[str, ...] = ("succeeded", "failed", "canceled")

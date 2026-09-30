@@ -58,11 +58,10 @@ class Settings(BaseSettings):
     job_poll_interval_seconds: float = 3.0
     job_lease_seconds: int = 300
     inference_concurrency: int = 2
-    # A running training run with no event for this long is presumed hung. Log lines count as
-    # events, so this only needs to exceed the longest silent stretch (e.g. dataset preprocessing).
+    # A running training run with no heartbeat or event for this long is presumed hung. The Ludwig callback
+    # beats every few seconds while training, so this only needs to exceed the longest stretch without one
+    # (dataset preprocessing).
     run_heartbeat_timeout_seconds: int = 900
-    # Persisted log rows per run in run_events; the full log always goes to S3 regardless.
-    run_log_max_rows: int = 20_000
 
     @property
     def is_production(self) -> bool:

@@ -1,7 +1,6 @@
-"""The real lifespan wired end to end: writer, log handler, recovery, dispatcher lanes, reaper."""
+"""The real lifespan wired end to end: writer, recovery, dispatcher lanes, reaper."""
 
 import asyncio
-import logging
 import sys
 
 import pytest
@@ -45,13 +44,11 @@ async def test_startup_and_shutdown_install_and_remove_every_process_wide_compon
     app = create_app()
     async with app.router.lifespan_context(app):
         assert events_pkg.get_event_writer() is not None
-        assert events_pkg.get_log_handler() in logging.getLogger("ludwig").handlers
         d = get_dispatcher()
         assert d is not None and set(d.lanes) == {"train", "export", "validate"}
         assert [d.lanes[n].concurrency for n in ("train", "export", "validate")] == [1, 2, 1]
 
     assert get_dispatcher() is None
-    assert not any(type(h).__name__ == "RunLogHandler" for h in logging.getLogger("ludwig").handlers)
     with pytest.raises(RuntimeError, match="not running"):
         events_pkg.get_event_writer()
 
@@ -74,7 +71,6 @@ async def test_a_queued_run_is_claimed_run_and_its_events_are_streamable_end_to_
             got.append(ev)
         statuses = [e["payload"]["status"] for e in got if e["kind"] == "status"]
         assert statuses == ["running", "failed"]
-        assert any(e["kind"] == "log" for e in got)  # the job own log lines were streamed too
         assert [e["seq"] for e in got] == sorted(e["seq"] for e in got)
     assert not abort.is_registered(str(rid))
 

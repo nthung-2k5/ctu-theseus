@@ -2,9 +2,7 @@ import { LineChart } from '@mantine/charts'
 import { Alert, Badge, Group, Loader, Paper, Progress, SimpleGrid, Text } from '@mantine/core'
 import { ChartLineIcon } from '@phosphor-icons/react'
 import { formatMetricLabel, STATUS_COLORS } from '@public/components/training/constants'
-import { LogConsole } from '@public/components/training/LogConsole'
 import { useRunContext } from '@public/components/training/RunContext'
-import { useRunLogs } from '@public/components/training/useRunLogs'
 import { useRunMetrics } from '@public/components/training/useRunMetrics'
 import { EmptyState, SectionLabel, StatusBadge } from '@public/components/ui'
 import { SERIES_COLORS, VALIDATION_DASH } from '@public/lib/palette'
@@ -30,7 +28,6 @@ export function RunLivePage() {
   const { run, isActive, status, live } = useRunContext()
   const metrics = useRunMetrics(run.id, isActive, live)
   const { data: detail } = useTrainingRunDetail(run.id, true)
-  const { lines } = useRunLogs()
 
   const totalEpochs = Number((detail?.run.hyperparameters as Record<string, unknown> | null)?.epochs) || null
   const currentEpoch = metrics.epochs.at(-1) ?? 0
@@ -104,15 +101,6 @@ export function RunLivePage() {
           ))}
         </SimpleGrid>
       )}
-
-      <Paper style={{ overflow: 'hidden' }}>
-        <div style={{ height: 300 }}>
-          <LogConsole
-            lines={lines}
-            empty={isActive ? 'Waiting for output…' : 'No log output was recorded for this run.'}
-          />
-        </div>
-      </Paper>
     </div>
   )
 }

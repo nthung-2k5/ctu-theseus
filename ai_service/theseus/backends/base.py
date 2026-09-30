@@ -218,8 +218,6 @@ class TrainerBackend(ABC):
     Hyperparameters: ClassVar[type[HyperparamsBase]] = HyperparamsBase
     # Exportable artifacts this backend can convert a trained model into, keyed by Artifact.id.
     artifacts: ClassVar[dict[str, Artifact]] = {}
-    # Logger namespaces streamed into the run's live log / log file (see events/log_handler.py).
-    log_namespaces: ClassVar[tuple[str, ...]] = ()
     # Suffix of an S3 object under the run's results prefix that `preprocessing_manifest` needs
     # beyond the compiled config, if any (e.g. Ludwig's "training_set_metadata.json").
     metadata_filename: ClassVar[str | None] = None
