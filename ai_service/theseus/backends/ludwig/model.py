@@ -15,6 +15,7 @@ import pandas as pd
 from ludwig.api import LudwigModel
 
 from theseus.backends.base import LoadedModel, OutputSpec
+from theseus.backends.ludwig import compat as _compat  # noqa: F401  Windows-only Ludwig workarounds
 from theseus.backends.ludwig import encoders as _encoders  # noqa: F401  registers this backend's Ludwig encoders
 from theseus.services.predict import (
     ClassificationClass,
