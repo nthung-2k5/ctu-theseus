@@ -37,10 +37,12 @@ _REGRESSION_METRICS = ["loss", "mean_squared_error", "mean_absolute_error", "r2"
 _IMAGE_SIZES = ["128", "224", "256"]
 
 # Section headings of the create-run form (ParamSpec.group), in the order they appear.
-_OPTIMISATION = "Optimisation"
-_STOPPING = "Batching & stopping"
-_HEAD = "Backbone & head"
-_DATA = "Data & loss"
+# Section headings of the hyperparameter form, in the order it shows them: what the model is, how it trains,
+# when it stops, what data it sees. In plain words, since the people filling the form may not know the ML terms.
+_MODEL = "Model details"
+_TRAINING = "Training"
+_STOPPING = "Stopping"
+_DATA = "Data"
 
 
 class LudwigHyperparameters(HyperparamsBase):
@@ -357,31 +359,44 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
     if knobs is None:
         return []
 
-    optimisation = [
+    learning = [
         ParamSpec(
-            name="learningRate", label="Learning Rate", type="float", group=_OPTIMISATION,
+            name="learningRate", label="Learning Rate", type="float", group=_TRAINING,
             default=knobs.learning_rate.default, min=knobs.learning_rate.min, max=knobs.learning_rate.max,
             step=_learning_rate_step(knobs.learning_rate.min, knobs.learning_rate.max),
+            description="How big a step the model takes each time it learns from some examples. Too high and it "
+            "overshoots and never settles; too low and training is very slow. The default suits most cases.",
         ),
         ParamSpec(
-            name="optimizer", label="Optimizer", type="choice", group=_OPTIMISATION, default=None,
+            name="optimizer", label="Optimizer", type="choice", group=_TRAINING, default=None,
             choices=list(LUDWIG_OPTIMIZER_TYPES),
-            description="Defaults to Ludwig's per-model-type default (Adam for ECD)",
+            description="The method the model uses to improve itself after each step. Leave it on Default unless "
+            "you know you want a specific one; the default (Adam) is a safe general choice.",
+        ),
+    ]  # fmt: skip
+
+    training = [
+        ParamSpec(
+            name="epochs", label="Epochs", type="int", group=_TRAINING,
+            default=knobs.epochs.default, min=knobs.epochs.min, max=knobs.epochs.max, step=1,
+            description="How many times the model goes through your whole training set (each pass is one epoch). "
+            "More epochs let it learn more, but too many can make it memorise the examples instead of learning "
+            "the pattern.",
+        ),
+        ParamSpec(
+            name="batchSize", label="Batch Size", type="choice", group=_TRAINING,
+            default=str(knobs.batch_size.default), choices=[str(o) for o in knobs.batch_size.options],
+            description="How many examples the model looks at before it updates itself. Bigger batches train faster "
+            "but need more memory. \"auto\" lets the app pick the biggest size that fits.",
         ),
     ]  # fmt: skip
 
     stopping = [
         ParamSpec(
-            name="epochs", label="Epochs", type="int", group=_STOPPING,
-            default=knobs.epochs.default, min=knobs.epochs.min, max=knobs.epochs.max, step=1,
-        ),
-        ParamSpec(
-            name="batchSize", label="Batch Size", type="choice", group=_STOPPING,
-            default=str(knobs.batch_size.default), choices=[str(o) for o in knobs.batch_size.options],
-        ),
-        ParamSpec(
             name="earlyStopPatience", label="Early Stop Patience",
-            description="Epochs without improvement before stopping. Switch off to train every epoch.",
+            description="Stops training automatically when results have not improved for this many epochs in a "
+            "row, so time isn't wasted and the model doesn't over-learn your examples. Switch off to always "
+            "train every epoch.",
             type="int", group=_STOPPING, default=knobs.early_stop_patience.default,
             min=knobs.early_stop_patience.min, step=1, disabled_value=-1,
         ),
@@ -395,6 +410,8 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             ParamSpec(
                 name="validationMetric", label="Early Stop / Best-Epoch Metric", type="choice", group=_STOPPING,
                 default=None, choices=metrics,
+                description="The score used to judge whether results are still improving and which epoch was the "
+                "best one. Leave it on Default and the app picks a sensible score for your task.",
             )
         )  # fmt: skip
 
@@ -404,22 +421,28 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
         if any(e.pretrained for e in spec.encoders):
             head.append(
                 ParamSpec(
-                    name="freezeBackbone", label="Freeze backbone", type="bool", group=_HEAD, default=False,
-                    description="Trains only the head and keeps the pretrained weights fixed",
+                    name="freezeBackbone", label="Freeze backbone", type="bool", group=_MODEL, default=False,
+                    description="Keeps the pretrained model exactly as it is and trains only the small part on top "
+                    "of it. Faster and needs fewer examples, but it adapts less closely to your data.",
                 )
             )  # fmt: skip
         head += [
             ParamSpec(
-                name="headLayers", label="Head layers", type="int", group=_HEAD, default=0, min=0, max=4, step=1,
-                description="Hidden layers between the backbone and the output. 0 is a plain linear head.",
+                name="headLayers", label="Head layers", type="int", group=_MODEL, default=0, min=0, max=4, step=1,
+                description="Extra layers between the model and its final answer. 0 is the simplest option and is "
+                "usually enough; try adding layers if results are poor and you have plenty of examples.",
             ),
             ParamSpec(
-                name="headWidth", label="Head width", type="choice", group=_HEAD, default="256",
-                choices=["64", "128", "256", "512"], description="Units per hidden layer of the head.",
+                name="headWidth", label="Head width", type="choice", group=_MODEL, default="256",
+                choices=["64", "128", "256", "512"],
+                description="How many units each extra layer has. Wider layers can pick up more complex patterns "
+                "but are slower and more likely to memorise.",
             ),
             ParamSpec(
-                name="headDropout", label="Head dropout", type="float", group=_HEAD, default=0.0, min=0.0, max=0.9,
-                step=0.05, description="Dropout applied inside the head's hidden layers.",
+                name="headDropout", label="Head dropout", type="float", group=_MODEL, default=0.0, min=0.0, max=0.9,
+                step=0.05,
+                description="Randomly switches off this fraction of units while training, which stops the model "
+                "from just memorising the examples. 0 means off.",
             ),
         ]  # fmt: skip
 
@@ -428,14 +451,18 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
         data.append(
             ParamSpec(
                 name="maxSequenceLength", label="Max sequence length", type="choice", group=_DATA, default=None,
-                choices=["64", "128", "256", "512"], description="Truncates each text to this many tokens",
+                choices=["64", "128", "256", "512"],
+                description="Longer texts are cut off after this many tokens (roughly, pieces of words). A higher "
+                "number keeps more of each text but is slower.",
             )
         )  # fmt: skip
     if task.modality == "vision":
         data.append(
             ParamSpec(
                 name="imageSize", label="Image Size", type="choice", group=_DATA, default=None,
-                choices=_IMAGE_SIZES, description="Resizes every training image to a square of this size",
+                choices=_IMAGE_SIZES,
+                description="Every image is resized to a square of this many pixels before training. Larger keeps "
+                "more detail but is slower and needs more memory.",
             )
         )  # fmt: skip
 
@@ -447,13 +474,13 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
                 type="bool",
                 group=_DATA,
                 default=False,
-                description="Balances the loss so a minority class isn't drowned out by a majority one — "
-                "recommended for imbalanced datasets",
+                description="Makes mistakes on rarer classes count for more, so the model doesn't simply favour the "
+                "most common one. Recommended when some classes have far fewer examples than others.",
             )
         )
 
-    # Section order of the form: optimisation, batching and stopping, backbone and head, data and loss.
-    return [*optimisation, *stopping, *head, *data]
+    # Section order of the form: the model's details, training, stopping, data.
+    return [*head, *training, *learning, *stopping, *data]
 
 
 def _learning_rate_step(lo: float | None, hi: float | None) -> float:

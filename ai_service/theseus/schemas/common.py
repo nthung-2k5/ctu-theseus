@@ -36,6 +36,6 @@ class ParamSpec(ApiModel):
     # uses -1): the sentinel. The web renders an on/off switch plus a number instead of asking for the sentinel;
     # what is sent and stored is still the sentinel itself.
     disabled_value: float | None = None
-    # Section heading the form files this parameter under (e.g. "Optimisation"); parameters without
+    # Section heading the form files this parameter under (e.g. "Training"); parameters without
     # one are shown together under a generic heading. Order of first appearance is the section order.
     group: str | None = None

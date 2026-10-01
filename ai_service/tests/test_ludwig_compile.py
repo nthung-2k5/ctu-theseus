@@ -258,6 +258,16 @@ class TestHyperparameterSpecs:
         assert specs["earlyStopPatience"].model_dump(by_alias=True)["disabledValue"] == -1
         assert [n for n, p in specs.items() if p.disabled_value is not None] == ["earlyStopPatience"]
 
+    def test_every_knob_has_a_plain_language_tooltip_text(self):
+        """The form shows `description` as a tooltip for people who do not know the ML terms."""
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from theseus.backends.ludwig.tasks import LUDWIG_TASKS
+
+        for task_id in LUDWIG_TASKS:
+            for p in hyperparameter_specs(get_task_descriptor(task_id)):
+                assert p.description and len(p.description) > 40, (task_id, p.name)
+                assert not {"ludwig", "ecd", "llm"} & set(p.description.lower().split()), (task_id, p.name)
+
     def test_every_knob_is_filed_under_a_section_and_sections_appear_in_form_order(self):
         from theseus.backends.ludwig.compile import hyperparameter_specs
 
@@ -265,17 +275,28 @@ class TestHyperparameterSpecs:
             specs = hyperparameter_specs(get_task_descriptor(task_id))
             assert all(p.group for p in specs), task_id
             sections = list(dict.fromkeys(p.group for p in specs))  # first-appearance order is the form order
-            expected = ["Optimisation", "Batching & stopping", "Backbone & head", "Data & loss"]
+            expected = ["Model details", "Training", "Stopping", "Data"]
             assert sections == [g for g in expected if g in sections], task_id
-            assert sections[:2] == expected[:2]
-            assert ("Backbone & head" in sections) == (task_id != "text_generation")  # an LLM has no head to edit
+            assert {"Training", "Stopping"} <= set(sections)  # every task trains and stops
+            assert ("Model details" in sections) == (task_id != "text_generation")  # an LLM has no head to edit
 
     def test_a_section_only_exists_when_the_task_has_knobs_for_it(self):
         from theseus.backends.ludwig.compile import hyperparameter_specs
 
         regression = {p.group for p in hyperparameter_specs(get_task_descriptor("tabular_regression"))}
         vision = {p.group for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
-        assert "Data & loss" not in regression and "Data & loss" in vision
+        assert "Data" not in regression and "Data" in vision
+
+    def test_the_basics_come_before_the_technical_settings_within_a_section(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        specs = hyperparameter_specs(get_task_descriptor("image_classification"))
+        by_section: dict[str, list[str]] = {}
+        for p in specs:
+            by_section.setdefault(p.group or "", []).append(p.name)
+        assert by_section["Training"] == ["epochs", "batchSize", "learningRate", "optimizer"]
+        assert by_section["Stopping"] == ["earlyStopPatience", "validationMetric"]
+        assert by_section["Model details"][0] == "freezeBackbone"
 
     def test_epoch_and_batch_size_defaults_come_from_the_task_not_a_shared_constant(self):
         from theseus.backends.ludwig.compile import hyperparameter_specs
