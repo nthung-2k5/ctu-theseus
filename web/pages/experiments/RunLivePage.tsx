@@ -77,8 +77,8 @@ export function RunLivePage() {
         <KpiTile label="Val loss" value={fmt(metrics.latest('validation', 'loss'))} color={SERIES_COLORS.validation} />
         <KpiTile label="Best val loss" value={fmt(metrics.best('validation', 'loss'))} />
         <KpiTile
-          label="Val accuracy"
-          value={fmt(accuracyMetric ? metrics.latest('validation', accuracyMetric) : null)}
+          label="Test Accuracy"
+          value={fmt(accuracyMetric ? metrics.latest('test', accuracyMetric) : null)}
           color={SERIES_COLORS.f1}
         />
         <KpiTile label="Epochs done" value={String(currentEpoch)} />

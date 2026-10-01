@@ -177,7 +177,7 @@ export function RunLayout() {
 
         <Tabs value={activeTab} onChange={goToTab}>
           <Tabs.List>
-            <Tabs.Tab value="live">Live</Tabs.Tab>
+            <Tabs.Tab value="live">Metrics</Tabs.Tab>
             <Tabs.Tab
               value="evaluation"
               disabled={!succeeded}
