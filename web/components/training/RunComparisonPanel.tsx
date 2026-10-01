@@ -8,6 +8,7 @@
 import { LineChart } from '@mantine/charts'
 import { Badge, Group, MultiSelect, Paper, SegmentedControl, Select, Table, Text } from '@mantine/core'
 import { EmptyState, SectionLabel, StatusBadge } from '@public/components/ui'
+import { formatHyperparamValue } from '@public/lib/format'
 import { useModelParamNames } from '@public/lib/models'
 import { CHART_COLORS } from '@public/lib/palette'
 import { trainingRunDetailQueryOptions, useTrainingRunDetail } from '@public/lib/queries'
@@ -15,13 +16,6 @@ import type { SplitType, TrainingRunSummary } from '@public/store/types'
 import { useQueries } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { formatMetricLabel, STATUS_COLORS } from './constants'
-
-function formatHyperparamValue(value: unknown): string {
-  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'None'
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled'
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toPrecision(4)
-  return String(value)
-}
 
 function ComparisonRow({
   run,
@@ -62,7 +56,7 @@ function ComparisonRow({
                 ...(data?.run.modelLabel ? [`model: ${data.run.modelLabel}`] : []),
                 ...Object.entries(hyperparameters)
                   .filter(([key]) => !modelKeys.has(key))
-                  .map(([key, value]) => `${key}: ${formatHyperparamValue(value)}`),
+                  .map(([key, value]) => `${key}: ${formatHyperparamValue(key, value)}`),
               ].join(' · ')
             : '—'}
         </Text>

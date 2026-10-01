@@ -13,6 +13,7 @@ import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon, StopIcon, TrophyIcon } from '@phosphor-icons/react'
 import { EmptyState, QueryBoundary, StatusBadge } from '@public/components/ui'
 import { cancelSweep as cancelSweepRequest } from '@public/lib/api/generated/sweeps/sweeps'
+import { formatHyperparamValue } from '@public/lib/format'
 import { useModelParamNames } from '@public/lib/models'
 import { sweepDetailQueryOptions, useSweepDetail } from '@public/lib/queries'
 import type { SweepSearchSpace, SweepTrial } from '@public/store/types'
@@ -24,13 +25,6 @@ const SWEEP_STATUS_COLORS: Record<string, string> = {
   running: 'blue',
   completed: 'teal',
   canceled: 'gray',
-}
-
-function formatHyperparamValue(value: unknown): string {
-  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'None'
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled'
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toPrecision(4)
-  return String(value)
 }
 
 function trialHeadlineMetric(trial: SweepTrial): number | null {
@@ -199,7 +193,7 @@ export function SweepDetailPanel({
                             <Text size="xs" c="dimmed" maw={280}>
                               {hyperparameters
                                 ? Object.entries(hyperparameters)
-                                    .map(([key, value]) => `${key}: ${formatHyperparamValue(value)}`)
+                                    .map(([key, value]) => `${key}: ${formatHyperparamValue(key, value)}`)
                                     .join(' · ')
                                 : '—'}
                             </Text>

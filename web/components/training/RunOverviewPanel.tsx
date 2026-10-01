@@ -8,7 +8,8 @@
 
 import { Badge, Group, Paper, SimpleGrid, Skeleton, Stack, Table, Text } from '@mantine/core'
 import { SectionLabel, StatusBadge } from '@public/components/ui'
-import { useModelParamNames } from '@public/lib/models'
+import { formatHyperparamValue, humanizeKey } from '@public/lib/format'
+import { useHyperparamLabels, useModelParamNames } from '@public/lib/models'
 import { useTrainingRunDetail } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectTask, TrainingRunSummary } from '@public/store/types'
@@ -24,13 +25,6 @@ const HYPERPARAM_LABELS: Record<string, string> = {
   // No longer a training option (augmentation is set when a snapshot is created), but runs started
   // before that change still carry it in their hyperparameters.
   augmentations: 'Augmentation (legacy)',
-}
-
-function formatHyperparamValue(value: unknown): string {
-  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'None'
-  if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled'
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toPrecision(4)
-  return String(value)
 }
 
 function formatDuration(ms: number): string {
@@ -81,6 +75,7 @@ export function RunOverviewPanel({
   // The server names the model a run used (a custom model's name even after it was archived, which the
   // picker would no longer list). The task label stands in for a run that named no model.
   const modelKeys = useModelParamNames(projectId)
+  const hyperparamLabels = useHyperparamLabels(projectId)
   const descriptor = getTaskDescriptor(task)
   const modelLabel = data?.run.modelLabel ?? descriptor.label
 
@@ -128,7 +123,10 @@ export function RunOverviewPanel({
             </Text>
           ) : (
             <KeyValueTable
-              rows={configEntries.map(([key, value]) => [HYPERPARAM_LABELS[key] ?? key, formatHyperparamValue(value)])}
+              rows={configEntries.map(([key, value]) => [
+                hyperparamLabels.get(key) ?? HYPERPARAM_LABELS[key] ?? humanizeKey(key),
+                formatHyperparamValue(key, value),
+              ])}
             />
           )}
         </Stack>
