@@ -9,7 +9,7 @@ import { userModelsApi } from '@public/lib/customModels'
  */
 export function ModelsPage() {
   return (
-    <div className="flex flex-col gap-3 p-3" style={{ maxWidth: 1100 }}>
+    <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title="My models"
         description="Bring your own model and train on it. Only you can use the models listed here."
