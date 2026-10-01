@@ -5,7 +5,7 @@
  * (`GET /projects/:id/augmentations`, `GET /projects/:id/training-backends`) drives both.
  */
 
-import { Group, NumberInput, Select, Switch } from '@mantine/core'
+import { Group, NumberInput, Select, Stack, Switch } from '@mantine/core'
 import type { ParamSpec } from '@public/lib/api/generated/models'
 
 export function ParamField({
@@ -48,6 +48,39 @@ export function ParamField({
         allowDeselect={optional}
         clearable={optional}
       />
+    )
+  }
+  if (spec.disabledValue != null) {
+    // A number with an "off" state stored as one sentinel (Ludwig's early stopping uses -1): show a switch and
+    // a number instead of making the user type the sentinel. What is sent is still the sentinel itself.
+    const off = spec.disabledValue
+    const isOff = value === off
+    const lowest = Math.max(spec.min ?? off + 1, off + 1)
+    const turnedOn = spec.default != null && spec.default !== off ? Number(spec.default) : lowest
+    return (
+      <Stack gap={6}>
+        <Switch
+          size={size}
+          label={spec.label}
+          description={spec.description}
+          checked={!isOff}
+          onChange={(e) => onChange(e.currentTarget.checked ? turnedOn : off)}
+        />
+        <NumberInput
+          size={size}
+          aria-label={spec.label}
+          value={!isOff && typeof value === 'number' ? value : ''}
+          placeholder="Disabled"
+          disabled={isOff}
+          min={lowest}
+          max={spec.max ?? undefined}
+          step={spec.step ?? undefined}
+          allowDecimal={spec.type === 'float'}
+          decimalScale={spec.type === 'float' ? 6 : 0}
+          clampBehavior="strict"
+          onChange={(v) => typeof v === 'number' && onChange(v)}
+        />
+      </Stack>
     )
   }
   return (

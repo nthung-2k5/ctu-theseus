@@ -7653,6 +7653,17 @@
             ],
             "title": "Choices"
           },
+          "disabledValue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabledvalue"
+          },
           "group": {
             "anyOf": [
               {

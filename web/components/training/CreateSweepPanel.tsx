@@ -67,7 +67,10 @@ function SweepKnobField({
           size="xs"
           flex={1}
           label={`${spec.label} candidates`}
-          description={spec.type === 'int' ? 'Comma-separated integers' : 'Comma-separated numbers'}
+          description={
+            `${spec.type === 'int' ? 'Comma-separated integers' : 'Comma-separated numbers'}` +
+            (spec.disabledValue != null ? `; ${spec.disabledValue} = disabled` : '')
+          }
           disabled={!included}
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => onValueChange(e.currentTarget.value)}

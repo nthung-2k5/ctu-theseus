@@ -380,9 +380,10 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             default=str(knobs.batch_size.default), choices=[str(o) for o in knobs.batch_size.options],
         ),
         ParamSpec(
-            name="earlyStopPatience", label="Early Stop Patience", description="-1 disables early stopping",
+            name="earlyStopPatience", label="Early Stop Patience",
+            description="Epochs without improvement before stopping. Switch off to train every epoch.",
             type="int", group=_STOPPING, default=knobs.early_stop_patience.default,
-            min=knobs.early_stop_patience.min, step=1,
+            min=knobs.early_stop_patience.min, step=1, disabled_value=-1,
         ),
     ]  # fmt: skip
 

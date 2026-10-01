@@ -250,6 +250,14 @@ class TestHyperparameterSpecs:
             "freezeBackbone", "headLayers", "headWidth", "headDropout",
         }  # fmt: skip
 
+    def test_early_stopping_declares_its_off_value_and_no_other_knob_does(self):
+        from theseus.backends.ludwig.compile import hyperparameter_specs
+
+        specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
+        assert specs["earlyStopPatience"].disabled_value == -1  # what Ludwig and the stored run config use for "off"
+        assert specs["earlyStopPatience"].model_dump(by_alias=True)["disabledValue"] == -1
+        assert [n for n, p in specs.items() if p.disabled_value is not None] == ["earlyStopPatience"]
+
     def test_every_knob_is_filed_under_a_section_and_sections_appear_in_form_order(self):
         from theseus.backends.ludwig.compile import hyperparameter_specs
 
