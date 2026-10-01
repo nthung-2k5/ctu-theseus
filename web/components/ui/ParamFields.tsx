@@ -5,29 +5,63 @@
  * (`GET /projects/:id/augmentations`, `GET /projects/:id/training-backends`) drives both.
  */
 
-import { Group, NumberInput, Select, Stack, Switch } from '@mantine/core'
+import { Group, Input, NumberInput, Select, Switch } from '@mantine/core'
 import type { ParamSpec } from '@public/lib/api/generated/models'
+import { useId } from 'react'
+import { LabelWithTip } from './InfoTip'
+
+/**
+ * A label above, then the control in a row as tall as a text input. Dropdowns and number boxes already have that
+ * shape; a bare switch does not, so in a row of mixed fields it sat higher or lower than its neighbours. Going
+ * through Mantine's own input wrapper keeps the label spacing identical to theirs.
+ */
+function ControlRow({
+  id,
+  spec,
+  size,
+  children,
+}: {
+  id: string
+  spec: ParamSpec
+  size: 'xs' | 'sm'
+  children: React.ReactNode
+}) {
+  return (
+    <Input.Wrapper id={id} size={size} label={<LabelWithTip label={spec.label} tip={spec.description} />}>
+      <Group h={`var(--input-height-${size})`} gap="xs" wrap="nowrap" align="center">
+        {children}
+      </Group>
+    </Input.Wrapper>
+  )
+}
 
 export function ParamField({
   spec,
   value,
   onChange,
   size = 'xs',
+  disabled,
 }: {
   spec: ParamSpec
   value: unknown
   onChange: (value: unknown) => void
   size?: 'xs' | 'sm'
+  /** Greys the field out, e.g. a setting that does not apply to what else is chosen. */
+  disabled?: boolean
 }) {
+  const controlId = useId()
   if (spec.type === 'bool') {
     return (
-      <Switch
-        size={size}
-        label={spec.label}
-        description={spec.description}
-        checked={Boolean(value)}
-        onChange={(e) => onChange(e.currentTarget.checked)}
-      />
+      <ControlRow id={controlId} spec={spec} size={size}>
+        <Switch
+          id={controlId}
+          size={size}
+          aria-label={spec.label}
+          disabled={disabled}
+          checked={Boolean(value)}
+          onChange={(e) => onChange(e.currentTarget.checked)}
+        />
+      </ControlRow>
     )
   }
   if (spec.type === 'choice') {
@@ -39,8 +73,8 @@ export function ParamField({
     return (
       <Select
         size={size}
-        label={spec.label}
-        description={spec.description}
+        label={<LabelWithTip label={spec.label} tip={spec.description} />}
+        disabled={disabled}
         data={spec.choices ?? []}
         value={value != null ? String(value) : null}
         placeholder={optional ? 'Default' : undefined}
@@ -58,20 +92,22 @@ export function ParamField({
     const lowest = Math.max(spec.min ?? off + 1, off + 1)
     const turnedOn = spec.default != null && spec.default !== off ? Number(spec.default) : lowest
     return (
-      <Stack gap={6}>
+      <ControlRow id={controlId} spec={spec} size={size}>
         <Switch
+          id={controlId}
           size={size}
-          label={spec.label}
-          description={spec.description}
+          aria-label={`${spec.label}: on or off`}
+          disabled={disabled}
           checked={!isOff}
           onChange={(e) => onChange(e.currentTarget.checked ? turnedOn : off)}
         />
         <NumberInput
           size={size}
+          style={{ flex: 1, minWidth: 0 }}
           aria-label={spec.label}
           value={!isOff && typeof value === 'number' ? value : ''}
           placeholder="Disabled"
-          disabled={isOff}
+          disabled={isOff || disabled}
           min={lowest}
           max={spec.max ?? undefined}
           step={spec.step ?? undefined}
@@ -80,14 +116,14 @@ export function ParamField({
           clampBehavior="strict"
           onChange={(v) => typeof v === 'number' && onChange(v)}
         />
-      </Stack>
+      </ControlRow>
     )
   }
   return (
     <NumberInput
       size={size}
-      label={spec.label}
-      description={spec.description}
+      label={<LabelWithTip label={spec.label} tip={spec.description} />}
+      disabled={disabled}
       value={typeof value === 'number' ? value : ''}
       min={spec.min ?? undefined}
       max={spec.max ?? undefined}

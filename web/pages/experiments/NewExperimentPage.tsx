@@ -1,4 +1,4 @@
-import { Button, SegmentedControl } from '@mantine/core'
+import { Button, SegmentedControl, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { CreateRunPanel, type RunPrefill } from '@public/components/training/CreateRunPanel'
@@ -75,8 +75,27 @@ export function NewExperimentPage() {
               value={mode}
               onChange={(v) => navigate({ search: (prev) => ({ ...prev, mode: v as 'run' | 'sweep' }), replace: true })}
               data={[
-                { value: 'run', label: 'Run' },
-                { value: 'sweep', label: 'Sweep' },
+                {
+                  value: 'run',
+                  label: (
+                    <Tooltip label="Train one model with the settings you choose." multiline w={220} withArrow>
+                      <span style={{ display: 'block' }}>Run</span>
+                    </Tooltip>
+                  ),
+                },
+                {
+                  value: 'sweep',
+                  label: (
+                    <Tooltip
+                      label="Train several models, each with different settings, and compare them to find what works best."
+                      multiline
+                      w={240}
+                      withArrow
+                    >
+                      <span style={{ display: 'block' }}>Sweep</span>
+                    </Tooltip>
+                  ),
+                },
               ]}
             />
             <Button variant="default" leftSection={<ArrowLeftIcon size={14} />} onClick={goBack}>

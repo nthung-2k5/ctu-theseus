@@ -11,7 +11,7 @@
 
 import { Checkbox, Group, MultiSelect, NumberInput, Paper, Select, SimpleGrid, Text, TextInput } from '@mantine/core'
 import { FlaskIcon } from '@phosphor-icons/react'
-import { groupParams, SectionLabel } from '@public/components/ui'
+import { groupParams, LabelWithTip, SectionLabel } from '@public/components/ui'
 import type { ParamSpec } from '@public/lib/api/generated/models'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
 import { isClassificationTask } from '@public/lib/tasks'
@@ -56,7 +56,7 @@ function SweepKnobField({
         <MultiSelect
           size="xs"
           flex={1}
-          label={`${spec.label} candidates`}
+          label={<LabelWithTip label={`${spec.label} candidates`} tip={spec.description} />}
           data={spec.choices ?? []}
           disabled={!included}
           value={Array.isArray(value) ? value : []}
@@ -66,7 +66,7 @@ function SweepKnobField({
         <TextInput
           size="xs"
           flex={1}
-          label={`${spec.label} candidates`}
+          label={<LabelWithTip label={`${spec.label} candidates`} tip={spec.description} />}
           description={
             `${spec.type === 'int' ? 'Comma-separated integers' : 'Comma-separated numbers'}` +
             (spec.disabledValue != null ? `; ${spec.disabledValue} = disabled` : '')
@@ -176,7 +176,12 @@ export function CreateSweepPanel({
           <>
             <Select
               size="xs"
-              label="Strategy"
+              label={
+                <LabelWithTip
+                  label="Strategy"
+                  tip="How the settings you tick below are combined. Grid tries every possible combination. Random tries a sample of them, which is quicker when there are many."
+                />
+              }
               w={230}
               allowDeselect={false}
               data={[
@@ -188,7 +193,12 @@ export function CreateSweepPanel({
             />
             <NumberInput
               size="xs"
-              label="Max trials"
+              label={
+                <LabelWithTip
+                  label="Max trials"
+                  tip="The most models this sweep will train. Each combination is one trial, so a long list of values can add up quickly."
+                />
+              }
               w={100}
               min={1}
               max={50}
@@ -203,8 +213,8 @@ export function CreateSweepPanel({
       <Paper p="sm">
         <SectionLabel mb={4}>Search space</SectionLabel>
         <Text size="xs" c="dimmed" mb="sm">
-          Check the knobs to search over and list their candidate values. Every combination (grid) or a random sample of
-          combinations (random) is dispatched as its own training run.
+          Tick the settings you want to try and list the values to try for each. Every combination (grid) or a random
+          sample of combinations (random) is trained as its own run, so you can compare the results.
         </Text>
         <div className="flex flex-col gap-3">
           {groupParams(sweepableKnobs).map(({ group, specs }) => (

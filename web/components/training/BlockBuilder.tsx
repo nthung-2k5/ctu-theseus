@@ -1,17 +1,12 @@
 import { ActionIcon, Badge, Group, NumberInput, Paper, Select, Stack, Switch, Text, Tooltip } from '@mantine/core'
 import { TrashIcon } from '@phosphor-icons/react'
+import { LabelWithTip } from '@public/components/ui'
 import type { ParamSpec, TrainingBackendOut } from '@public/lib/api/generated/models'
 import type { DatasetVersion } from '@public/store/types'
 import { useState } from 'react'
+import { MODEL_HELP, ModelPicker } from './ModelPicker'
 
 type BlockKind = 'preprocess' | 'augment' | 'backbone' | 'head' | 'loss'
-
-/** Where a model comes from, in the order the picker lists them. */
-const MODEL_SOURCES = [
-  { source: 'builtin', label: 'Built-in' },
-  { source: 'global', label: 'Shared by your organization' },
-  { source: 'private', label: 'My models' },
-] as const
 
 const KIND_COLOR: Record<BlockKind, string> = {
   preprocess: 'gray',
@@ -27,6 +22,16 @@ const KIND_LABEL: Record<BlockKind, string> = {
   backbone: 'Backbone',
   head: 'Head',
   loss: 'Loss',
+}
+
+/** What each block does, in words for someone who has never trained a model. */
+const KIND_HELP: Record<BlockKind, string> = {
+  preprocess: 'Prepares every picture or text in the same way before the model sees it, for example by resizing.',
+  augment:
+    'Makes slightly changed copies of your training examples (flipped, brightened, and so on) so the model sees more variety. It is chosen when the snapshot is built.',
+  backbone: MODEL_HELP,
+  head: 'The last small part that turns what the backbone has learned into your answer, such as a class or a number.',
+  loss: 'How the model’s mistakes are scored while it learns.',
 }
 
 /** Data flows through the pipeline in this order, so the canvas always renders in it. */
@@ -112,16 +117,6 @@ export function BlockBuilder({
   const augmentation = version?.augmentationConfig ?? null
 
   const modelInfo = backend.models.find((m) => m.id === modelId)
-  // Built-in models first, then an administrator's shared ones, then the user's own. With no custom
-  // models the picker stays the flat list it always was.
-  const modelGroups = MODEL_SOURCES.map((s) => ({
-    group: s.label,
-    items: backend.models
-      .filter((m) => (m.source ?? 'builtin') === s.source)
-      .map((m) => ({ value: m.id, label: m.label })),
-  })).filter((g) => g.items.length > 0)
-  const modelOptions =
-    modelGroups.length > 1 ? modelGroups : backend.models.map((m) => ({ value: m.id, label: m.label }))
   const preOn = !!pre && values[pre.spec.name] != null
   const headLayers = Number(values.headLayers ?? 0)
   const lossOn = !!weightsSpec && values.useClassWeights === true
@@ -236,7 +231,7 @@ export function BlockBuilder({
             <Select
               size="xs"
               w={140}
-              label={pre?.label}
+              label={pre ? <LabelWithTip label={pre.label} tip={pre.spec.description} /> : undefined}
               allowDeselect={false}
               data={pre?.spec.choices ?? []}
               value={pre && values[pre.spec.name] != null ? String(values[pre.spec.name]) : null}
@@ -289,28 +284,7 @@ export function BlockBuilder({
       case 'backbone':
         return (
           <Stack gap="xs">
-            <Group gap="md" align="flex-start">
-              <Select
-                size="xs"
-                w={260}
-                aria-label="Model"
-                allowDeselect={false}
-                searchable
-                data={modelOptions}
-                value={modelId}
-                onChange={(v) => v && changeModel(v)}
-              />
-              <Group gap={6} align="flex-start" wrap="nowrap" pt={6}>
-                {modelInfo && modelInfo.source !== undefined && modelInfo.source !== 'builtin' && (
-                  <Badge size="xs" variant="light" color={modelInfo.source === 'private' ? 'grape' : 'blue'}>
-                    {modelInfo.source === 'private' ? 'my model' : 'shared'}
-                  </Badge>
-                )}
-                <Text size="xs" c="dimmed" maw={420}>
-                  {modelInfo?.description}
-                </Text>
-              </Group>
-            </Group>
+            <ModelPicker backend={backend} modelId={modelId} onChange={changeModel} />
             {freezeSpec && (
               <Tooltip
                 label="A model trained from scratch has no pretrained weights to freeze"
@@ -319,8 +293,7 @@ export function BlockBuilder({
                 <div style={{ width: 'fit-content' }}>
                   <Switch
                     size="xs"
-                    label="Freeze backbone"
-                    description="Train only the head; the pretrained weights stay fixed."
+                    label={<LabelWithTip label="Freeze backbone" tip={freezeSpec.description} />}
                     disabled={!modelInfo?.pretrained}
                     checked={values.freezeBackbone === true}
                     onChange={(e) => onValue('freezeBackbone', e.currentTarget.checked)}
@@ -336,7 +309,7 @@ export function BlockBuilder({
             <NumberInput
               size="xs"
               w={110}
-              label="Hidden layers"
+              label={<LabelWithTip label="Hidden layers" tip={layersSpec?.description} />}
               min={layersSpec?.min ?? 0}
               max={layersSpec?.max ?? 4}
               allowDecimal={false}
@@ -348,7 +321,7 @@ export function BlockBuilder({
               <Select
                 size="xs"
                 w={110}
-                label="Width"
+                label={<LabelWithTip label="Width" tip={widthSpec.description} />}
                 allowDeselect={false}
                 data={widthSpec.choices ?? []}
                 value={String(values.headWidth ?? widthSpec.default)}
@@ -359,7 +332,7 @@ export function BlockBuilder({
               <NumberInput
                 size="xs"
                 w={110}
-                label="Dropout"
+                label={<LabelWithTip label="Dropout" tip={dropoutSpec.description} />}
                 min={dropoutSpec.min ?? 0}
                 max={dropoutSpec.max ?? 0.9}
                 step={dropoutSpec.step ?? 0.05}
@@ -470,9 +443,11 @@ export function BlockBuilder({
               <Group justify="space-between" wrap="nowrap" align="flex-start">
                 <div style={{ flex: 1 }}>
                   <Group gap={6} mb={4}>
-                    <Badge color={KIND_COLOR[kind]} size="sm">
-                      {kind}
-                    </Badge>
+                    <Tooltip label={KIND_HELP[kind]} multiline w={280} withArrow>
+                      <Badge color={KIND_COLOR[kind]} size="sm" style={{ cursor: 'help' }}>
+                        {kind}
+                      </Badge>
+                    </Tooltip>
                     <Text size="sm" fw={500}>
                       {title(kind)}
                     </Text>

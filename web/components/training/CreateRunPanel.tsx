@@ -14,15 +14,27 @@
  * created (see SnapshotBuilderPage), so the resulting items are real, browsable dataset items.
  */
 
-import { Alert, Badge, Button, Group, Paper, SegmentedControl, SimpleGrid, Skeleton, Text } from '@mantine/core'
+import {
+  Alert,
+  Badge,
+  Button,
+  Group,
+  Paper,
+  SegmentedControl,
+  SimpleGrid,
+  Skeleton,
+  Text,
+  Tooltip,
+} from '@mantine/core'
 import { WarningIcon } from '@phosphor-icons/react'
-import { groupParams, ParamField, SectionLabel } from '@public/components/ui'
+import { groupParams, InfoTip, LabelWithTip, ParamField, SectionLabel } from '@public/components/ui'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
 import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
 import { useEffect, useMemo, useState } from 'react'
 import { BlockBuilder } from './BlockBuilder'
 import { ConfigHeader, LaunchBar } from './ConfigHeader'
+import { MODEL_HELP, ModelPicker } from './ModelPicker'
 
 export interface RunPrefill {
   name: string
@@ -148,6 +160,11 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
   }
 
   const setValue = (n: string, v: unknown) => setValues((prev) => ({ ...prev, [n]: v }))
+  // Same rule as the Simple canvas: a model trained from scratch has no pretrained weights to freeze.
+  const changeModel = (id: string) => {
+    setModelId(id)
+    if (!backend?.models.find((m) => m.id === id)?.pretrained) setValue('freezeBackbone', false)
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -168,8 +185,27 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
             value={level}
             onChange={(v) => setLevel(v as Level)}
             data={[
-              { value: 'simple', label: 'Simple' },
-              { value: 'advanced', label: 'Advanced' },
+              {
+                value: 'simple',
+                label: (
+                  <Tooltip
+                    label="Pick a model and a couple of key settings. Everything else uses sensible defaults."
+                    multiline
+                    w={240}
+                    withArrow
+                  >
+                    <span style={{ display: 'block' }}>Simple</span>
+                  </Tooltip>
+                ),
+              },
+              {
+                value: 'advanced',
+                label: (
+                  <Tooltip label="Show every setting, for when you want full control." multiline w={240} withArrow>
+                    <span style={{ display: 'block' }}>Advanced</span>
+                  </Tooltip>
+                ),
+              },
             ]}
           />
         }
@@ -194,7 +230,7 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
                 spec.type === 'choice' && (spec.choices?.length ?? 0) <= 6 && spec.default != null ? (
                   <div key={spec.name}>
                     <Text size="xs" fw={500} mb={4}>
-                      {spec.label}
+                      <LabelWithTip label={spec.label} tip={spec.description} />
                     </Text>
                     <SegmentedControl
                       size="xs"
@@ -210,7 +246,7 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
                 ),
               )}
               <Text size="xs" c="dimmed" maw={360}>
-                Everything else uses sensible defaults. Open <b>Advanced</b> for all {params.length} hyperparameters.
+                Everything else uses sensible defaults. Open <b>Advanced</b> for all {params.length} settings.
               </Text>
             </Group>
           </Paper>
@@ -232,18 +268,45 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
               </Button>
             </Group>
           </Paper>
+          {backend && (
+            <Paper p="sm">
+              <Group gap={4} mb="xs">
+                <SectionLabel>Model</SectionLabel>
+                <InfoTip text={MODEL_HELP} />
+              </Group>
+              <ModelPicker backend={backend} modelId={modelId} onChange={changeModel} />
+            </Paper>
+          )}
           {groupParams(params).map(({ group, specs }) => (
             <Paper key={group} p="sm">
               <SectionLabel mb="xs">{group}</SectionLabel>
               <SimpleGrid cols={{ base: 2, md: 3 }} spacing="sm" style={{ alignItems: 'end' }}>
-                {specs.map((spec) => (
-                  <ParamField
-                    key={spec.name}
-                    spec={spec}
-                    value={values[spec.name]}
-                    onChange={(v) => setValue(spec.name, v)}
-                  />
-                ))}
+                {specs.map((spec) => {
+                  // A model trained from scratch has no pretrained weights to freeze.
+                  const cannotFreeze = spec.name === 'freezeBackbone' && !modelInfo?.pretrained
+                  const field = (
+                    <ParamField
+                      key={spec.name}
+                      spec={spec}
+                      value={values[spec.name]}
+                      onChange={(v) => setValue(spec.name, v)}
+                      disabled={cannotFreeze}
+                    />
+                  )
+                  return cannotFreeze ? (
+                    <Tooltip
+                      key={spec.name}
+                      label="A model trained from scratch has no pretrained weights to freeze"
+                      multiline
+                      w={240}
+                      withArrow
+                    >
+                      <div>{field}</div>
+                    </Tooltip>
+                  ) : (
+                    field
+                  )
+                })}
               </SimpleGrid>
             </Paper>
           ))}

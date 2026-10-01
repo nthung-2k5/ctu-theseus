@@ -1,5 +1,6 @@
 import { Alert, Badge, Button, Group, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
 import { LockIcon, RocketLaunchIcon } from '@phosphor-icons/react'
+import { LabelWithTip } from '@public/components/ui'
 import { MODALITY_META } from '@public/lib/modality'
 import { getTaskDescriptor, isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
@@ -54,7 +55,12 @@ export function ConfigHeader({
       <Group align="flex-end" gap="md">
         <TextInput
           size="xs"
-          label={nameLabel}
+          label={
+            <LabelWithTip
+              label={nameLabel}
+              tip="A name so you can recognise this later in your list of experiments. It does not affect how the model trains."
+            />
+          }
           placeholder={namePlaceholder}
           w={240}
           value={name}
@@ -63,7 +69,10 @@ export function ConfigHeader({
         />
         <div>
           <Text size="xs" fw={500} mb={4}>
-            Task
+            <LabelWithTip
+              label="Task"
+              tip="What the model is learning to do, for example telling pictures apart. It is set when the project is created and can't be changed here."
+            />
           </Text>
           <Tooltip label="Fixed by the project">
             <Badge size="lg" variant="outline" color="gray" leftSection={<LockIcon size={11} />}>
@@ -73,7 +82,12 @@ export function ConfigHeader({
         </div>
         <Select
           size="xs"
-          label="Snapshot"
+          label={
+            <LabelWithTip
+              label="Snapshot"
+              tip="A frozen copy of your dataset that the model learns from. Because it never changes, results stay comparable between experiments. Make a new snapshot after you change your data."
+            />
+          }
           w={210}
           allowDeselect={false}
           searchable
@@ -89,7 +103,12 @@ export function ConfigHeader({
         {backends.length > 1 && (
           <Select
             size="xs"
-            label="Trainer backend"
+            label={
+              <LabelWithTip
+                label="Trainer backend"
+                tip="The software that does the training. Different ones can offer different models and settings."
+              />
+            }
             w={170}
             allowDeselect={false}
             data={backends.map((b) => ({ value: b.id, label: b.label }))}
@@ -99,7 +118,11 @@ export function ConfigHeader({
         )}
         {extras}
         {isClassificationTask(project.task) && (
-          <Tooltip label="Manage classes">
+          <Tooltip
+            label="The categories the model learns to tell apart. You need at least 2. Click to manage them."
+            multiline
+            w={240}
+          >
             <Link to="/project/$projectId/classes" params={{ projectId: project.id }}>
               <Badge size="lg" color={classCount < 2 ? 'yellow' : 'teal'} style={{ cursor: 'pointer' }}>
                 {classCount} classes
