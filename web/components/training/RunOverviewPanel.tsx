@@ -8,24 +8,13 @@
 
 import { Badge, Group, Paper, SimpleGrid, Skeleton, Stack, Table, Text } from '@mantine/core'
 import { SectionLabel, StatusBadge } from '@public/components/ui'
-import { formatHyperparamValue, humanizeKey } from '@public/lib/format'
-import { useHyperparamLabels, useModelParamNames } from '@public/lib/models'
+import { formatHyperparamValue } from '@public/lib/format'
+import { useHyperparamLabel, useModelParamNames } from '@public/lib/models'
 import { useTrainingRunDetail } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
 import type { ProjectTask, TrainingRunSummary } from '@public/store/types'
 import type { ReactNode } from 'react'
 import { STATUS_COLORS } from './constants'
-
-const HYPERPARAM_LABELS: Record<string, string> = {
-  epochs: 'Epochs',
-  batchSize: 'Batch Size',
-  learningRate: 'Learning Rate',
-  earlyStopPatience: 'Early Stop Patience',
-  useClassWeights: 'Class Weighting',
-  // No longer a training option (augmentation is set when a snapshot is created), but runs started
-  // before that change still carry it in their hyperparameters.
-  augmentations: 'Augmentation (legacy)',
-}
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -75,7 +64,7 @@ export function RunOverviewPanel({
   // The server names the model a run used (a custom model's name even after it was archived, which the
   // picker would no longer list). The task label stands in for a run that named no model.
   const modelKeys = useModelParamNames(projectId)
-  const hyperparamLabels = useHyperparamLabels(projectId)
+  const labelOf = useHyperparamLabel(projectId)
   const descriptor = getTaskDescriptor(task)
   const modelLabel = data?.run.modelLabel ?? descriptor.label
 
@@ -123,10 +112,7 @@ export function RunOverviewPanel({
             </Text>
           ) : (
             <KeyValueTable
-              rows={configEntries.map(([key, value]) => [
-                hyperparamLabels.get(key) ?? HYPERPARAM_LABELS[key] ?? humanizeKey(key),
-                formatHyperparamValue(key, value),
-              ])}
+              rows={configEntries.map(([key, value]) => [labelOf(key), formatHyperparamValue(key, value)])}
             />
           )}
         </Stack>

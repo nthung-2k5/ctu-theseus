@@ -37,6 +37,26 @@ export function humanizeKey(key: string): string {
   return words.replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/** Labels for keys no current backend spec declares any more but that old runs still carry. */
+const LEGACY_HYPERPARAM_LABELS: Record<string, string> = {
+  epochs: 'Epochs',
+  batchSize: 'Batch Size',
+  learningRate: 'Learning Rate',
+  earlyStopPatience: 'Early Stop Patience',
+  useClassWeights: 'Class Weighting',
+  // No longer a training option (augmentation is set when a snapshot is created), but runs started
+  // before that change still carry it in their hyperparameters.
+  augmentations: 'Augmentation (legacy)',
+}
+
+/**
+ * The name to show for a hyperparameter key: the label the trainer backend's own spec gives it (so a run
+ * reads like the form it was started from), else a legacy label, else the key turned into words.
+ */
+export function hyperparamLabel(key: string, specLabels?: ReadonlyMap<string, string>): string {
+  return specLabels?.get(key) ?? LEGACY_HYPERPARAM_LABELS[key] ?? humanizeKey(key)
+}
+
 /**
  * Hyperparameters whose stored number means "off" rather than a quantity: the value the trainer backend declares
  * as `ParamSpec.disabledValue`. Kept here too because the run summaries must also format runs whose backend spec

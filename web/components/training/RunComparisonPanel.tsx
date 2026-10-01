@@ -9,7 +9,7 @@ import { LineChart } from '@mantine/charts'
 import { Badge, Group, MultiSelect, Paper, SegmentedControl, Select, Table, Text } from '@mantine/core'
 import { EmptyState, SectionLabel, StatusBadge } from '@public/components/ui'
 import { formatHyperparamValue } from '@public/lib/format'
-import { useModelParamNames } from '@public/lib/models'
+import { useHyperparamLabel, useModelParamNames } from '@public/lib/models'
 import { CHART_COLORS } from '@public/lib/palette'
 import { trainingRunDetailQueryOptions, useTrainingRunDetail } from '@public/lib/queries'
 import type { SplitType, TrainingRunSummary } from '@public/store/types'
@@ -22,12 +22,15 @@ function ComparisonRow({
   color,
   isCurrent,
   modelKeys,
+  labelOf,
 }: {
   run: TrainingRunSummary
   color: string
   isCurrent: boolean
   /** Hyperparameter keys that hold the model choice; shown as the model's name rather than as a knob. */
   modelKeys: ReadonlySet<string>
+  /** Display name for a hyperparameter key. */
+  labelOf: (key: string) => string
 }) {
   const { data } = useTrainingRunDetail(run.id, true)
   const hyperparameters = (data?.run.hyperparameters ?? null) as Record<string, unknown> | null
@@ -53,10 +56,10 @@ function ComparisonRow({
         <Text size="xs" c="dimmed" maw={320}>
           {hyperparameters
             ? [
-                ...(data?.run.modelLabel ? [`model: ${data.run.modelLabel}`] : []),
+                ...(data?.run.modelLabel ? [`Model: ${data.run.modelLabel}`] : []),
                 ...Object.entries(hyperparameters)
                   .filter(([key]) => !modelKeys.has(key))
-                  .map(([key, value]) => `${key}: ${formatHyperparamValue(key, value)}`),
+                  .map(([key, value]) => `${labelOf(key)}: ${formatHyperparamValue(key, value)}`),
               ].join(' · ')
             : '—'}
         </Text>
@@ -80,6 +83,7 @@ export function RunComparisonPanel({
   currentRunId?: string
 }) {
   const modelKeys = useModelParamNames(projectId)
+  const labelOf = useHyperparamLabel(projectId)
   const [metric, setMetric] = useState('loss')
   const [split, setSplit] = useState<SplitType>('validation')
   const selected = selectedIds.map((id) => runs.find((r) => r.id === id)).filter((r): r is TrainingRunSummary => !!r)
@@ -193,6 +197,7 @@ export function RunComparisonPanel({
                     color={colorFor(run.id)}
                     isCurrent={run.id === currentRunId}
                     modelKeys={modelKeys}
+                    labelOf={labelOf}
                   />
                 ))}
               </Table.Tbody>

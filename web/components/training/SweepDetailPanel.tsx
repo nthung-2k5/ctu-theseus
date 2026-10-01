@@ -14,7 +14,7 @@ import { ArrowLeftIcon, StopIcon, TrophyIcon } from '@phosphor-icons/react'
 import { EmptyState, QueryBoundary, StatusBadge } from '@public/components/ui'
 import { cancelSweep as cancelSweepRequest } from '@public/lib/api/generated/sweeps/sweeps'
 import { formatHyperparamValue } from '@public/lib/format'
-import { useModelParamNames } from '@public/lib/models'
+import { useHyperparamLabel, useModelParamNames } from '@public/lib/models'
 import { sweepDetailQueryOptions, useSweepDetail } from '@public/lib/queries'
 import type { SweepSearchSpace, SweepTrial } from '@public/store/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -65,6 +65,7 @@ export function SweepDetailPanel({
   // Only a numeric knob can drive a scatter x-axis; the model choice (whatever key the backend names it
   // under) is categorical.
   const modelKeys = useModelParamNames(projectId)
+  const labelOf = useHyperparamLabel(projectId)
   const numericKnobs = Object.keys(searchSpace).filter((key) => !modelKeys.has(key))
   const effectiveKnob = scatterKnob && numericKnobs.includes(scatterKnob) ? scatterKnob : (numericKnobs[0] ?? null)
 
@@ -130,13 +131,13 @@ export function SweepDetailPanel({
                 <div>
                   <Group justify="space-between" mb="xs">
                     <Text size="sm" fw={600}>
-                      Accuracy vs. {effectiveKnob}
+                      Accuracy vs. {effectiveKnob ? labelOf(effectiveKnob) : ''}
                     </Text>
                     {numericKnobs.length > 1 && (
                       <Select
                         size="xs"
                         w={180}
-                        data={numericKnobs}
+                        data={numericKnobs.map((knob) => ({ value: knob, label: labelOf(knob) }))}
                         value={effectiveKnob}
                         onChange={setScatterKnob}
                         allowDeselect={false}
@@ -148,6 +149,7 @@ export function SweepDetailPanel({
                       h={220}
                       data={scatterData}
                       dataKey={{ x: effectiveKnob, y: 'accuracy' }}
+                      xAxisLabel={labelOf(effectiveKnob)}
                       withLegend={false}
                     />
                   )}
@@ -193,7 +195,7 @@ export function SweepDetailPanel({
                             <Text size="xs" c="dimmed" maw={280}>
                               {hyperparameters
                                 ? Object.entries(hyperparameters)
-                                    .map(([key, value]) => `${key}: ${formatHyperparamValue(key, value)}`)
+                                    .map(([key, value]) => `${labelOf(key)}: ${formatHyperparamValue(key, value)}`)
                                     .join(' · ')
                                 : '—'}
                             </Text>

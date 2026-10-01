@@ -1,22 +1,24 @@
 import { useMemo } from 'react'
 import { useListProjectTrainingBackends } from './api/generated/training/training'
+import { hyperparamLabel } from './format'
 
 /** Until the backends load, assume the two names in use (Ludwig's, and the generic default). */
 const FALLBACK_PARAM_NAMES = ['encoderId', 'modelId']
 
 /**
- * Display label for each hyperparameter name, taken from the trainer backends' own parameter specs, so a
- * run's configuration reads the same as the form it was started from ("Freeze Backbone", not `freezeBackbone`).
- * Empty until the backends load, and has no entry for a key no current spec declares (an old run's).
+ * Turns a hyperparameter key into its display name wherever a run's configuration is listed (the Config tab, a
+ * sweep's trials, the run comparison), so all of them read like the form the run was started from
+ * ("Freeze Backbone", not `freezeBackbone`). Labels come from the trainer backends' own parameter specs, with
+ * `hyperparamLabel`'s fallbacks for what they do not name (an old run's keys, or before the backends load).
  */
-export function useHyperparamLabels(projectId: string): ReadonlyMap<string, string> {
+export function useHyperparamLabel(projectId: string): (key: string) => string {
   const { data } = useListProjectTrainingBackends(projectId)
   return useMemo(() => {
-    const labels = new Map<string, string>()
+    const specLabels = new Map<string, string>()
     for (const backend of data?.backends ?? []) {
-      for (const param of backend.params) if (!labels.has(param.name)) labels.set(param.name, param.label)
+      for (const param of backend.params) if (!specLabels.has(param.name)) specLabels.set(param.name, param.label)
     }
-    return labels
+    return (key: string) => hyperparamLabel(key, specLabels)
   }, [data])
 }
 
