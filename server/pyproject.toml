@@ -53,11 +53,19 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.1.1", "pytest-asyncio>=1.0.0", "httpx", "ruff", "onnxruntime", "types-PyYAML", "scipy-stubs"]
+dev = [
+  "pytest>=9.1.1",
+  "pytest-asyncio>=1.0.0",
+  "httpx",
+  "ruff",
+  "onnxruntime",
+  "types-PyYAML",
+  "scipy-stubs",
+]
 
 [tool.pytest.ini_options]
 # Modules are imported as top-level (e.g. `from services.predict import ...`)
-# relative to ai_service/ — same as how main.py resolves them at runtime.
+# relative to server/ — same as how main.py resolves them at runtime.
 pythonpath = ["."]
 asyncio_mode = "auto"
 
@@ -80,4 +88,4 @@ extend-exclude = ["migrations/versions", "schema", "theseus/export/templates"]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-"theseus/export/readme.py" = ["E501"]  # README prose
+"theseus/export/readme.py" = ["E501"] # README prose

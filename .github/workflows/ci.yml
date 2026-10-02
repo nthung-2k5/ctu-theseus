@@ -43,7 +43,7 @@ jobs:
       TEST_DATABASE_URI: postgresql://theseus:theseus@127.0.0.1:5432/theseus_test
     defaults:
       run:
-        working-directory: ai_service
+        working-directory: server
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
