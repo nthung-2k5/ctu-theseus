@@ -6,7 +6,7 @@
  * build the bundle (not built / failed) or download it (ready).
  *
  * The formats are not hardcoded here: they come from GET /api/export-formats,
- * where each one is a Python class in ai_service/theseus/export/formats/.
+ * where each one is a Python class in server/theseus/export/formats/.
  */
 
 import { Badge, Button, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core'

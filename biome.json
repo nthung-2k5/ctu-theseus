@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!ai_service", "!schema/openapi.json", "!schema/task_registry.json"]
+    "includes": ["**", "!server", "!schema/openapi.json", "!schema/task_registry.json"]
   },
   "formatter": {
     "enabled": true,

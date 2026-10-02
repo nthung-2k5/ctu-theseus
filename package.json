@@ -16,11 +16,11 @@
     "watch": "bun run aspire:dev",
     "lint:fix": "bunx --bun @biomejs/biome check --write .",
     "test:web": "cd web && bun run build",
-    "test:ai": "cd ai_service && uv run pytest",
+    "test:ai": "cd server && uv run pytest",
     "ci": "bun run lint && bun run lint:ai && bun run test:ai && bun run schema:check && bun run test:web",
-    "lint:ai": "cd ai_service && uv run ruff check . && uv run ruff format --check .",
-    "schema": "cd ai_service && uv run python scripts/export_schema.py",
-    "schema:check": "cd ai_service && uv run python scripts/export_schema.py --check"
+    "lint:ai": "cd server && uv run ruff check . && uv run ruff format --check .",
+    "schema": "cd server && uv run python scripts/export_schema.py",
+    "schema:check": "cd server && uv run python scripts/export_schema.py --check"
   },
   "dependencies": {
     "vscode-jsonrpc": "8.2.1"

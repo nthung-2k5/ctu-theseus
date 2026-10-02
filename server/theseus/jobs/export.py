@@ -3,7 +3,7 @@
 Framework-neutral since trainer backends became a plugin system: the actual model conversion and
 golden-sample prediction go through the run's own `TrainerBackend`, not Ludwig directly.
 
-Replaces ai_service/tasks/export.py plus the gateway two-phase dance (converting -> event ->
+Replaces server/tasks/export.py plus the gateway two-phase dance (converting -> event ->
 assembling -> in-memory queue). One job now walks the whole status flow on a single row:
 
     pending -> converting -> assembling -> ready | failed
@@ -49,7 +49,9 @@ def _plain(v: Any) -> Any:
     return v.item() if hasattr(v, "item") else v
 
 
-def _shape_input_value(input_columns: list[str], sample_row: "pd.Series") -> tuple[str | None, Any]:
+def _shape_input_value(
+    input_columns: list[str], sample_row: "pd.Series"
+) -> tuple[str | None, Any]:
     """(inputColumn, inputValue) for expected.json.
 
     A single input column keeps the original scalar shape (an s3:// URI for file-backed
@@ -62,7 +64,9 @@ def _shape_input_value(input_columns: list[str], sample_row: "pd.Series") -> tup
     return None, {c: _plain(sample_row[c]) for c in input_columns}
 
 
-def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_key: str) -> dict[str, Any] | None:
+def _build_golden_sample(
+    backend: type[TrainerBackend], model_dir: str, dataset_key: str
+) -> dict[str, Any] | None:
     """Run one real test-split row through the trained model.
 
     Returns the input/output pair the devkit verify script checks its own (re-implemented)
@@ -72,7 +76,11 @@ def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_
     try:
         model = backend.load(model_dir)
         df = pd.read_parquet(storage.s3fs_path(C.BUCKET_DATASETS, dataset_key))
-        rows = df[df[C.SPLIT_COLUMN_NAME] == "test"] if C.SPLIT_COLUMN_NAME in df.columns else df
+        rows = (
+            df[df[C.SPLIT_COLUMN_NAME] == "test"]
+            if C.SPLIT_COLUMN_NAME in df.columns
+            else df
+        )
         if len(rows) == 0:
             rows = df
         sample = rows.iloc[[0]]
@@ -81,7 +89,9 @@ def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_
         # threshold=0.0: this is a reference fixture, not a filtered result. The verify script
         # wants the full distribution to compare.
         predicted = model.golden_prediction(predictions, threshold=0.0)
-        input_column, input_value = _shape_input_value(model.input_columns, sample.iloc[0])
+        input_column, input_value = _shape_input_value(
+            model.input_columns, sample.iloc[0]
+        )
         return {
             "schemaVersion": 1,
             "inputColumn": input_column,
@@ -96,11 +106,19 @@ def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_
         logger.exception("Bug while building the golden sample for export verification")
         raise
     except Exception:
-        logger.exception("Failed to build golden sample for export verification, skipping expected.json")
+        logger.exception(
+            "Failed to build golden sample for export verification, skipping expected.json"
+        )
         return None
 
 
-def _convert(run_id: str, backend: type[TrainerBackend], artifact_id: str, dataset_key: str, export_id: str) -> None:
+def _convert(
+    run_id: str,
+    backend: type[TrainerBackend],
+    artifact_id: str,
+    dataset_key: str,
+    export_id: str,
+) -> None:
     """Sync: download the trained model, export it, upload the artifact and the golden sample."""
     with _conversion_lock:
         model_dir = storage.find_model_dir(storage.download_model(run_id))
@@ -110,12 +128,16 @@ def _convert(run_id: str, backend: type[TrainerBackend], artifact_id: str, datas
         model = backend.load(model_dir)
         artifact = backend.artifacts[artifact_id]
         export_path = backend.convert(model, artifact_id, workdir)
-        storage.upload_file(C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename), export_path)
+        storage.upload_file(
+            C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename), export_path
+        )
 
         # Best effort, and idempotent (same S3 key), so re-running per artifact is fine.
         golden = _build_golden_sample(backend, model_dir, dataset_key)
         if golden is not None:
-            storage.upload_json(C.BUCKET_MODELS, storage.expected_sample_key(run_id), golden)
+            storage.upload_json(
+                C.BUCKET_MODELS, storage.expected_sample_key(run_id), golden
+            )
         storage.cleanup_temp("exports", export_id)
 
 
@@ -139,13 +161,22 @@ async def run_export(export_id: uuid.UUID) -> None:
     )  # fmt: skip
 
     if not await run_in_executor(
-        None, storage.file_exists, C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename)
+        None,
+        storage.file_exists,
+        C.BUCKET_MODELS,
+        storage.export_key(run_id, artifact.filename),
     ):
         dataset_key = storage.snapshot_parquet_key(str(run.dataset_version_id))
         # Loading the model re-reads a custom model's files from the path the run was trained with.
         await ensure_run_custom_model(run.id)
         await run_in_executor(
-            export_executor, _convert, run_id, backend, export_format.artifact, dataset_key, str(export_id)
+            export_executor,
+            _convert,
+            run_id,
+            backend,
+            export_format.artifact,
+            dataset_key,
+            str(export_id),
         )
 
     # Guarded: only a job still in `converting` may advance. Zero rows means it was recovered or
@@ -170,4 +201,6 @@ async def handle_failure(job_id: uuid.UUID, exc: BaseException) -> None:
     """An attempt failed: retry after a delay, or fail for good once attempts are exhausted."""
     error = f"{type(exc).__name__}: {exc}"
     logger.error("Export %s failed: %s", job_id, error)
-    await queue.release_or_fail(queue.EXPORT, job_id, error, final_values={"failed_message": error[:500]})
+    await queue.release_or_fail(
+        queue.EXPORT, job_id, error, final_values={"failed_message": error[:500]}
+    )

@@ -3,7 +3,7 @@
  *
  * Nothing here knows about a specific preprocessing op: the list of ops and every op's tunable
  * parameters come from GET /projects/:id/preprocessing, where each op is a Python class
- * (ai_service/theseus/preprocessing/ops/). A new op class shows up in this form after a backend
+ * (server/theseus/preprocessing/ops/). A new op class shows up in this form after a backend
  * restart with no frontend change.
  *
  * Unlike augmentation, an op here is deterministic and REPLACES its original for whichever splits

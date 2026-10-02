@@ -59,7 +59,7 @@ const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/Commun
 // const AI_WORKER_CUDA_IMAGE = 'nvidia/cuda:13.1.2-runtime-ubuntu24.04'
 //
 // const api = await builder
-//   .addDockerfileBuilder('api', './ai_service', async (ctx) => {
+//   .addDockerfileBuilder('api', './server', async (ctx) => {
 //     await ctx
 //       .builder()
 //       .from(AI_WORKER_CUDA_IMAGE)
@@ -96,11 +96,14 @@ const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/Commun
 
 // The whole backend: the REST API, the job queue and Ludwig training/export/inference run in this one
 // process (a hard requirement, see theseus.lifespan.assert_single_process). It now runs on the host through
-// Aspire's Python support (`uv sync` from ai_service/pyproject.toml, then `main.py`), so it uses the host's
+// Aspire's Python support (`uv sync` from server/pyproject.toml, then `main.py`), so it uses the host's
 // Python and GPU directly. Postgres and S3 stay in containers; Aspire hands the host process their
 // localhost addresses.
+
+const schemaGenerate = await builder.addPythonApp("schema-generate", "./server/scripts", "export_schema.py");
+
 const api = await builder
-  .addPythonApp('api', './ai_service', 'main.py')
+  .addPythonApp('api', './server', 'main.py')
   .withUv({ args: ['sync', '--frozen'] })
   .withHttpEndpoint({
     name: 'http',
@@ -139,6 +142,7 @@ const web = await builder
     isProxied: false,
   })
   .waitFor(api)
+  .waitForCompletion(schemaGenerate)
   .withExternalHttpEndpoints()
 
 await builder

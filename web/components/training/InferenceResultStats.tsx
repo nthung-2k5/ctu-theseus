@@ -4,7 +4,7 @@ import { SectionLabel } from '@public/components/ui'
 import { MONO_STACK } from '@public/theme'
 import { ConfidenceBars } from './ConfidenceBars'
 
-/** Mirrors the inference output schema (ai_service/theseus/services/predict.py). */
+/** Mirrors the inference output schema (server/theseus/services/predict.py). */
 export type InferenceOutput =
   | { kind: 'classification'; feature: string; classes: { label: string; confidence: number }[] }
   | { kind: 'regression'; feature: string; value: number }

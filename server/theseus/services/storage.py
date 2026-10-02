@@ -1,4 +1,4 @@
-"""S3 access and the canonical key layout, merged from server/lib/storage.ts and ai_service/services/storage.py.
+"""S3 access and the canonical key layout, merged from server/lib/storage.ts and server/services/storage.py.
 
 Every function here is synchronous (boto3). Call them from async code via an executor, never
 directly on the event loop.
@@ -152,7 +152,9 @@ def s3fs_path(bucket: str, key: str) -> str:
 # -- Object operations -----------------------------------------------------------------------
 
 
-def get_upload_url(bucket: str, key: str, expires_in: int = 3600, content_type: str | None = None) -> str:
+def get_upload_url(
+    bucket: str, key: str, expires_in: int = 3600, content_type: str | None = None
+) -> str:
     """A time-limited presigned PUT URL, so the BROWSER can upload a large file straight to object storage
     instead of streaming it through this process. Signed against `s3_public_endpoint` for the same reason as
     `get_download_url`. The client must send the same Content-Type it was signed with."""
@@ -160,7 +162,9 @@ def get_upload_url(bucket: str, key: str, expires_in: int = 3600, content_type: 
     if content_type:
         params["ContentType"] = content_type
     client = s3(get_settings().s3_public_endpoint)  # None falls back to s3_endpoint
-    return client.generate_presigned_url("put_object", Params=params, ExpiresIn=expires_in)
+    return client.generate_presigned_url(
+        "put_object", Params=params, ExpiresIn=expires_in
+    )
 
 
 def get_download_url(bucket: str, key: str, expires_in: int = 3600) -> str:
@@ -172,10 +176,14 @@ def get_download_url(bucket: str, key: str, expires_in: int = 3600) -> str:
     """
     s = get_settings()
     client = s3(s.s3_public_endpoint)  # None falls back to s3_endpoint
-    return client.generate_presigned_url("get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires_in)
+    return client.generate_presigned_url(
+        "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires_in
+    )
 
 
-def upload_bytes(bucket: str, key: str, data: bytes, content_type: str | None = None) -> None:
+def upload_bytes(
+    bucket: str, key: str, data: bytes, content_type: str | None = None
+) -> None:
     extra: dict[str, Any] = {"ContentType": content_type} if content_type else {}
     s3().put_object(Bucket=bucket, Key=key, Body=data, **extra)
 
@@ -207,7 +215,9 @@ def delete_files(bucket: str, keys: list[str]) -> None:
 
 def list_keys(bucket: str, prefix: str) -> list[str]:
     keys: list[str] = []
-    for page in s3().get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+    for page in (
+        s3().get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix)
+    ):
         keys.extend(obj["Key"] for obj in page.get("Contents", []))
     return keys
 
@@ -226,7 +236,9 @@ class PoolUpload(NamedTuple):
     is_duplicate: bool
 
 
-def upload_to_pool(project_id: str, data: bytes, ext: str, content_type: str | None = None) -> PoolUpload:
+def upload_to_pool(
+    project_id: str, data: bytes, ext: str, content_type: str | None = None
+) -> PoolUpload:
     """Upload to the project's content-addressed pool, skipping the write if that hash already exists.
 
     Every dataset upload path must go through this, or per-project dedup silently breaks.
@@ -254,7 +266,12 @@ def upload_file(bucket: str, key: str, local_path: str) -> None:
 
 def upload_json(bucket: str, key: str, data: Any) -> None:
     """Serialize and upload as a JSON object (no temp file)."""
-    upload_bytes(bucket, key, json.dumps(data, indent=2, default=str).encode("utf-8"), "application/json")
+    upload_bytes(
+        bucket,
+        key,
+        json.dumps(data, indent=2, default=str).encode("utf-8"),
+        "application/json",
+    )
 
 
 def download_prefix(bucket: str, prefix: str, local_dir: str) -> int:
@@ -312,7 +329,9 @@ def find_model_dir(root: str) -> str:
     highest-numbered run: Ludwig increments rather than overwrites, and os.walk order would
     otherwise decide which checkpoint gets served.
     """
-    candidates = [d for d, _, files in os.walk(root) if "model_hyperparameters.json" in files]
+    candidates = [
+        d for d, _, files in os.walk(root) if "model_hyperparameters.json" in files
+    ]
     return max(candidates, key=_run_ordinal) if candidates else root
 
 

@@ -5,8 +5,8 @@
 
 Run on the host, never inside the container (./schema is bind-mounted read-only there):
 
-    cd ai_service && uv run python scripts/export_schema.py            # write
-    cd ai_service && uv run python scripts/export_schema.py --check    # CI: fail if stale
+    cd server && uv run python scripts/export_schema.py            # write
+    cd server && uv run python scripts/export_schema.py --check    # CI: fail if stale
 
 Importing the app must not touch Postgres or S3; that is a design constraint of create_app().
 """
@@ -49,7 +49,8 @@ def main() -> int:
             print(f"wrote {path}")
     if stale:
         print(
-            f"Stale generated files: {', '.join(stale)}. Run: uv run python scripts/export_schema.py", file=sys.stderr
+            f"Stale generated files: {', '.join(stale)}. Run: uv run python scripts/export_schema.py",
+            file=sys.stderr,
         )
         return 1
     return 0

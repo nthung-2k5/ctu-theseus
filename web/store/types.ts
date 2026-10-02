@@ -51,7 +51,7 @@ export type SweepStrategyValue = 'grid' | 'random'
 export type SweepStatusValue = 'running' | 'completed' | 'canceled'
 
 /* ── Evaluation ── */
-/* Mirrors ai_service/services/evaluate.py's report.json shape (ingested */
+/* Mirrors server/services/evaluate.py's report.json shape (ingested */
 /* verbatim into runEvaluations.report — see server/lib/microservice.ts) */
 /* and the runEvaluations row GET /runs/:runId/evaluation returns.       */
 

@@ -1,4 +1,4 @@
-# ai_service
+# server
 
 The CTU Theseus backend: a single FastAPI service that serves the REST API, owns the Postgres
 database, runs the durable job queue, and runs [Ludwig](https://ludwig.ai) for AutoML
@@ -10,12 +10,12 @@ events, auth) and the S3 key layout. This file covers just this package.
 
 ## Running
 
-Managed by the Aspire AppHost (`../apphost.mts`, `addDockerfileBuilder('api', './ai_service', ...)`).
+Managed by the Aspire AppHost (`../apphost.mts`, `addDockerfileBuilder('api', './server', ...)`).
 Normally you don't run this directly: `aspire run` from the repo root starts it alongside
 Postgres and RustFS. To run it standalone (needs Postgres 18 and an S3-compatible store):
 
 ```bash
-cd ai_service
+cd server
 uv sync
 uv run python main.py      # applies Alembic migrations, then serves on $PORT (default 8000)
 ```

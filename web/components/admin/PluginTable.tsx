@@ -4,7 +4,7 @@
  * built-in models tab of Admin > Models.
  *
  * A switch only stops NEW use. Existing runs, exports and projects keep working (see
- * ai_service/theseus/services/plugin_settings.py). Precedence: a task's own setting beats the "all tasks"
+ * server/theseus/services/plugin_settings.py). Precedence: a task's own setting beats the "all tasks"
  * one, so something can be off everywhere and on for a single task.
  */
 
