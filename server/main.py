@@ -16,6 +16,7 @@ from pathlib import Path
 import uvicorn
 from alembic import command
 from alembic.config import Config
+
 from theseus.settings import get_settings
 
 HERE = Path(__file__).resolve().parent
@@ -28,9 +29,7 @@ def run_migrations() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s"
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
     settings = get_settings()
     if not os.environ.get("SKIP_MIGRATIONS"):
         run_migrations()
