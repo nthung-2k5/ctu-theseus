@@ -4,7 +4,7 @@
     "language": "typescript/nodejs"
   },
   "sdk": {
-    "version": "13.5.4"
+    "version": "13.6.0"
   },
   "channel": "stable",
   "profiles": {
@@ -17,10 +17,10 @@
     }
   },
   "packages": {
-    "Aspire.Hosting.PostgreSQL": "13.5.4",
-    "CommunityToolkit.Aspire.Hosting.RustFs": "13.5.0",
-    "Aspire.Hosting.Python": "13.5.4",
-    "Aspire.Hosting.JavaScript": "13.5.4",
-    "Aspire.Hosting.Yarp": "13.5.4"
+    "Aspire.Hosting.PostgreSQL": "13.6.0",
+    "CommunityToolkit.Aspire.Hosting.RustFs": "13.6.0",
+    "Aspire.Hosting.Python": "13.6.0",
+    "Aspire.Hosting.JavaScript": "13.6.0",
+    "Aspire.Hosting.Yarp": "13.6.0"
   }
 }
