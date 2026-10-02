@@ -20,7 +20,7 @@ from theseus.services import custom_models
 
 async def ensure_run_custom_model(run_id: uuid.UUID | str) -> None:
     try:
-        rid = run_id if isinstance(run_id, uuid.UUID) else uuid.UUID(str(run_id))
+        rid = run_id if isinstance(run_id, uuid.UUID) else uuid.UUID(run_id)
     except ValueError:
         # Not a run id, so it cannot have trained on a custom model. (Real run ids are always UUIDs, and
         # `resolve_backend` has already rejected an unknown one before the model cache gets here; this also

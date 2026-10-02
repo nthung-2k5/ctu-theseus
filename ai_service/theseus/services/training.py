@@ -134,9 +134,13 @@ async def queue_training(
         return await _record_failure(422, f"Invalid hyperparameter '{where}': {first['msg']}")
     custom_row = custom_ref = None
     if model_catalog.is_custom_id(sel.model_id):
+        assert sel.model_id is not None
+        
         # The project's owner is who trains: their private models and the global ones are visible to them.
         project = await session.get(Project, project_id)
         try:
+            assert project is not None
+
             custom_row, custom_ref = await model_catalog.resolve(
                 session, project.user_id, get_task_descriptor(task), backend, sel.model_id
             )

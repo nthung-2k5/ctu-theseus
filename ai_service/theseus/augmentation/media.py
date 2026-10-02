@@ -77,14 +77,14 @@ def decode_audio(data: bytes, ext: str) -> AudioClip:
             else:
                 arr = arr.astype(np.float32)
             arr = arr[None, :] if arr.ndim == 1 else arr.T
-            return AudioClip(np.ascontiguousarray(arr), int(rate))
+            return AudioClip(np.ascontiguousarray(arr), rate)
         except Exception:
             pass  # e.g. an ADPCM or float24 WAV scipy rejects: let torchaudio have a go
 
     import torchaudio
 
     waveform, rate = torchaudio.load(io.BytesIO(data))
-    return AudioClip(waveform.numpy().astype(np.float32), int(rate))
+    return AudioClip(waveform.numpy().astype(np.float32), rate)
 
 
 def encode_audio(clip: AudioClip) -> Encoded:

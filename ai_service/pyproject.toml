@@ -53,7 +53,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.1.1", "pytest-asyncio>=1.0.0", "httpx", "ruff", "onnxruntime"]
+dev = ["pytest>=9.1.1", "pytest-asyncio>=1.0.0", "httpx", "ruff", "onnxruntime", "types-PyYAML", "scipy-stubs"]
 
 [tool.pytest.ini_options]
 # Modules are imported as top-level (e.g. `from services.predict import ...`)

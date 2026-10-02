@@ -8,7 +8,7 @@ import asyncio
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -55,7 +55,7 @@ def assert_single_process(argv: list[str] | None = None) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     assert_single_process()
     get_settings()  # fail fast on missing production config
     init_telemetry(app)

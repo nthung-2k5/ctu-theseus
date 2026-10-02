@@ -30,7 +30,7 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _http(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         headers = getattr(exc, "headers", None)
-        return JSONResponse(envelope(exc.status_code, str(exc.detail)), exc.status_code, headers=headers)
+        return JSONResponse(envelope(exc.status_code, exc.detail), exc.status_code, headers=headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:

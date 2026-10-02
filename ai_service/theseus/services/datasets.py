@@ -321,7 +321,7 @@ async def create_items_bulk(
                 DatasetItem.source_item_id.is_(None),  # never dedup onto a derived item
             )
         )
-        known.update({r.content_hash: r for r in rows.scalars()})
+        known.update({r.content_hash: r for r in rows.scalars() if r.content_hash is not None})
 
     result: list[DatasetItem] = []
     fresh: list[tuple[ItemIn, DatasetItem]] = []

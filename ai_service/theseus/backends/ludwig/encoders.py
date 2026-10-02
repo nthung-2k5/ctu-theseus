@@ -117,11 +117,11 @@ class HFVisionEncoder(ImageEncoder):
         try:
             with torch.no_grad():
                 blank = torch.zeros(1, self._channels, self._height, self._width)
-                return int(_pool(self.model(pixel_values=blank)).shape[-1])
+                return _pool(self.model(pixel_values=blank)).shape[-1]
         finally:
             self.model.train(was_training)
 
-    def forward(self, inputs: torch.Tensor) -> EncoderOutputDict:
+    def forward(self, inputs: torch.Tensor, training=None, mask=None) -> EncoderOutputDict:
         inputs = inputs.float()
         if inputs.shape[-2:] != (self._height, self._width):
             # Whatever size the pipeline produced, give the backbone the size it was built for.
