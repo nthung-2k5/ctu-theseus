@@ -222,3 +222,6 @@ dist/
 
 # Orval output (regenerate with `bun run generate` in web/; source is schema/openapi.json)
 /web/lib/api/generated/
+
+# Thesis / capstone documentation (local only)
+docs/
