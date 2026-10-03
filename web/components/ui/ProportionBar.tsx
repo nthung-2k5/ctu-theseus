@@ -20,7 +20,8 @@ export function ProportionBar({ segments, height = 12 }: { segments: ProportionS
         height,
         borderRadius: height / 2,
         overflow: 'hidden',
-        background: 'var(--mantine-color-dark-6)',
+        gap: 2,
+        background: 'var(--mantine-color-default-hover)',
       }}
     >
       {total > 0 &&

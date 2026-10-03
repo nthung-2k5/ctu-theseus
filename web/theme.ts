@@ -1,4 +1,11 @@
-import { createTheme, type MantineColorsTuple, type MantineThemeOverride, rem } from '@mantine/core'
+import {
+  type CSSVariablesResolver,
+  createTheme,
+  DEFAULT_THEME,
+  type MantineColorsTuple,
+  type MantineThemeOverride,
+  rem,
+} from '@mantine/core'
 
 /**
  * Custom Mantine theme (dark-first, dense, desktop-first).
@@ -84,5 +91,27 @@ export const theme: MantineThemeOverride = createTheme({
     SegmentedControl: { defaultProps: { size: 'xs' } },
     Tooltip: { defaultProps: { withArrow: true, openDelay: 250 } },
     Code: { styles: { root: { fontFamily: MONO_STACK } } },
+  },
+})
+
+/**
+ * WCAG AA fixes for Mantine's light scheme. Its defaults miss 4.5:1 on small text: `dimmed` is
+ * gray-6 (3.2:1 on the page background) and a light-variant badge's text is the plain shade 9
+ * (2.7-4.5:1 on its tint), and `error` is red-6 (3.1:1). Dark scheme defaults already pass, so only light is overridden.
+ */
+const LIGHT_VARIANT_COLORS = [...Object.keys(DEFAULT_THEME.colors), 'primary', 'secondary']
+
+export const cssVariablesResolver: CSSVariablesResolver = () => ({
+  variables: {},
+  dark: {},
+  light: {
+    '--mantine-color-dimmed': '#5c636a',
+    '--mantine-color-error': '#c92a2a',
+    ...Object.fromEntries(
+      LIGHT_VARIANT_COLORS.map((name) => [
+        `--mantine-color-${name}-light-color`,
+        `color-mix(in srgb, var(--mantine-color-${name}-9), black 30%)`,
+      ]),
+    ),
   },
 })

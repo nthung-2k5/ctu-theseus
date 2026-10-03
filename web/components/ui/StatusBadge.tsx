@@ -15,8 +15,14 @@ export function StatusBadge({
   colorMap: Record<string, string>
   fallbackColor?: string
 } & Omit<BadgeProps, 'color' | 'children'>) {
+  const color = colorMap[value] ?? fallbackColor
+  // A raw hex colour (the chart palette) is used as the light variant's text colour as-is, which
+  // is too pale on its tint in the light scheme. Darken it there; dark keeps the bright colour.
+  const style = color.startsWith('#')
+    ? ({ '--badge-color': `light-dark(color-mix(in srgb, ${color}, black 50%), ${color})` } as React.CSSProperties)
+    : undefined
   return (
-    <Badge variant="light" color={colorMap[value] ?? fallbackColor} tt="capitalize" {...badgeProps}>
+    <Badge variant="light" color={color} tt="capitalize" style={style} {...badgeProps}>
       {value.replace(/_/g, ' ')}
     </Badge>
   )

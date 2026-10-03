@@ -99,6 +99,16 @@ body {
     border-color: var(--mantine-color-cyan-5);
   }
 
+  /* The active nav row's tint is ~1.1-1.2:1 against the sidebar, so a solid accent bar
+     (>=3:1 in both schemes) carries the "you are here" state; dark also gets a stronger tint. */
+  .mantine-NavLink-root[data-active] {
+    box-shadow: inset 3px 0 0 var(--mantine-color-primary-filled);
+  }
+
+  :root[data-mantine-color-scheme="dark"] .mantine-NavLink-root[data-active] {
+    background-color: color-mix(in srgb, var(--mantine-color-primary-5) 28%, var(--mantine-color-dark-7));
+  }
+
   .spin {
     animation: spin 1s linear infinite;
   }

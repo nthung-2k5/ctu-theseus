@@ -15,11 +15,15 @@ export const SERIES_COLORS = {
 /** Dash pattern for validation series (recharts `strokeDasharray`). */
 export const VALIDATION_DASH = '5 4'
 
-/** Dataset partition colours. */
+/**
+ * Dataset partition colours. Three distinct hues (blue / orange / violet; train and validation
+ * used to be two near-identical blues) at roughly equal lightness, each >=3:1 against both the
+ * light and dark bar surfaces. Neighbouring segments are separated by a gap, not by contrast.
+ */
 export const PARTITION_COLORS = {
-  train: '#4a89d1',
-  validation: '#00afef',
-  test: '#f59e0b',
+  train: '#2f6fd0',
+  validation: '#c86a04',
+  test: '#8b5cf6',
 } as const
 
 /** Accent for augmented items/charts. */

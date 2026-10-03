@@ -67,6 +67,12 @@ interface ProjectNavItem {
   count?: (project: ProjectDetail) => number
 }
 
+/** Filled badges carry light text, so use a shade dark enough for 4.5:1 (the light variant keeps the plain color). */
+function filledBadgeColor(color: string | undefined) {
+  if (!color) return 'gray.7'
+  return color === 'primary' ? color : `${color}.${color === 'teal' ? 9 : 8}`
+}
+
 const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
   { label: 'Overview', icon: DatabaseIcon, to: '/project/$projectId', exact: true },
   { label: 'Upload', icon: UploadSimpleIcon, to: '/project/$projectId/upload', color: 'primary' },
@@ -308,7 +314,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                       leftSection={<item.icon size={18} />}
                       rightSection={
                         count !== undefined ? (
-                          <Badge size="xs" variant={isActive ? 'filled' : 'light'} color={item.color ?? 'gray'}>
+                          <Badge
+                            size="xs"
+                            variant={isActive ? 'filled' : 'light'}
+                            color={isActive ? filledBadgeColor(item.color) : (item.color ?? 'gray')}
+                          >
                             {count}
                           </Badge>
                         ) : null

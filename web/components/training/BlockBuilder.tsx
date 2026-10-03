@@ -410,8 +410,8 @@ export function BlockBuilder({
                 padding: '5px 8px',
                 borderRadius: 4,
                 fontSize: 12,
-                background: p.active ? 'var(--mantine-color-dark-5)' : 'var(--mantine-color-dark-6)',
-                border: `1px solid ${p.active && p.swap ? `var(--mantine-color-${KIND_COLOR[p.kind]}-6)` : 'var(--mantine-color-dark-4)'}`,
+                background: p.active ? 'var(--mantine-color-default-hover)' : 'var(--mantine-color-default)',
+                border: `1px solid ${p.active && p.swap ? `var(--mantine-color-${KIND_COLOR[p.kind]}-6)` : 'var(--mantine-color-default-border)'}`,
               }}
             >
               {KIND_LABEL[p.kind]} · {p.label}
@@ -425,7 +425,7 @@ export function BlockBuilder({
                   borderRadius: 4,
                   fontSize: 12,
                   opacity: 0.45,
-                  border: '1px dashed var(--mantine-color-dark-4)',
+                  border: '1px dashed var(--mantine-color-default-border)',
                 }}
               >
                 Augment · from snapshot
