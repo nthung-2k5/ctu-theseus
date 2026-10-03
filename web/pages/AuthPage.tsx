@@ -92,7 +92,7 @@ export function AuthPage() {
         c="dimmed"
         style={{ position: 'absolute', top: 20, left: 24, zIndex: 2, display: 'flex', gap: 6, alignItems: 'center' }}
       >
-        <ArrowLeftIcon size={14} /> CTU Theseus
+        <ArrowLeftIcon size={14} /> CTU OmniTrain
       </Anchor>
       <Paper
         p="xl"

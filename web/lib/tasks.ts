@@ -72,7 +72,7 @@ export function isClassificationTask(task: ProjectTask | undefined): boolean {
 }
 
 /**
- * Tasks Theseus can represent at all (has an annotation/columns story). Whether one is trainable
+ * Tasks OmniTrain can represent at all (has an annotation/columns story). Whether one is trainable
  * *right now* additionally depends on which trainer backend plugins are installed and available —
  * see `useListTrainingBackends` for that runtime check.
  */

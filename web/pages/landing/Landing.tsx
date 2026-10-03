@@ -111,7 +111,7 @@ export function Landing() {
     <div className="ot-landing" ref={root} tabIndex={-1}>
       <header className="ot-nav">
         <div className="ot-logo">
-          <span className="ot-logo-mark" /> CTU Theseus
+          <span className="ot-logo-mark" /> CTU OmniTrain
         </div>
         <nav className="ot-nav-links" aria-label="Sections">
           <a href="#how">How it works</a>
@@ -280,7 +280,7 @@ export function Landing() {
         </Reveal>
       </section>
 
-      <footer className="ot-footer">CTU Theseus · train, evaluate and export models</footer>
+      <footer className="ot-footer">CTU OmniTrain · train, evaluate and export models</footer>
     </div>
   )
 }

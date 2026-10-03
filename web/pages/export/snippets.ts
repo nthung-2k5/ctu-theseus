@@ -23,7 +23,7 @@ export function predictSnippets(runId: string, input: InferenceInputSpec, origin
   }
 
   const curl = `curl -X POST "${url}" \\
-  -H "Authorization: Bearer $THESEUS_API_KEY" \\
+  -H "Authorization: Bearer $OMNITRAIN_API_KEY" \\
 ${curlBody}`
 
   const python = `import os
@@ -31,7 +31,7 @@ import requests
 
 response = requests.post(
     "${url}",
-    headers={"Authorization": f"Bearer {os.environ['THESEUS_API_KEY']}"},
+    headers={"Authorization": f"Bearer {os.environ['OMNITRAIN_API_KEY']}"},
 ${pyBody}
 )
 response.raise_for_status()

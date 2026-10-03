@@ -213,11 +213,11 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <ListIcon size={18} />
             </ActionIcon>
-            <UnstyledButton onClick={() => navigate({ to: '/projects' })} aria-label="CTU Theseus home">
+            <UnstyledButton onClick={() => navigate({ to: '/projects' })} aria-label="CTU OmniTrain home">
               <Group gap={8} wrap="nowrap">
                 <BrandMark />
                 <Text fw={600} size="md" style={{ letterSpacing: 0.3 }}>
-                  CTU Theseus
+                  CTU OmniTrain
                 </Text>
               </Group>
             </UnstyledButton>
@@ -338,7 +338,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <MantineAppShell.Section>
           <Box px="xs" py={4}>
             <Text size="xs" c="dimmed">
-              CTU Theseus v1.5
+              CTU OmniTrain v1.5
             </Text>
           </Box>
         </MantineAppShell.Section>
