@@ -241,7 +241,7 @@ export function ImportedModelForm({
 
           <MultiSelect
             label="Available for tasks"
-            description="Users can pick this model in experiments for these tasks only."
+            description="Users can pick this model in training runs for these tasks only."
             data={(kind?.tasks ?? []).map((t) => ({ value: t, label: taskLabel(t) }))}
             disabled={!kind}
             {...form.getInputProps('tasks')}

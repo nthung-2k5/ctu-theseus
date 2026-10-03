@@ -1,6 +1,6 @@
 /**
  * A small "i" icon that explains a setting in plain words on hover, keyboard focus or touch. Used on the form
- * options of New experiment so a setting's name is never the only thing a non-technical user has to go on.
+ * options of New training run so a setting's name is never the only thing a non-technical user has to go on.
  */
 
 import { Tooltip } from '@mantine/core'

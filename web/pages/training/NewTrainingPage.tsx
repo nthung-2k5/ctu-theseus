@@ -13,9 +13,9 @@ import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-q
 import { getRouteApi } from '@tanstack/react-router'
 import { useMemo } from 'react'
 
-const routeApi = getRouteApi('/_app/project/$projectId/experiments/new')
+const routeApi = getRouteApi('/_app/project/$projectId/training/new')
 
-export function NewExperimentPage() {
+export function NewTrainingPage() {
   const { projectId } = routeApi.useParams()
   const { mode = 'run', from } = routeApi.useSearch()
   const navigate = routeApi.useNavigate()
@@ -36,13 +36,13 @@ export function NewExperimentPage() {
     }
   }, [source])
 
-  const goBack = () => navigate({ to: '/project/$projectId/experiments', params: { projectId } })
+  const goBack = () => navigate({ to: '/project/$projectId/training', params: { projectId } })
 
   const startTraining = useMutation({
     ...getStartTrainingMutationOptions(),
     onSuccess: ({ run }) => {
       queryClient.invalidateQueries({ queryKey: getListRunsQueryKey(projectId) })
-      void navigate({ to: '/project/$projectId/experiments/$runId', params: { projectId, runId: run.id } })
+      void navigate({ to: '/project/$projectId/training/$runId', params: { projectId, runId: run.id } })
     },
     onError: (error) => {
       notifications.show({ title: 'Error', message: apiErrorMessage(error, 'Failed to start the run'), color: 'red' })
@@ -55,7 +55,7 @@ export function NewExperimentPage() {
       queryClient.invalidateQueries({ queryKey: projectSweepsQueryOptions(projectId).queryKey })
       notifications.show({ title: 'Sweep started', message: `Dispatching trials for "${sweep.name}"…`, color: 'blue' })
       void navigate({
-        to: '/project/$projectId/experiments/sweeps/$sweepId',
+        to: '/project/$projectId/training/sweeps/$sweepId',
         params: { projectId, sweepId: sweep.id },
       })
     },
@@ -67,7 +67,7 @@ export function NewExperimentPage() {
   return (
     <div className="flex flex-col gap-3 p-3">
       <PageHeader
-        title="New experiment"
+        title="New training run"
         description={project.name}
         actions={
           <>

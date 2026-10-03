@@ -3,7 +3,7 @@ import { useRunContext } from '@public/components/training/RunContext'
 import { useTrainingRuns } from '@public/lib/queries'
 import { getRouteApi } from '@tanstack/react-router'
 
-const routeApi = getRouteApi('/_app/project/$projectId/experiments/$runId/compare')
+const routeApi = getRouteApi('/_app/project/$projectId/training/$runId/compare')
 
 /** The current run is always in the comparison; `?with=` (comma-separated ids) adds the others. */
 export function RunComparePage() {

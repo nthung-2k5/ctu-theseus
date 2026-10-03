@@ -1,8 +1,7 @@
 import { Alert, Badge, Button, Group, Paper, Select, Text, TextInput, Tooltip } from '@mantine/core'
-import { LockIcon, RocketLaunchIcon } from '@phosphor-icons/react'
+import { RocketLaunchIcon } from '@phosphor-icons/react'
 import { LabelWithTip } from '@public/components/ui'
-import { MODALITY_META } from '@public/lib/modality'
-import { getTaskDescriptor, isClassificationTask } from '@public/lib/tasks'
+import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
@@ -13,9 +12,8 @@ export interface BackendOption {
 }
 
 /**
- * The strip at the top of "new run" and "new sweep": name, the task (fixed by the project), the
- * snapshot to train on, the trainer backend, and the class count when the task uses classes.
- * `extras` adds mode-specific fields after them; `right` sits at the far end (the Simple/Advanced switch).
+ * The strip at the top of "new run" and "new sweep": name, the snapshot to train on, the trainer backend, and the class count when the task uses classes.
+ * `extras` adds mode-specific fields after them; `right` sits at the far end.
  */
 export function ConfigHeader({
   project,
@@ -28,6 +26,8 @@ export function ConfigHeader({
   backends,
   backendId,
   onBackendChange,
+  hideSnapshot,
+  hideClassCount,
   extras,
   right,
 }: {
@@ -41,11 +41,13 @@ export function ConfigHeader({
   backends: BackendOption[]
   backendId: string | null
   onBackendChange: (id: string | null) => void
+  /** The snapshot is chosen elsewhere on the page (a list), so leave out its dropdown and summary line. */
+  hideSnapshot?: boolean
+  /** Leave out the class-count badge (the launch checks still require at least 2 classes). */
+  hideClassCount?: boolean
   extras?: ReactNode
   right?: ReactNode
 }) {
-  const descriptor = getTaskDescriptor(project.task)
-  const modality = MODALITY_META[descriptor.modality]
   const versions = (project.dataset?.versions ?? []).filter((v) => v.status === 'ready')
   const selected = versions.find((v) => v.id === versionId)
   const classCount = project.dataset?.classes?.length ?? 0
@@ -58,48 +60,38 @@ export function ConfigHeader({
           label={
             <LabelWithTip
               label={nameLabel}
-              tip="A name so you can recognise this later in your list of experiments. It does not affect how the model trains."
+              tip="A name so you can recognise this later in your list of training runs. It does not affect how the model trains."
             />
           }
           placeholder={namePlaceholder}
-          w={240}
+          w={hideSnapshot ? undefined : 240}
+          style={hideSnapshot ? { flex: 1 } : undefined}
           value={name}
           onChange={(e) => onNameChange(e.currentTarget.value)}
           error={name.trim() ? undefined : 'required'}
         />
-        <div>
-          <Text size="xs" fw={500} mb={4}>
-            <LabelWithTip
-              label="Task"
-              tip="What the model is learning to do, for example telling pictures apart. It is set when the project is created and can't be changed here."
-            />
-          </Text>
-          <Tooltip label="Fixed by the project">
-            <Badge size="lg" variant="outline" color="gray" leftSection={<LockIcon size={11} />}>
-              {modality.label} · {descriptor.label}
-            </Badge>
-          </Tooltip>
-        </div>
-        <Select
-          size="xs"
-          label={
-            <LabelWithTip
-              label="Snapshot"
-              tip="A frozen copy of your dataset that the model learns from. Because it never changes, results stay comparable between experiments. Make a new snapshot after you change your data."
-            />
-          }
-          w={210}
-          allowDeselect={false}
-          searchable
-          placeholder={versions.length === 0 ? 'No ready snapshots' : 'Select a snapshot'}
-          disabled={versions.length === 0}
-          data={versions.map((v) => ({
-            value: v.id,
-            label: `${v.versionTag}${v.preprocessedCount ? ` · ~${v.preprocessedCount.toLocaleString()} pre` : ''}${v.augmentedCount ? ` · +${v.augmentedCount.toLocaleString()} aug` : ''}`,
-          }))}
-          value={versionId}
-          onChange={onVersionChange}
-        />
+        {!hideSnapshot && (
+          <Select
+            size="xs"
+            label={
+              <LabelWithTip
+                label="Snapshot"
+                tip="A frozen copy of your dataset that the model learns from. Because it never changes, results stay comparable between runs. Make a new snapshot after you change your data."
+              />
+            }
+            w={210}
+            allowDeselect={false}
+            searchable
+            placeholder={versions.length === 0 ? 'No ready snapshots' : 'Select a snapshot'}
+            disabled={versions.length === 0}
+            data={versions.map((v) => ({
+              value: v.id,
+              label: `${v.versionTag}${v.preprocessedCount ? ` · ~${v.preprocessedCount.toLocaleString()} pre` : ''}${v.augmentedCount ? ` · +${v.augmentedCount.toLocaleString()} aug` : ''}`,
+            }))}
+            value={versionId}
+            onChange={onVersionChange}
+          />
+        )}
         {backends.length > 1 && (
           <Select
             size="xs"
@@ -117,7 +109,7 @@ export function ConfigHeader({
           />
         )}
         {extras}
-        {isClassificationTask(project.task) && (
+        {!hideClassCount && isClassificationTask(project.task) && (
           <Tooltip
             label="The categories the model learns to tell apart. You need at least 2. Click to manage them."
             multiline
@@ -132,12 +124,11 @@ export function ConfigHeader({
         )}
         {right && <div style={{ marginLeft: 'auto' }}>{right}</div>}
       </Group>
-      {selected && (
+      {!hideSnapshot && selected && (
         <Text size="xs" c="dimmed" mt="xs" className="tnum">
           Training on {selected.versionTag}: {(selected.itemCount ?? 0).toLocaleString()} items
           {selected.preprocessedCount ? ` (${selected.preprocessedCount.toLocaleString()} preprocessed)` : ''}
-          {selected.augmentedCount ? ` (${selected.augmentedCount.toLocaleString()} augmented)` : ''} · #
-          {selected.id.slice(0, 8)}
+          {selected.augmentedCount ? ` (${selected.augmentedCount.toLocaleString()} augmented)` : ''}
         </Text>
       )}
     </Paper>

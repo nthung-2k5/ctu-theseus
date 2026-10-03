@@ -1,14 +1,6 @@
 import { projectDetailQueryOptions } from '@public/lib/queries'
 import { ClassesPage } from '@public/pages/ClassesPage'
 import { DatasetPage } from '@public/pages/DatasetPage'
-import { ExperimentsPage } from '@public/pages/experiments/ExperimentsPage'
-import { NewExperimentPage } from '@public/pages/experiments/NewExperimentPage'
-import { RunComparePage } from '@public/pages/experiments/RunComparePage'
-import { RunConfigPage } from '@public/pages/experiments/RunConfigPage'
-import { RunEvaluationPage } from '@public/pages/experiments/RunEvaluationPage'
-import { RunLayout } from '@public/pages/experiments/RunLayout'
-import { RunLivePage } from '@public/pages/experiments/RunLivePage'
-import { SweepPage } from '@public/pages/experiments/SweepPage'
 import { ExportPage } from '@public/pages/export/ExportPage'
 import { ExportRunPage } from '@public/pages/export/ExportRunPage'
 import { ProjectPage } from '@public/pages/ProjectPage'
@@ -17,6 +9,14 @@ import { PlaygroundRunPage } from '@public/pages/playground/PlaygroundRunPage'
 import { SnapshotBuilderPage } from '@public/pages/SnapshotBuilderPage'
 import { SnapshotDetailPage } from '@public/pages/SnapshotDetailPage'
 import { SnapshotsPage } from '@public/pages/SnapshotsPage'
+import { NewTrainingPage } from '@public/pages/training/NewTrainingPage'
+import { RunComparePage } from '@public/pages/training/RunComparePage'
+import { RunConfigPage } from '@public/pages/training/RunConfigPage'
+import { RunEvaluationPage } from '@public/pages/training/RunEvaluationPage'
+import { RunLayout } from '@public/pages/training/RunLayout'
+import { RunLivePage } from '@public/pages/training/RunLivePage'
+import { SweepPage } from '@public/pages/training/SweepPage'
+import { TrainingPage } from '@public/pages/training/TrainingPage'
 import { UploadPage } from '@public/pages/UploadPage'
 import { createRoute, Outlet, redirect, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
@@ -117,40 +117,76 @@ export const snapshotDetailRoute = createRoute({
   component: SnapshotDetailPage,
 })
 
-/* ── Experiments (training runs and sweeps) ── */
+/* ── Training (runs and sweeps) ── */
 
-export const experimentsRoute = createRoute({
+export const trainingRoute = createRoute({
   getParentRoute: () => projectRoute,
-  path: '/experiments',
+  path: '/training',
   component: () => <Outlet />,
 })
 
-export const experimentsIndexRoute = createRoute({
-  getParentRoute: () => experimentsRoute,
+/**
+ * The runs list. Training used to be one page at this same path, switched by search params (`runId`, `view`,
+ * `sweepId`, `tab`); these now live at their own paths, so old links and bookmarks carrying them are
+ * redirected. With none of them this is the list itself.
+ */
+export const trainingIndexRoute = createRoute({
+  getParentRoute: () => trainingRoute,
   path: '/',
-  component: ExperimentsPage,
+  // Optional keys, so a plain link to the list needs no `search`.
+  validateSearch: z.object({
+    runId: z.string().optional().catch(undefined),
+    view: z.enum(['create', 'sweep']).optional().catch(undefined),
+    sweepId: z.string().optional().catch(undefined),
+    tab: z.string().optional().catch(undefined),
+  }).parse,
+  beforeLoad: ({ params, search }) => {
+    const { projectId } = params
+    if (search.sweepId)
+      throw redirect({
+        to: '/project/$projectId/training/sweeps/$sweepId',
+        params: { projectId, sweepId: search.sweepId },
+      })
+    if (search.view)
+      throw redirect({
+        to: '/project/$projectId/training/new',
+        params: { projectId },
+        search: { mode: search.view === 'sweep' ? 'sweep' : 'run' },
+      })
+    if (search.runId) {
+      const runId = search.runId
+      if (search.tab === 'evaluation')
+        throw redirect({ to: '/project/$projectId/training/$runId/evaluation', params: { projectId, runId } })
+      if (search.tab === 'inference')
+        throw redirect({ to: '/project/$projectId/playground/$runId', params: { projectId, runId } })
+      if (search.tab === 'export')
+        throw redirect({ to: '/project/$projectId/export/$runId', params: { projectId, runId } })
+      throw redirect({ to: '/project/$projectId/training/$runId', params: { projectId, runId } })
+    }
+  },
+  component: TrainingPage,
 })
 
-export const experimentNewRoute = createRoute({
-  getParentRoute: () => experimentsRoute,
+export const trainingNewRoute = createRoute({
+  getParentRoute: () => trainingRoute,
   path: '/new',
   // `from` pre-fills the form from an earlier run ("New run from this setup").
   validateSearch: z.object({
     mode: z.enum(['run', 'sweep']).optional().catch(undefined),
     from: z.string().optional().catch(undefined),
   }).parse,
-  component: NewExperimentPage,
+  component: NewTrainingPage,
 })
 
 export const sweepRoute = createRoute({
-  getParentRoute: () => experimentsRoute,
+  getParentRoute: () => trainingRoute,
   path: '/sweeps/$sweepId',
   component: SweepPage,
 })
 
 /** The run layout owns the SSE stream and tab strip; each tab is a child route. */
 export const runRoute = createRoute({
-  getParentRoute: () => experimentsRoute,
+  getParentRoute: () => trainingRoute,
   path: '/$runId',
   component: RunLayout,
 })
@@ -198,44 +234,4 @@ export const exportRunRoute = createRoute({
   getParentRoute: () => exportRoute,
   path: '/$runId',
   component: ExportRunPage,
-})
-
-/**
- * Old URL. Training used to be one page switched by search params (`runId`, `view`, `sweepId`, `tab`);
- * these now live at their own paths, so old links and bookmarks are redirected.
- */
-export const legacyTrainingRoute = createRoute({
-  getParentRoute: () => projectRoute,
-  path: '/training',
-  validateSearch: (search: Record<string, unknown>) => ({
-    runId: typeof search.runId === 'string' ? search.runId : undefined,
-    view: search.view === 'create' || search.view === 'sweep' ? search.view : undefined,
-    sweepId: typeof search.sweepId === 'string' ? search.sweepId : undefined,
-    tab: typeof search.tab === 'string' ? search.tab : undefined,
-  }),
-  beforeLoad: ({ params, search }) => {
-    const { projectId } = params
-    if (search.sweepId)
-      throw redirect({
-        to: '/project/$projectId/experiments/sweeps/$sweepId',
-        params: { projectId, sweepId: search.sweepId },
-      })
-    if (search.view)
-      throw redirect({
-        to: '/project/$projectId/experiments/new',
-        params: { projectId },
-        search: { mode: search.view === 'sweep' ? 'sweep' : 'run' },
-      })
-    if (search.runId) {
-      const runId = search.runId
-      if (search.tab === 'evaluation')
-        throw redirect({ to: '/project/$projectId/experiments/$runId/evaluation', params: { projectId, runId } })
-      if (search.tab === 'inference')
-        throw redirect({ to: '/project/$projectId/playground/$runId', params: { projectId, runId } })
-      if (search.tab === 'export')
-        throw redirect({ to: '/project/$projectId/export/$runId', params: { projectId, runId } })
-      throw redirect({ to: '/project/$projectId/experiments/$runId', params: { projectId, runId } })
-    }
-    throw redirect({ to: '/project/$projectId/experiments', params: { projectId } })
-  },
 })

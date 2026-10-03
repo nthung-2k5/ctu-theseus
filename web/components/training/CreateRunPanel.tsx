@@ -7,34 +7,25 @@
  * fixed Ludwig-shaped schema baked into the frontend. Adding a backend, or changing what one
  * offers, needs no change here.
  *
- * One config, two views: Simple picks the model and a couple of headline settings, Advanced shows
- * every hyperparameter. Both edit the same state, so switching never loses anything.
+ * One config, one form: the everyday settings (base model, input size, head, class weights, epochs,
+ * batch size) are always shown, and "Show advanced settings" reveals every other hyperparameter below
+ * them. Both edit the same state, so toggling never loses anything.
  *
  * Preprocessing and augmentation are not training options: both are chosen when a snapshot is
  * created (see SnapshotBuilderPage), so the resulting items are real, browsable dataset items.
  */
 
-import {
-  Alert,
-  Badge,
-  Button,
-  Group,
-  Paper,
-  SegmentedControl,
-  SimpleGrid,
-  Skeleton,
-  Text,
-  Tooltip,
-} from '@mantine/core'
-import { WarningIcon } from '@phosphor-icons/react'
+import { Alert, Button, Collapse, Group, Paper, SegmentedControl, SimpleGrid, Skeleton, Text } from '@mantine/core'
+import { CaretDownIcon, CaretUpIcon, WarningIcon } from '@phosphor-icons/react'
 import { groupParams, InfoTip, LabelWithTip, ParamField, SectionLabel } from '@public/components/ui'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
 import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
 import { useEffect, useMemo, useState } from 'react'
-import { BlockBuilder } from './BlockBuilder'
+import { BasicSettings, basicParamNames } from './BasicSettings'
 import { ConfigHeader, LaunchBar } from './ConfigHeader'
 import { MODEL_HELP, ModelPicker } from './ModelPicker'
+import { SNAPSHOT_HELP, SnapshotPicker } from './SnapshotPicker'
 
 export interface RunPrefill {
   name: string
@@ -56,16 +47,14 @@ interface CreateRunPanelProps {
   }) => void
 }
 
-type Level = 'simple' | 'advanced'
-
-/** The settings worth surfacing in Simple mode, when the backend has them. */
+/** The settings always shown next to the basics, when the backend has them. */
 const QUICK_PARAM_NAMES = ['epochs', 'batchSize']
 
 export function CreateRunPanel({ project, prefill, loading, onStartTraining }: CreateRunPanelProps) {
   const { data, isLoading } = useListProjectTrainingBackends(project.id)
   const backends = data?.backends ?? []
 
-  const [level, setLevel] = useState<Level>('simple')
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [name, setName] = useState('')
   const [versionId, setVersionId] = useState<string | null>(null)
 
@@ -124,19 +113,11 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
     return named.length > 0 ? named : params.filter((p) => p.type !== 'bool').slice(0, 2)
   }, [params])
 
-  const selectedVersion = readyVersions.find((v) => v.id === versionId)
-  const modelInfo = backend?.models.find((m) => m.id === modelId)
-  const hasHead = params.some((p) => p.name === 'headLayers')
-  const headLayers = Number(values.headLayers ?? 0)
-  const blockBadges = [
-    values.imageSize != null ? `pre · ${values.imageSize}px` : null,
-    values.maxSequenceLength != null ? `pre · ${values.maxSequenceLength} tokens` : null,
-    selectedVersion?.preprocessingConfig ? `preprocess · ${selectedVersion.preprocessingConfig.ops.length} ops` : null,
-    selectedVersion?.augmentationConfig ? `augment · ${selectedVersion.augmentationConfig.ops.length} ops` : null,
-    modelInfo ? `${modelInfo.label}${values.freezeBackbone === true ? ' · frozen' : ''}` : null,
-    hasHead ? (headLayers === 0 ? 'head · linear' : `head · ${headLayers}×${values.headWidth ?? 256}`) : null,
-    values.useClassWeights === true ? 'class weights' : null,
-  ].filter((b): b is string => !!b)
+  // Everything the basic form and the quick settings do not already show.
+  const advancedParams = useMemo(() => {
+    const shown = basicParamNames(params)
+    return params.filter((p) => !shown.has(p.name) && !quick.some((q) => q.name === p.name))
+  }, [params, quick])
 
   const launch = () => {
     if (!backend || !versionId) return
@@ -160,7 +141,7 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
   }
 
   const setValue = (n: string, v: unknown) => setValues((prev) => ({ ...prev, [n]: v }))
-  // Same rule as the Simple canvas: a model trained from scratch has no pretrained weights to freeze.
+  // A model trained from scratch has no pretrained weights to freeze.
   const changeModel = (id: string) => {
     setModelId(id)
     if (!backend?.models.find((m) => m.id === id)?.pretrained) setValue('freezeBackbone', false)
@@ -179,137 +160,92 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
         backends={backends}
         backendId={backendId}
         onBackendChange={setBackendId}
-        right={
-          <SegmentedControl
-            size="xs"
-            value={level}
-            onChange={(v) => setLevel(v as Level)}
-            data={[
-              {
-                value: 'simple',
-                label: (
-                  <Tooltip
-                    label="Pick a model and a couple of key settings. Everything else uses sensible defaults."
-                    multiline
-                    w={240}
-                    withArrow
-                  >
-                    <span style={{ display: 'block' }}>Simple</span>
-                  </Tooltip>
-                ),
-              },
-              {
-                value: 'advanced',
-                label: (
-                  <Tooltip label="Show every setting, for when you want full control." multiline w={240} withArrow>
-                    <span style={{ display: 'block' }}>Advanced</span>
-                  </Tooltip>
-                ),
-              },
-            ]}
-          />
-        }
+        hideSnapshot
+        hideClassCount
       />
 
-      {level === 'simple' ? (
-        <>
-          {backend && (
-            <BlockBuilder
-              backend={backend}
-              values={values}
-              onValue={setValue}
-              modelId={modelId}
-              onModelChange={setModelId}
-              version={selectedVersion}
-            />
-          )}
+      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
+        {backend && (
           <Paper p="sm">
-            <SectionLabel mb="xs">Quick settings</SectionLabel>
-            <Group gap="lg" align="flex-end">
-              {quick.map((spec) =>
-                spec.type === 'choice' && (spec.choices?.length ?? 0) <= 6 && spec.default != null ? (
-                  <div key={spec.name}>
-                    <Text size="xs" fw={500} mb={4}>
-                      <LabelWithTip label={spec.label} tip={spec.description} />
-                    </Text>
-                    <SegmentedControl
-                      size="xs"
-                      value={values[spec.name] != null ? String(values[spec.name]) : String(spec.default)}
-                      onChange={(v) => setValue(spec.name, v)}
-                      data={spec.choices ?? []}
-                    />
-                  </div>
-                ) : (
-                  <div key={spec.name} style={{ width: 130 }}>
-                    <ParamField spec={spec} value={values[spec.name]} onChange={(v) => setValue(spec.name, v)} />
-                  </div>
-                ),
-              )}
-              <Text size="xs" c="dimmed" maw={360}>
-                Everything else uses sensible defaults. Open <b>Advanced</b> for all {params.length} settings.
-              </Text>
+            <Group gap={4} mb="xs">
+              <SectionLabel>Base model</SectionLabel>
+              <InfoTip text={MODEL_HELP} />
             </Group>
+            <ModelPicker backend={backend} modelId={modelId} onChange={changeModel} />
           </Paper>
-        </>
-      ) : (
+        )}
+        <Paper p="sm">
+          <Group gap={4} mb="xs">
+            <SectionLabel>Dataset snapshot</SectionLabel>
+            <InfoTip text={SNAPSHOT_HELP} />
+          </Group>
+          <SnapshotPicker versions={readyVersions} versionId={versionId} onChange={setVersionId} />
+        </Paper>
+      </SimpleGrid>
+
+      {backend && <BasicSettings backend={backend} values={values} onValue={setValue} modelId={modelId} />}
+      {quick.length > 0 && (
+        <Paper p="sm">
+          <SectionLabel mb="xs">Training</SectionLabel>
+          <Group gap="lg" align="flex-end">
+            {quick.map((spec) =>
+              spec.type === 'choice' && (spec.choices?.length ?? 0) <= 6 && spec.default != null ? (
+                <div key={spec.name}>
+                  <Text size="xs" fw={500} mb={4}>
+                    <LabelWithTip label={spec.label} tip={spec.description} />
+                  </Text>
+                  <SegmentedControl
+                    size="xs"
+                    value={values[spec.name] != null ? String(values[spec.name]) : String(spec.default)}
+                    onChange={(v) => setValue(spec.name, v)}
+                    data={spec.choices ?? []}
+                  />
+                </div>
+              ) : (
+                <div key={spec.name} style={{ width: 130 }}>
+                  <ParamField spec={spec} value={values[spec.name]} onChange={(v) => setValue(spec.name, v)} />
+                </div>
+              ),
+            )}
+            <Text size="xs" c="dimmed" maw={360}>
+              Everything else uses sensible defaults.
+            </Text>
+          </Group>
+        </Paper>
+      )}
+
+      {advancedParams.length > 0 && (
         <>
-          <Paper p="sm">
-            <Group justify="space-between" wrap="nowrap">
-              <Group gap={6}>
-                <SectionLabel>Architecture</SectionLabel>
-                {blockBadges.map((b) => (
-                  <Badge key={b} variant="light" color="gray" tt="none">
-                    {b}
-                  </Badge>
-                ))}
-              </Group>
-              <Button size="compact-xs" variant="default" onClick={() => setLevel('simple')}>
-                Edit blocks in Simple
-              </Button>
-            </Group>
-          </Paper>
-          {backend && (
-            <Paper p="sm">
-              <Group gap={4} mb="xs">
-                <SectionLabel>Base model</SectionLabel>
-                <InfoTip text={MODEL_HELP} />
-              </Group>
-              <ModelPicker backend={backend} modelId={modelId} onChange={changeModel} />
-            </Paper>
-          )}
-          {groupParams(params).map(({ group, specs }) => (
-            <Paper key={group} p="sm">
-              <SectionLabel mb="xs">{group}</SectionLabel>
-              <SimpleGrid cols={{ base: 2, md: 3 }} spacing="sm" style={{ alignItems: 'end' }}>
-                {specs.map((spec) => {
-                  // A model trained from scratch has no pretrained weights to freeze.
-                  const cannotFreeze = spec.name === 'freezeBackbone' && !modelInfo?.pretrained
-                  const field = (
-                    <ParamField
-                      key={spec.name}
-                      spec={spec}
-                      value={values[spec.name]}
-                      onChange={(v) => setValue(spec.name, v)}
-                      disabled={cannotFreeze}
-                    />
-                  )
-                  return cannotFreeze ? (
-                    <Tooltip
-                      key={spec.name}
-                      label="A model trained from scratch has no pretrained weights to freeze"
-                      multiline
-                      w={240}
-                      withArrow
-                    >
-                      <div>{field}</div>
-                    </Tooltip>
-                  ) : (
-                    field
-                  )
-                })}
-              </SimpleGrid>
-            </Paper>
-          ))}
+          <div>
+            <Button
+              size="xs"
+              variant="default"
+              aria-expanded={showAdvanced}
+              rightSection={showAdvanced ? <CaretUpIcon size={12} /> : <CaretDownIcon size={12} />}
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              {showAdvanced ? 'Hide advanced settings' : `Show advanced settings (${advancedParams.length})`}
+            </Button>
+          </div>
+          <Collapse expanded={showAdvanced}>
+            <div className="flex flex-col gap-3">
+              {groupParams(advancedParams).map(({ group, specs }) => (
+                <Paper key={group} p="sm">
+                  <SectionLabel mb="xs">{group}</SectionLabel>
+                  <SimpleGrid cols={{ base: 2, md: 3 }} spacing="sm" style={{ alignItems: 'end' }}>
+                    {specs.map((spec) => (
+                      <ParamField
+                        key={spec.name}
+                        spec={spec}
+                        value={values[spec.name]}
+                        onChange={(v) => setValue(spec.name, v)}
+                      />
+                    ))}
+                  </SimpleGrid>
+                </Paper>
+              ))}
+            </div>
+          </Collapse>
         </>
       )}
 

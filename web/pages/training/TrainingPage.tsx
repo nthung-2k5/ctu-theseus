@@ -39,13 +39,13 @@ import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-q
 import { getRouteApi } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 
-const routeApi = getRouteApi('/_app/project/$projectId/experiments/')
+const routeApi = getRouteApi('/_app/project/$projectId/training/')
 
 const STATUSES = ['queued', 'running', 'succeeded', 'failed', 'canceled']
 
 const SWEEP_STATUS_COLORS: Record<string, string> = { running: 'cyan', completed: 'teal', canceled: 'gray' }
 
-export function ExperimentsPage() {
+export function TrainingPage() {
   const { projectId } = routeApi.useParams()
   const navigate = routeApi.useNavigate()
   const queryClient = useQueryClient()
@@ -119,13 +119,13 @@ export function ExperimentsPage() {
   }
 
   const openRun = (runId: string) =>
-    navigate({ to: '/project/$projectId/experiments/$runId', params: { projectId, runId } })
+    navigate({ to: '/project/$projectId/training/$runId', params: { projectId, runId } })
 
   const compare = () => {
     const [first, ...rest] = [...compareIds]
     if (!first) return
     void navigate({
-      to: '/project/$projectId/experiments/$runId/compare',
+      to: '/project/$projectId/training/$runId/compare',
       params: { projectId, runId: first },
       search: { with: rest.join(',') || undefined },
     })
@@ -217,7 +217,7 @@ export function ExperimentsPage() {
       render: (run) => (
         <Group gap={4} wrap="nowrap" onClick={(e) => e.stopPropagation()}>
           <LinkButton
-            to="/project/$projectId/experiments/$runId/evaluation"
+            to="/project/$projectId/training/$runId/evaluation"
             params={{ projectId, runId: run.id }}
             size="compact-xs"
             variant="light"
@@ -304,7 +304,7 @@ export function ExperimentsPage() {
   return (
     <div className="flex flex-col gap-3 p-3">
       <PageHeader
-        title="Experiments"
+        title="Training"
         description="Training runs and sweeps: monitor them live, then evaluate, test or export the result."
         actions={
           <>
@@ -319,7 +319,7 @@ export function ExperimentsPage() {
               </Button>
             )}
             <LinkButton
-              to="/project/$projectId/experiments/new"
+              to="/project/$projectId/training/new"
               params={{ projectId }}
               search={{ mode: 'sweep' }}
               variant="default"
@@ -329,7 +329,7 @@ export function ExperimentsPage() {
               New sweep
             </LinkButton>
             <LinkButton
-              to="/project/$projectId/experiments/new"
+              to="/project/$projectId/training/new"
               params={{ projectId }}
               search={{ mode: 'run' }}
               leftSection={<PlusIcon size={14} />}
@@ -383,7 +383,7 @@ export function ExperimentsPage() {
             action={
               hasReadySnapshot ? (
                 <LinkButton
-                  to="/project/$projectId/experiments/new"
+                  to="/project/$projectId/training/new"
                   params={{ projectId }}
                   search={{ mode: 'run' }}
                   leftSection={<PlusIcon size={14} />}
@@ -417,7 +417,7 @@ export function ExperimentsPage() {
             getRowKey={(sweep) => sweep.id}
             onRowClick={(sweep) =>
               navigate({
-                to: '/project/$projectId/experiments/sweeps/$sweepId',
+                to: '/project/$projectId/training/sweeps/$sweepId',
                 params: { projectId, sweepId: sweep.id },
               })
             }

@@ -12,13 +12,9 @@ import { guestRoute, landingRoute, loginRoute, registerRoute } from './guest.rou
 import {
   classesRoute,
   datasetRoute,
-  experimentNewRoute,
-  experimentsIndexRoute,
-  experimentsRoute,
   exportIndexRoute,
   exportRoute,
   exportRunRoute,
-  legacyTrainingRoute,
   playgroundIndexRoute,
   playgroundRoute,
   playgroundRunRoute,
@@ -34,6 +30,9 @@ import {
   snapshotsIndexRoute,
   snapshotsRoute,
   sweepRoute,
+  trainingIndexRoute,
+  trainingNewRoute,
+  trainingRoute,
   uploadRoute,
 } from './project.route'
 
@@ -45,15 +44,14 @@ const projectTree = projectRoute.addChildren([
   classesRoute,
   datasetRoute,
   snapshotsRoute.addChildren([snapshotsIndexRoute, snapshotNewRoute, snapshotDetailRoute]),
-  experimentsRoute.addChildren([
-    experimentsIndexRoute,
-    experimentNewRoute,
+  trainingRoute.addChildren([
+    trainingIndexRoute,
+    trainingNewRoute,
     sweepRoute,
     runRoute.addChildren([runLiveRoute, runEvaluationRoute, runCompareRoute, runConfigRoute]),
   ]),
   playgroundRoute.addChildren([playgroundIndexRoute, playgroundRunRoute]),
   exportRoute.addChildren([exportIndexRoute, exportRunRoute]),
-  legacyTrainingRoute,
 ])
 
 const adminTree = adminRoute.addChildren([

@@ -12,7 +12,7 @@ export function RunConfigPage() {
     <div className="flex flex-col gap-3">
       <Group justify="flex-end">
         <LinkButton
-          to="/project/$projectId/experiments/new"
+          to="/project/$projectId/training/new"
           params={{ projectId }}
           search={{ mode: 'run', from: run.id }}
           leftSection={<BrainIcon size={14} />}

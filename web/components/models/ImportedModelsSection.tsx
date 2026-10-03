@@ -142,7 +142,7 @@ export function ImportedModelsSection({ api }: { api: ModelsApi }) {
       children: (
         <Text size="sm">
           {m.runCount > 0
-            ? `${m.runCount} training run${m.runCount === 1 ? '' : 's'} used “${m.name}”, so it will be archived instead of deleted: hidden from new experiments, while those runs keep working.`
+            ? `${m.runCount} training run${m.runCount === 1 ? '' : 's'} used “${m.name}”, so it will be archived instead of deleted: hidden from new training runs, while those runs keep working.`
             : `Delete “${m.name}” and its files? This cannot be undone.`}
         </Text>
       ),

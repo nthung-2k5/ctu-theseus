@@ -35,7 +35,7 @@ type StepTarget =
   | '/project/$projectId/classes'
   | '/project/$projectId/dataset'
   | '/project/$projectId/snapshots'
-  | '/project/$projectId/experiments'
+  | '/project/$projectId/training'
   | '/project/$projectId/export'
 
 interface Step {
@@ -125,11 +125,11 @@ export function ProjectPage() {
       action: 'Open snapshots',
     },
     {
-      id: 'experiments',
+      id: 'training',
       label: 'Train',
       desc: 'Launch runs or sweeps and watch metrics stream live.',
       icon: BrainIcon,
-      to: '/project/$projectId/experiments',
+      to: '/project/$projectId/training',
       status:
         runCount > 0
           ? `${runCount} run${runCount === 1 ? '' : 's'}`
@@ -138,7 +138,7 @@ export function ProjectPage() {
             : 'Needs a snapshot',
       done: runCount > 0,
       disabled: !hasReadySnapshot,
-      action: 'Open experiments',
+      action: 'Open training',
     },
     {
       id: 'export',
@@ -295,13 +295,13 @@ export function ProjectPage() {
         <Paper p="md">
           <Stack gap="xs">
             <Group justify="space-between">
-              <SectionLabel>Recent experiments</SectionLabel>
+              <SectionLabel>Recent training runs</SectionLabel>
               {runs.length > 0 && (
                 <Button
                   variant="subtle"
                   size="compact-xs"
                   rightSection={<ArrowRightIcon size={12} />}
-                  onClick={() => navigate({ to: '/project/$projectId/experiments', params: { projectId } })}
+                  onClick={() => navigate({ to: '/project/$projectId/training', params: { projectId } })}
                 >
                   View all ({runs.length})
                 </Button>
@@ -327,7 +327,7 @@ export function ProjectPage() {
                       style={{ cursor: 'pointer' }}
                       onClick={() =>
                         navigate({
-                          to: '/project/$projectId/experiments/$runId',
+                          to: '/project/$projectId/training/$runId',
                           params: { projectId, runId: run.id },
                         })
                       }

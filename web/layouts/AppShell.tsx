@@ -38,7 +38,7 @@ import { BrandMark, SectionLabel } from '@public/components/ui'
 import { logout } from '@public/lib/api/generated/auth/auth'
 import { sessionQueryOptions } from '@public/lib/auth'
 import { projectDetailQueryOptions, useProjects } from '@public/lib/queries'
-import { getTaskDescriptor, isClassificationTask } from '@public/lib/tasks'
+import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useMatch, useNavigate } from '@tanstack/react-router'
@@ -56,7 +56,7 @@ interface ProjectNavItem {
     | '/project/$projectId/classes'
     | '/project/$projectId/dataset'
     | '/project/$projectId/snapshots'
-    | '/project/$projectId/experiments'
+    | '/project/$projectId/training'
     | '/project/$projectId/playground'
     | '/project/$projectId/export'
   /** Overview must match exactly; everything else matches by prefix. */
@@ -100,9 +100,9 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
     color: 'grape',
   },
   {
-    label: 'Experiments',
+    label: 'Training',
     icon: BrainIcon,
-    to: '/project/$projectId/experiments',
+    to: '/project/$projectId/training',
     disabled: (project) => !hasReadyVersion(project),
     count: (project) => project.runCount ?? 0,
     color: 'teal',
@@ -124,9 +124,7 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
 function ProjectSwitcher({ projectId }: { projectId: string | undefined }) {
   const navigate = useNavigate()
   const { data } = useProjects()
-  const { data: detail } = useQuery({ ...projectDetailQueryOptions(projectId ?? ''), enabled: !!projectId })
   const projects = data?.projects ?? []
-  const taskLabel = detail?.project ? getTaskDescriptor(detail.project.task)?.label : undefined
 
   return (
     <Group gap="xs" wrap="nowrap">
@@ -142,11 +140,6 @@ function ProjectSwitcher({ projectId }: { projectId: string | undefined }) {
         onChange={(id) => id && navigate({ to: '/project/$projectId', params: { projectId: id } })}
         nothingFoundMessage="No projects"
       />
-      {taskLabel && (
-        <Badge size="sm" visibleFrom="md">
-          {taskLabel}
-        </Badge>
-      )}
     </Group>
   )
 }

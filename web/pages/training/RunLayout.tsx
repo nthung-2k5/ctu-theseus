@@ -20,7 +20,7 @@ import {
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 
-const routeApi = getRouteApi('/_app/project/$projectId/experiments/$runId')
+const routeApi = getRouteApi('/_app/project/$projectId/training/$runId')
 
 const TABS = ['live', 'evaluation', 'compare', 'config'] as const
 type RunTab = (typeof TABS)[number]
@@ -46,7 +46,7 @@ export function RunLayout() {
     queryClient.invalidateQueries({ queryKey: trainingRunDetailQueryOptions(runId).queryKey })
   })
 
-  const goToList = () => navigate({ to: '/project/$projectId/experiments', params: { projectId } })
+  const goToList = () => navigate({ to: '/project/$projectId/training', params: { projectId } })
 
   const stop = useMutation({
     mutationFn: async () => cancelRun(runId),
@@ -72,8 +72,8 @@ export function RunLayout() {
             title="Run not found"
             description="It may have been deleted."
             action={
-              <LinkButton to="/project/$projectId/experiments" params={{ projectId }} variant="default">
-                Back to experiments
+              <LinkButton to="/project/$projectId/training" params={{ projectId }} variant="default">
+                Back to training
               </LinkButton>
             }
           />
@@ -86,20 +86,20 @@ export function RunLayout() {
   const succeeded = status === 'succeeded'
   const snapshot = project.dataset?.versions?.find((v) => v.id === run.datasetVersionId)
 
-  const segment = location.pathname.split(`/experiments/${runId}`)[1]?.replace(/^\//, '').split('/')[0] ?? ''
+  const segment = location.pathname.split(`/training/${runId}`)[1]?.replace(/^\//, '').split('/')[0] ?? ''
   const activeTab: RunTab = (TABS as readonly string[]).includes(segment) ? (segment as RunTab) : 'live'
 
   const goToTab = (tab: string | null) => {
     const params = { projectId, runId }
     switch (tab) {
       case 'evaluation':
-        return navigate({ to: '/project/$projectId/experiments/$runId/evaluation', params })
+        return navigate({ to: '/project/$projectId/training/$runId/evaluation', params })
       case 'compare':
-        return navigate({ to: '/project/$projectId/experiments/$runId/compare', params, search: {} })
+        return navigate({ to: '/project/$projectId/training/$runId/compare', params, search: {} })
       case 'config':
-        return navigate({ to: '/project/$projectId/experiments/$runId/config', params })
+        return navigate({ to: '/project/$projectId/training/$runId/config', params })
       default:
-        return navigate({ to: '/project/$projectId/experiments/$runId', params })
+        return navigate({ to: '/project/$projectId/training/$runId', params })
     }
   }
 

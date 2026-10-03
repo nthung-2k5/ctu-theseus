@@ -25,8 +25,8 @@ export function PlaygroundPage() {
             title="No fine-tuned models yet"
             description="A run has to finish successfully before you can test it."
             action={
-              <LinkButton to="/project/$projectId/experiments" params={{ projectId }} variant="default">
-                Go to experiments
+              <LinkButton to="/project/$projectId/training" params={{ projectId }} variant="default">
+                Go to training
               </LinkButton>
             }
           />
