@@ -226,7 +226,7 @@ disable takes effect on the very next request. Disabling an account revokes its 
 keys and blocks sign-in; an access token already issued lives out its 15-minute lifetime. The API
 refuses to demote or disable yourself or the last active admin.
 
-Admins can switch trainer backends, built-in models, export formats, preprocessing and augmentation
+Admins can switch trainer backends, base models, export formats, preprocessing and augmentation
 ops, and whole tasks on or off, globally or for one task (`plugin_settings`). No row means enabled, so
 an install with no overrides behaves as it always did, and a task's own setting beats the "all tasks"
 one. The registries stay immutable after startup: the switches are a filter that listings and
@@ -236,10 +236,16 @@ process). A switch only stops **new** use: existing projects, runs and queued ex
 (`find_export_format` and `get_backend` are deliberately not filtered). Admins also see every user's
 runs and exports and the state of the job queues (Administration > Jobs).
 
-### Bring your own model
+### Imported models (bring your own)
 
-A user can train on a model the platform did not ship: a public **Hugging Face Hub** reference, or
-**uploaded weights**. A custom model (`custom_models`) is **global** (no owner: an admin adds it for
+**Naming.** In the UI a **base model** is the pretrained (or from-scratch) starting point a run is
+configured with: either one a backend ships (still `builtin` in the API) or an **imported model**
+(`custom_models`, `custom:{uuid}`), which is *shared* (global, added by an admin) or *private* to its
+owner. What a run produces is a **fine-tuned model**. Only the labels, the web route (`/imported-models`) and
+the web component names changed: API fields, DB columns and the `builtin`/`custom` identifiers did not.
+
+A user can fine-tune a model the platform did not ship: a public **Hugging Face Hub** reference, or
+**uploaded weights**. An imported model (`custom_models`) is **global** (no owner: an admin adds it for
 everyone) or **private** to its owner, and lists the tasks it is offered for. It is addressed as
 `custom:{uuid}` in the hyperparameter the backend names for its model choice (`encoderId` for Ludwig),
 so it shares the picker with the built-ins. `services/model_catalog.py` decides who sees what; someone
@@ -346,6 +352,6 @@ web/                      React SPA
   routes/, pages/         TanStack Router route tree (code-based) and one component per route
   components/dataset/     Per-modality labeling UI (vision grid, text list, audio list, CSV importer)
   components/ui/          Shared design-system primitives (PageHeader, EmptyState, DataTable, ...)
-  components/models/      Bring-your-own model table, add form and file upload (My models + admin)
+  components/models/      Imported-model table, import form and file upload (Imported models + admin)
   pages/admin/            Administration: users, models, plugins & availability
 ```

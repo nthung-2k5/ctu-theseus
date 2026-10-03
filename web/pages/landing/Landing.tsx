@@ -56,7 +56,7 @@ const FEATURES = [
   {
     icon: FlaskIcon,
     title: 'Pluggable trainers',
-    text: 'Training backends are plugins. Pick a backend, a model and its hyper-parameters straight from the server.',
+    text: 'Training backends are plugins. Pick a backend, a base model and its hyper-parameters straight from the server.',
   },
   {
     icon: ArchiveIcon,
@@ -76,7 +76,7 @@ const FEATURES = [
   {
     icon: PlayIcon,
     title: 'Playground and export',
-    text: 'Try a trained model on real inputs, then package it in the format you deploy with.',
+    text: 'Try a fine-tuned model on real inputs, then package it in the format you deploy with.',
   },
 ]
 
@@ -251,7 +251,7 @@ export function Landing() {
           <b>
             <CountUp to={1} />
           </b>
-          <span>API for every trained model</span>
+          <span>API for every fine-tuned model</span>
         </Reveal>
       </section>
 

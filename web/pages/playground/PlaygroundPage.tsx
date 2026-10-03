@@ -16,13 +16,13 @@ export function PlaygroundPage() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <PageHeader title="Playground" description="Run predictions with a trained model on real inputs." />
+      <PageHeader title="Playground" description="Run predictions with a fine-tuned model on real inputs." />
 
       <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
         {runs.length === 0 ? (
           <EmptyState
             icon={PlayIcon}
-            title="No trained models yet"
+            title="No fine-tuned models yet"
             description="A run has to finish successfully before you can test it."
             action={
               <LinkButton to="/project/$projectId/experiments" params={{ projectId }} variant="default">

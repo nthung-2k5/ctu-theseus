@@ -87,7 +87,7 @@ export function ExportPage() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <PageHeader title="Export" description="Package a trained model and call it from your own code." />
+      <PageHeader title="Export" description="Package a fine-tuned model and call it from your own code." />
       <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
         {runs.length === 0 ? (
           <EmptyState

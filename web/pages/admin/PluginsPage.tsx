@@ -1,5 +1,5 @@
 /**
- * Admin > Plugins: switch trainer backends, built-in models, export formats, preprocessing and
+ * Admin > Plugins: switch trainer backends, base models, export formats, preprocessing and
  * augmentation ops, and whole tasks on or off, globally or for one task. The table itself is
  * `PluginTable`; this page is the tabs around it.
  */
@@ -11,7 +11,7 @@ import { useState } from 'react'
 
 const KINDS = [
   { value: 'backend', label: 'Trainer backends', hint: 'Which frameworks can start new runs.' },
-  { value: 'builtin_model', label: 'Built-in models', hint: 'Backbones shipped with a backend.' },
+  { value: 'builtin_model', label: 'Base models', hint: 'Base models shipped with a backend.' },
   { value: 'export_format', label: 'Export formats', hint: 'What a finished run can be exported as.' },
   { value: 'preprocessing', label: 'Preprocessing', hint: 'Snapshot-time preprocessing ops.' },
   { value: 'augmentation', label: 'Augmentation', hint: 'Snapshot-time augmentation ops.' },

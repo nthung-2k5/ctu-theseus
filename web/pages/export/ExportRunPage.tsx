@@ -77,7 +77,7 @@ export function ExportRunPage() {
         description="Build a bundle to download, or call the model over the prediction API."
         actions={
           <LinkButton to="/project/$projectId/export" params={{ projectId }} variant="default">
-            All models
+            All fine-tuned models
           </LinkButton>
         }
       />

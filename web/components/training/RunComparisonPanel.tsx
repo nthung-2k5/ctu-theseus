@@ -56,7 +56,7 @@ function ComparisonRow({
         <Text size="xs" c="dimmed" maw={320}>
           {hyperparameters
             ? [
-                ...(data?.run.modelLabel ? [`Model: ${data.run.modelLabel}`] : []),
+                ...(data?.run.modelLabel ? [`Base model: ${data.run.modelLabel}`] : []),
                 ...Object.entries(hyperparameters)
                   .filter(([key]) => !modelKeys.has(key))
                   .map(([key, value]) => `${labelOf(key)}: ${formatHyperparamValue(key, value)}`),

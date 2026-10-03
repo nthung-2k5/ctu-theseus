@@ -1,7 +1,7 @@
 import { AppShell } from '@public/layouts/AppShell'
 import { sessionQueryOptions } from '@public/lib/auth'
 import { DashboardPage } from '@public/pages/DashboardPage'
-import { ModelsPage } from '@public/pages/ModelsPage'
+import { ImportedModelsPage } from '@public/pages/ImportedModelsPage'
 import { SettingsPage } from '@public/pages/SettingsPage'
 import { createRoute, Outlet, redirect } from '@tanstack/react-router'
 import { rootRoute } from './__root'
@@ -27,11 +27,11 @@ export const dashboardRoute = createRoute({
   component: DashboardPage,
 })
 
-/** The user's own bring-your-own models. */
-export const modelsRoute = createRoute({
+/** The models the user imported themselves. */
+export const importedModelsRoute = createRoute({
   getParentRoute: () => appRoute,
-  path: '/models',
-  component: ModelsPage,
+  path: '/imported-models',
+  component: ImportedModelsPage,
 })
 
 export const settingsRoute = createRoute({

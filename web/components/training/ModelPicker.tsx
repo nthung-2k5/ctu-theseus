@@ -3,13 +3,13 @@ import type { TrainingBackendOut } from '@public/lib/api/generated/models'
 
 /** What "the model" is, in words for someone who has never trained one. */
 export const MODEL_HELP =
-  'The model that learns from your data. A pretrained one has already learned general patterns from a huge collection of examples, so it usually needs far less of yours.'
+  'The base model you fine-tune on your data. A pretrained one has already learned general patterns from a huge collection of examples, so it usually needs far less of yours.'
 
 /** Where a model comes from, in the order the picker lists them. */
 const MODEL_SOURCES = [
-  { source: 'builtin', label: 'Built-in' },
-  { source: 'global', label: 'Shared by your organization' },
-  { source: 'private', label: 'My models' },
+  { source: 'builtin', label: 'Base models' },
+  { source: 'global', label: 'Shared imported models' },
+  { source: 'private', label: 'My imported models' },
 ] as const
 
 /**
@@ -27,7 +27,7 @@ export function ModelPicker({
   onChange: (id: string) => void
 }) {
   const modelInfo = backend.models.find((m) => m.id === modelId)
-  // Built-in models first, then an administrator's shared ones, then the user's own. With no custom
+  // Base models first, then an administrator's shared imports, then the user's own. With no imported
   // models the picker stays the flat list it always was.
   const modelGroups = MODEL_SOURCES.map((s) => ({
     group: s.label,
@@ -43,7 +43,7 @@ export function ModelPicker({
       <Select
         size="xs"
         w={260}
-        aria-label="Model"
+        aria-label="Base model"
         allowDeselect={false}
         searchable
         data={modelOptions}
@@ -53,7 +53,7 @@ export function ModelPicker({
       <Group gap={6} align="flex-start" wrap="nowrap" pt={6}>
         {modelInfo && modelInfo.source !== undefined && modelInfo.source !== 'builtin' && (
           <Badge size="xs" variant="light" color={modelInfo.source === 'private' ? 'grape' : 'blue'}>
-            {modelInfo.source === 'private' ? 'my model' : 'shared'}
+            {modelInfo.source === 'private' ? 'imported' : 'shared'}
           </Badge>
         )}
         <Text size="xs" c="dimmed" maw={420}>

@@ -7,7 +7,7 @@ import {
   adminRoute,
   adminUsersRoute,
 } from './admin.route'
-import { apiKeysRoute, appRoute, dashboardRoute, modelsRoute, settingsRoute } from './app.route'
+import { apiKeysRoute, appRoute, dashboardRoute, importedModelsRoute, settingsRoute } from './app.route'
 import { guestRoute, landingRoute, loginRoute, registerRoute } from './guest.route'
 import {
   classesRoute,
@@ -64,6 +64,13 @@ const adminTree = adminRoute.addChildren([
   adminJobsRoute,
 ])
 
-const appTree = appRoute.addChildren([dashboardRoute, modelsRoute, settingsRoute, apiKeysRoute, adminTree, projectTree])
+const appTree = appRoute.addChildren([
+  dashboardRoute,
+  importedModelsRoute,
+  settingsRoute,
+  apiKeysRoute,
+  adminTree,
+  projectTree,
+])
 
 export const routeTree = rootRoute.addChildren([landingRoute, registerRoute, guestTree, appTree])

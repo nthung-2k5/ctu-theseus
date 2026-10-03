@@ -1,4 +1,4 @@
-import { CUSTOM_MODELS_KEY, type ModelsApi } from '@public/lib/customModels'
+import { IMPORTED_MODELS_KEY, type ModelsApi } from '@public/lib/importedModels'
 import { putFile } from '@public/lib/upload'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -20,7 +20,7 @@ export function useModelUpload(api: ModelsApi) {
       await api.finalize(modelId)
     } finally {
       setProgress(null)
-      queryClient.invalidateQueries({ queryKey: CUSTOM_MODELS_KEY })
+      queryClient.invalidateQueries({ queryKey: IMPORTED_MODELS_KEY })
     }
   }
 

@@ -100,8 +100,6 @@ const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/Commun
 // Python and GPU directly. Postgres and S3 stay in containers; Aspire hands the host process their
 // localhost addresses.
 
-const schemaGenerate = await builder.addPythonApp("schema-generate", "./server/scripts", "export_schema.py");
-
 const api = await builder
   .addPythonApp('api', './server', 'main.py')
   .withUv({ args: ['sync', '--frozen'] })
@@ -142,7 +140,6 @@ const web = await builder
     isProxied: false,
   })
   .waitFor(api)
-  .waitForCompletion(schemaGenerate)
   .withExternalHttpEndpoints()
 
 await builder

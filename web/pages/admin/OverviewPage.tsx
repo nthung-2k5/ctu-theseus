@@ -8,7 +8,7 @@ import { Badge, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core'
 import { BrainIcon, CubeIcon, ExportIcon, FoldersIcon, ShieldCheckIcon, UsersIcon } from '@phosphor-icons/react'
 import { MeterBar, PageHeader, QueryBoundary, SectionLabel, StatCard } from '@public/components/ui'
 import { getAdminSystemQueryOptions } from '@public/lib/api/generated/admin/admin'
-import { formatBytes } from '@public/lib/customModels'
+import { formatBytes } from '@public/lib/importedModels'
 import { useQuery } from '@tanstack/react-query'
 
 export function OverviewPage() {
@@ -41,7 +41,7 @@ export function OverviewPage() {
               <StatCard icon={ExportIcon} label="Exports" value={counts.exports} />
               <StatCard
                 icon={CubeIcon}
-                label="Custom models"
+                label="Imported models"
                 value={counts.customModels}
                 hint={formatBytes(counts.customModelBytes)}
               />

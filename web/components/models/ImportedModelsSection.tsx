@@ -1,5 +1,5 @@
 /**
- * The custom-model table, shared by "My models" (a user's own) and Admin > Models (everyone's).
+ * The imported-model table, shared by "Imported models" (a user's own) and Admin > Models (everyone's).
  * `api` decides which; the admin variant additionally shows owners, filters, and creates GLOBAL models.
  *
  * The list refreshes on its own while any model is queued or being validated, so a model turns Ready (or
@@ -22,18 +22,18 @@ import { DataTable, type DataTableColumn, EmptyState, QueryBoundary } from '@pub
 import { apiErrorMessage } from '@public/lib/api/client'
 import type { CustomModelOut } from '@public/lib/api/generated/models'
 import {
-  CUSTOM_MODELS_KEY,
   formatBytes,
+  IMPORTED_MODELS_KEY,
   isValidating,
   MODEL_STATUS_COLORS,
   MODEL_STATUS_LABELS,
   type ModelFilters,
   type ModelsApi,
   taskLabel,
-} from '@public/lib/customModels'
+} from '@public/lib/importedModels'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { CustomModelForm } from './CustomModelForm'
+import { ImportedModelForm } from './ImportedModelForm'
 import { ModelFileDropzone } from './ModelFileDropzone'
 import { useModelUpload } from './useModelUpload'
 
@@ -86,7 +86,7 @@ function UploadFileModal({
   )
 }
 
-export function CustomModelsSection({ api }: { api: ModelsApi }) {
+export function ImportedModelsSection({ api }: { api: ModelsApi }) {
   const queryClient = useQueryClient()
   const isAdmin = api.audience === 'admin'
 
@@ -104,14 +104,14 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
   }
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: [...CUSTOM_MODELS_KEY, api.audience, filters],
+    queryKey: [...IMPORTED_MODELS_KEY, api.audience, filters],
     queryFn: () => api.list(filters),
     refetchInterval: (query) => (query.state.data?.some(isValidating) ? 3000 : false),
     placeholderData: (previous) => previous,
   })
   const models = data ?? []
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: CUSTOM_MODELS_KEY })
+  const refresh = () => queryClient.invalidateQueries({ queryKey: IMPORTED_MODELS_KEY })
   const onError = (error: unknown) =>
     notifications.show({ title: 'Error', message: apiErrorMessage(error), color: 'red' })
 
@@ -126,9 +126,9 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
     onSuccess: (result) => {
       refresh()
       notifications.show({
-        title: result.archived ? 'Model archived' : 'Model deleted',
+        title: result.archived ? 'Imported model archived' : 'Imported model deleted',
         message: result.archived
-          ? 'Runs trained on it still work, so it was hidden rather than deleted.'
+          ? 'Runs fine-tuned from it still work, so it was hidden rather than deleted.'
           : 'It and its files were removed.',
         color: 'gray',
       })
@@ -138,7 +138,7 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
 
   const confirmRemove = (m: CustomModelOut) =>
     modals.openConfirmModal({
-      title: 'Delete model',
+      title: 'Delete imported model',
       children: (
         <Text size="sm">
           {m.runCount > 0
@@ -154,7 +154,7 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
   const columns: DataTableColumn<CustomModelOut>[] = [
     {
       key: 'name',
-      header: 'Model',
+      header: 'Imported model',
       render: (m) => (
         <div style={{ minWidth: 0 }}>
           <Text size="sm" fw={600}>
@@ -177,7 +177,7 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
             render: (m: CustomModelOut) =>
               m.scope === 'global' ? (
                 <Badge variant="light" color="grape">
-                  Global
+                  Shared
                 </Badge>
               ) : (
                 <Text size="xs" c="dimmed">
@@ -301,7 +301,7 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
                 value={scope}
                 onChange={setScope}
                 data={[
-                  { value: 'global', label: 'Global' },
+                  { value: 'global', label: 'Shared' },
                   { value: 'private', label: 'Private' },
                 ]}
                 w={130}
@@ -319,7 +319,7 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
           )}
         </Group>
         <Button leftSection={<PlusIcon size={14} />} onClick={openForm}>
-          {isAdmin ? 'New global model' : 'New model'}
+          {isAdmin ? 'Import shared model' : 'Import model'}
         </Button>
       </Group>
 
@@ -327,11 +327,11 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
         {models.length === 0 ? (
           <EmptyState
             icon={CubeIcon}
-            title={isAdmin ? 'No custom models' : 'No models of your own yet'}
+            title={isAdmin ? 'No imported models' : 'No imported models yet'}
             description={
               isAdmin
-                ? 'Add a global model to make it available to every user, or wait for users to add their own.'
-                : 'Bring a model from the Hugging Face Hub or upload your own weights, then pick it when you train.'
+                ? 'Import a shared model to make it available to every user, or wait for users to import their own.'
+                : 'Import a base model from the Hugging Face Hub or upload your own weights, then pick it when you fine-tune.'
             }
           />
         ) : (
@@ -339,11 +339,11 @@ export function CustomModelsSection({ api }: { api: ModelsApi }) {
         )}
       </QueryBoundary>
 
-      <CustomModelForm
+      <ImportedModelForm
         api={api}
         opened={formOpened}
         onClose={closeForm}
-        title={isAdmin ? 'New global model' : 'New model'}
+        title={isAdmin ? 'Import shared model' : 'Import model'}
       />
       <UploadFileModal api={api} model={uploading} onClose={() => setUploading(null)} />
     </div>

@@ -143,11 +143,13 @@ export function ProjectPage() {
     {
       id: 'export',
       label: 'Test & export',
-      desc: 'Try a trained model, then package it.',
+      desc: 'Try a fine-tuned model, then package it.',
       icon: ExportIcon,
       to: '/project/$projectId/export',
       status:
-        succeededRuns > 0 ? `${succeededRuns} model${succeededRuns === 1 ? '' : 's'} ready` : 'Needs a finished run',
+        succeededRuns > 0
+          ? `${succeededRuns} fine-tuned model${succeededRuns === 1 ? '' : 's'} ready`
+          : 'Needs a finished run',
       done: succeededRuns > 0,
       disabled: succeededRuns === 0,
       action: 'Open export',

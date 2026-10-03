@@ -61,7 +61,7 @@ export function RunOverviewPanel({
   // Not gated on run status — hyperparameters are fixed at queue time.
   const { data, isLoading } = useTrainingRunDetail(run.id, true)
   const hyperparameters = (data?.run.hyperparameters ?? null) as Record<string, unknown> | null
-  // The server names the model a run used (a custom model's name even after it was archived, which the
+  // The server names the base model a run used (an imported model's name even after it was archived, which the
   // picker would no longer list). The task label stands in for a run that named no model.
   const modelKeys = useModelParamNames(projectId)
   const labelOf = useHyperparamLabel(projectId)
@@ -93,7 +93,7 @@ export function RunOverviewPanel({
               ['Completed', completedAt ? completedAt.toLocaleString() : '—'],
               ['Duration', duration ?? '—'],
               [
-                'Model',
+                'Base model',
                 isLoading ? <Skeleton key="m" height={16} width={140} /> : <Badge key="model">{modelLabel}</Badge>,
               ],
             ]}

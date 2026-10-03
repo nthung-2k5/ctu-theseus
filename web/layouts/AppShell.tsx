@@ -247,8 +247,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Menu.Item leftSection={<FoldersIcon size={14} />} onClick={() => navigate({ to: '/projects' })}>
                   All projects
                 </Menu.Item>
-                <Menu.Item leftSection={<CubeIcon size={14} />} onClick={() => navigate({ to: '/models' })}>
-                  My models
+                <Menu.Item leftSection={<CubeIcon size={14} />} onClick={() => navigate({ to: '/imported-models' })}>
+                  Imported models
                 </Menu.Item>
                 <Menu.Item leftSection={<GearIcon size={14} />} onClick={() => navigate({ to: '/settings' })}>
                   Settings &amp; API keys
@@ -280,10 +280,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               variant="light"
             />
             <NavLink
-              label="My models"
+              label="Imported models"
               leftSection={<CubeIcon size={18} />}
-              active={location.pathname === '/models' || location.pathname.startsWith('/models/')}
-              onClick={() => navigate({ to: '/models' })}
+              active={location.pathname === '/imported-models' || location.pathname.startsWith('/imported-models/')}
+              onClick={() => navigate({ to: '/imported-models' })}
               variant="light"
             />
             {isAdmin && (

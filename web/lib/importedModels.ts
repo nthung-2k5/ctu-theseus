@@ -85,7 +85,7 @@ export interface ModelsApi {
 }
 
 /** Every custom-model query starts with this, so one invalidation refreshes them all. */
-export const CUSTOM_MODELS_KEY = ['custom-models'] as const
+export const IMPORTED_MODELS_KEY = ['imported-models'] as const
 
 export const userModelsApi: ModelsApi = {
   audience: 'user',

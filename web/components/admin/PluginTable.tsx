@@ -1,7 +1,7 @@
 /**
- * The on/off table for one kind of plugin (trainer backends, built-in models, export formats, ...): a switch
+ * The on/off table for one kind of plugin (trainer backends, base models, export formats, ...): a switch
  * for "all tasks" and a dialog for per-task overrides. Used by Admin > Plugins (one tab per kind) and by the
- * built-in models tab of Admin > Models.
+ * base models tab of Admin > Models.
  *
  * A switch only stops NEW use. Existing runs, exports and projects keep working (see
  * server/theseus/services/plugin_settings.py). Precedence: a task's own setting beats the "all tasks"

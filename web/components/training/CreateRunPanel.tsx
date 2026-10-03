@@ -271,7 +271,7 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
           {backend && (
             <Paper p="sm">
               <Group gap={4} mb="xs">
-                <SectionLabel>Model</SectionLabel>
+                <SectionLabel>Base model</SectionLabel>
                 <InfoTip text={MODEL_HELP} />
               </Group>
               <ModelPicker backend={backend} modelId={modelId} onChange={changeModel} />

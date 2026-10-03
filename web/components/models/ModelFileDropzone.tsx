@@ -2,7 +2,7 @@ import { Group, Paper, Stack, Text, ThemeIcon } from '@mantine/core'
 import { Dropzone, type FileRejection } from '@mantine/dropzone'
 import { notifications } from '@mantine/notifications'
 import { CloudArrowUpIcon, XIcon } from '@phosphor-icons/react'
-import { formatBytes } from '@public/lib/customModels'
+import { formatBytes } from '@public/lib/importedModels'
 
 const ACCEPTED = /\.(zip|safetensors)$/i
 

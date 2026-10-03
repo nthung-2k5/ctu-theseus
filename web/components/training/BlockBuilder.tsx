@@ -19,7 +19,7 @@ const KIND_COLOR: Record<BlockKind, string> = {
 const KIND_LABEL: Record<BlockKind, string> = {
   preprocess: 'Pre',
   augment: 'Augment',
-  backbone: 'Backbone',
+  backbone: 'Base model',
   head: 'Head',
   loss: 'Loss',
 }
@@ -78,7 +78,7 @@ function preprocessSetting(params: ParamSpec[]) {
 
 /**
  * A block view of one run's configuration, in pipeline order: pre-processing, augmentation, the
- * backbone (the model), the head and the loss. Each block is a real setting of the selected trainer
+ * base model (the backbone), the head and the loss. Each block is a real setting of the selected trainer
  * backend, not a separate model of the network, so what the canvas shows is exactly what will be trained:
  *
  *   preprocess  image size (vision) or max sequence length (text)

@@ -1,5 +1,5 @@
 /**
- * "Add a model": what it is (a kind the backend understands), where its weights come from (a Hugging Face
+ * "Import a model": what it is (a kind the backend understands), where its weights come from (a Hugging Face
  * Hub id, or an uploaded file) and which tasks it is offered for. The kinds and their tasks come from the
  * backend (GET /api/models/kinds), so this form never hard-codes what a backend supports.
  *
@@ -28,7 +28,7 @@ import { WarningCircleIcon } from '@phosphor-icons/react'
 import { apiErrorMessage } from '@public/lib/api/client'
 import type { CustomModelKindOut } from '@public/lib/api/generated/models'
 import { getListCustomModelKindsQueryOptions } from '@public/lib/api/generated/models/models'
-import { CUSTOM_MODELS_KEY, type ModelsApi, taskLabel } from '@public/lib/customModels'
+import { IMPORTED_MODELS_KEY, type ModelsApi, taskLabel } from '@public/lib/importedModels'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ModelFileDropzone } from './ModelFileDropzone'
@@ -47,7 +47,7 @@ interface FormValues {
 
 const INITIAL: FormValues = { name: '', description: '', kind: '', sourceKind: 'hub', sourceRef: '', tasks: [] }
 
-export function CustomModelForm({
+export function ImportedModelForm({
   api,
   opened,
   onClose,
@@ -67,7 +67,7 @@ export function CustomModelForm({
   const form = useForm<FormValues>({
     initialValues: INITIAL,
     validate: {
-      name: (v) => (v.trim() ? null : 'Give the model a name'),
+      name: (v) => (v.trim() ? null : 'Give the imported model a name'),
       kind: (v) => (v ? null : 'Choose what kind of model this is'),
       tasks: (v) => (v.length > 0 ? null : 'Choose at least one task'),
       sourceRef: (v, values) => (values.sourceKind === 'hub' && !v.trim() ? 'Enter the model id' : null),
@@ -118,24 +118,24 @@ export function CustomModelForm({
       return { model, uploadError }
     },
     onSuccess: ({ model, uploadError }) => {
-      queryClient.invalidateQueries({ queryKey: CUSTOM_MODELS_KEY })
+      queryClient.invalidateQueries({ queryKey: IMPORTED_MODELS_KEY })
       if (uploadError) {
         notifications.show({
-          title: 'Model created, upload failed',
+          title: 'Model imported, upload failed',
           message: `${apiErrorMessage(uploadError)} Use “Upload file” on “${model.name}” to try again.`,
           color: 'orange',
         })
       } else {
         notifications.show({
-          title: 'Model added',
-          message: 'It will be checked now. You can train on it once it shows as Ready.',
+          title: 'Model imported',
+          message: 'It will be checked now. You can fine-tune it once it shows as Ready.',
           color: 'teal',
         })
       }
       close()
     },
     onError: (error) =>
-      notifications.show({ title: 'Could not add the model', message: apiErrorMessage(error), color: 'red' }),
+      notifications.show({ title: 'Could not import the model', message: apiErrorMessage(error), color: 'red' }),
   })
 
   const submit = form.onSubmit((values) => {
@@ -261,7 +261,7 @@ export function CustomModelForm({
               Cancel
             </Button>
             <Button type="submit" loading={create.isPending} disabled={!!kind?.unavailableReason}>
-              {form.values.sourceKind === 'upload' ? 'Add and upload' : 'Add model'}
+              {form.values.sourceKind === 'upload' ? 'Import and upload' : 'Import model'}
             </Button>
           </Group>
         </Stack>
