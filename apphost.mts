@@ -152,6 +152,8 @@ await builder
     // A plain container has no service discovery, so route to its endpoint rather than the resource.
     await config.addRoute('/api/{**catch-all}', await api.getEndpoint('http'))
   })
+  .withHttpEndpoint({ port: 8080, name: "http" })
+  .withHttpsEndpoint({ port: 6767, name: "https" })
   .waitFor(api)
   .waitFor(web)
 
