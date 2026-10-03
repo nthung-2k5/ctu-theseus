@@ -12,6 +12,7 @@
       "applicationUrl": "https://ctu-theseus.dev.localhost:17297;http://ctu-theseus.dev.localhost:15235",
       "environmentVariables": {
         "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:21157",
+        "ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:23203",
         "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:22218"
       }
     }

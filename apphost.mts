@@ -3,7 +3,7 @@
 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createBuilder } from './.aspire/modules/aspire.mjs'
+import { createBuilder, OtlpProtocol } from './.aspire/modules/aspire.mjs'
 import CONSTANTS from './schema/constants.json' with { type: 'json' }
 
 const builder = await createBuilder()
@@ -113,6 +113,10 @@ const api = await builder
     endpointName: 'http',
   })
   .withReference(db)
+  // server/theseus/telemetry.py uses the OTLP/HTTP exporters. The dashboard's default OTLP endpoint is gRPC-only
+  // (it negotiates h2 over TLS), so HTTP clients fail the handshake with "tlsv1 alert no application protocol".
+  // This needs ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL set in aspire.config.json.
+  .withOtlpExporter({ protocol: OtlpProtocol.HttpProtobuf })
   // The API is no longer in a container, so S3_ENDPOINT already resolves to the host-mapped address and is
   // the same one the browser uses; S3_PUBLIC_ENDPOINT is kept explicit all the same.
   .withEnvironment('S3_ENDPOINT', s3Endpoint)
