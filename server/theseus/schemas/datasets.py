@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from theseus.augmentation.config import AugmentationConfig, AugmentationInfo
 from theseus.db.enums import (
@@ -117,6 +117,9 @@ class ItemOut(ItemRow):
     annotations: list[AnnotationOut] = []
     split_type: SplitType
     download_url: str | None = None
+    # A small JPEG of an image item (a few KB, against a full-size download), for grids. Authenticated like
+    # the rest of the API; it redirects to object storage. None for anything that isn't an image.
+    thumbnail_url: str | None = None
     # Set on any derived item (preprocessed or augmented): the pool original it came from.
     source_item_id: uuid.UUID | None = None
     source_external_id: str | None = None
@@ -226,8 +229,35 @@ class UploadResponse(ApiModel):
     results: list[UploadResult]
 
 
-class DeleteItemsBody(ApiModel):
-    item_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+class ItemFilter(ApiModel):
+    """The item listing's filters, to act on "everything matching" instead of on listed ids."""
+
+    split: SplitType | None = None
+    # A class id, or 'unassigned'.
+    class_id: str | None = None
+    search: str | None = None
+    labeled: bool | None = None
+
+
+class ItemSelection(ApiModel):
+    """Which draft items a bulk operation acts on: explicit ids, or a filter minus some exceptions."""
+
+    item_ids: list[uuid.UUID] | None = Field(default=None, min_length=1, max_length=1000)
+    filter: ItemFilter | None = None
+    # Items to leave out of a filter match, e.g. rows the user un-ticked after "select all matching".
+    exclude_item_ids: list[uuid.UUID] = Field(default_factory=list, max_length=1000)
+
+    @model_validator(mode="after")
+    def _exactly_one_selector(self) -> "ItemSelection":
+        if (self.item_ids is None) == (self.filter is None):
+            raise ValueError("Send exactly one of itemIds or filter")
+        if self.item_ids is not None and self.exclude_item_ids:
+            raise ValueError("excludeItemIds only applies together with a filter")
+        return self
+
+
+class DeleteItemsBody(ItemSelection):
+    pass
 
 
 class DeleteOutcome(ApiModel):
@@ -239,8 +269,7 @@ class DeleteItemsResponse(ApiModel):
     results: list[DeleteOutcome]
 
 
-class SetSplitBody(ApiModel):
-    item_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+class SetSplitBody(ItemSelection):
     split: SplitType
 
 
@@ -248,8 +277,7 @@ class SetSplitResponse(ApiModel):
     updated: list[uuid.UUID]
 
 
-class ClassifyBody(ApiModel):
-    item_ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+class ClassifyBody(ItemSelection):
     class_id: uuid.UUID
 
 

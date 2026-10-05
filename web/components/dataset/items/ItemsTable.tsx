@@ -35,8 +35,8 @@ export const ItemsTable = <T extends DatasetListItem>({
   const kind = groundTruthKind(spec)
 
   if (selection) {
-    const allSelected = items.length > 0 && items.every((i) => selection.selectedIds.has(i.id))
-    const someSelected = items.some((i) => selection.selectedIds.has(i.id))
+    const allSelected = items.length > 0 && items.every((i) => selection.isSelected(i.id))
+    const someSelected = items.some((i) => selection.isSelected(i.id))
     columns.push({
       key: 'select',
       header: (
@@ -57,7 +57,7 @@ export const ItemsTable = <T extends DatasetListItem>({
       render: (item) => (
         <Checkbox
           aria-label={`Select ${item.externalId ?? 'item'}`}
-          checked={selection.selectedIds.has(item.id)}
+          checked={selection.isSelected(item.id)}
           // Shift-click arrives as the click that produced this change event.
           onChange={(e) => selection.onToggle(item.id, (e.nativeEvent as MouseEvent).shiftKey === true)}
           // Selecting a row must not also open it.

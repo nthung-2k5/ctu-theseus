@@ -1,5 +1,15 @@
 import { expect, test } from 'bun:test'
-import { emptySelection, replaceSelection, selectRange, setMany, toggleItem } from './itemSelection'
+import {
+  emptySelection,
+  isSelected,
+  replaceSelection,
+  selectAllMatching,
+  selectedCount,
+  selectRange,
+  setMany,
+  toggleItem,
+  toRequest,
+} from './itemSelection'
 
 const ids = ['a', 'b', 'c', 'd', 'e']
 const sorted = (s: { ids: ReadonlySet<string> }) => [...s.ids].sort()
@@ -38,8 +48,45 @@ test('setMany selects or deselects a group without inverting a mixed selection',
   expect(sorted(setMany(setMany(mixed, ids, true), ['a', 'b'], false))).toEqual(['c', 'd', 'e'])
 })
 
-test('replaceSelection drops the anchor', () => {
+test('replaceSelection drops the anchor and leaves "all" mode', () => {
   const next = replaceSelection(['x', 'y'])
   expect(sorted(next)).toEqual(['x', 'y'])
   expect(next.anchor).toBeNull()
+  expect(replaceSelection(['x']).all).toBe(false)
+})
+
+test('"all matching" selects everything except what was ticked off', () => {
+  const all = selectAllMatching()
+  expect(isSelected(all, 'anything')).toBe(true)
+  const ticked = toggleItem(all, 'b') // un-tick b
+  expect(isSelected(ticked, 'b')).toBe(false)
+  expect(isSelected(ticked, 'c')).toBe(true)
+  expect(toggleItem(ticked, 'b').ids.size).toBe(0) // ticking it back removes the exclusion
+})
+
+test('in "all" mode setMany and range deselect by excluding and select by un-excluding', () => {
+  const all = selectAllMatching()
+  const without = setMany(all, ['a', 'b'], false)
+  expect(sorted(without)).toEqual(['a', 'b'])
+  expect(isSelected(without, 'a')).toBe(false)
+  expect(sorted(setMany(without, ['a'], true))).toEqual(['b'])
+  // A shift-click range un-excludes: it selects, whatever mode we are in.
+  const ranged = selectRange(toggleItem(without, 'a'), ids, 'c')
+  expect(isSelected(ranged, 'b')).toBe(true)
+})
+
+test('selectedCount subtracts exclusions from the matching total', () => {
+  expect(selectedCount(toggleItem(emptySelection, 'a'), 1000)).toBe(1) // explicit mode ignores the total
+  expect(selectedCount(selectAllMatching(), 42)).toBe(42)
+  expect(selectedCount(setMany(selectAllMatching(), ['a', 'b'], false), 42)).toBe(40)
+  expect(selectedCount(setMany(selectAllMatching(), ['a', 'b'], false), 1)).toBe(0) // never negative
+})
+
+test('toRequest sends ids, or the filter plus exclusions', () => {
+  expect(toRequest(replaceSelection(['a', 'b']), { split: 'train' })).toEqual({ itemIds: ['a', 'b'] })
+  const filtered = setMany(selectAllMatching(), ['a'], false)
+  expect(toRequest(filtered, { split: 'train', search: 'cat' })).toEqual({
+    filter: { split: 'train', search: 'cat' },
+    excludeItemIds: ['a'],
+  })
 })

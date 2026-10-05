@@ -114,6 +114,7 @@ theseus-datasets/
   snapshots/{versionId}/manifest.json
   snapshots/{versionId}/preprocessed/...     preprocessed replacements built with that snapshot (not pooled)
   snapshots/{versionId}/augmented/...        augmented copies built with that snapshot (not pooled)
+  thumbnails/{size}/{original key}.jpg       cached JPEG thumbnails of image items, made on first request
 
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config

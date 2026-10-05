@@ -9,6 +9,7 @@ theseus-datasets/
   snapshots/{versionId}/manifest.json
   snapshots/{versionId}/preprocessed/{hh}/{hash}{ext}   preprocessed replacements built with that snapshot (not pooled)
   snapshots/{versionId}/augmented/{hh}/{hash}{ext}   augmented copies built with that snapshot (not pooled)
+  thumbnails/{size}/{key of the original object}.jpg   cached JPEG thumbnails, made on first request (see thumbnails.py)
 theseus-training/
   {runId}/config.yaml                        compiled Ludwig config
   {runId}/results/                           Ludwig output tree (incl. training_set_metadata.json)
@@ -109,6 +110,22 @@ def preprocessed_prefix(version_id: str) -> str:
 
 def preprocessed_key(version_id: str, content_hash: str, ext: str) -> str:
     return f"{preprocessed_prefix(version_id)}{content_hash[:2]}/{content_hash}{ext}"
+
+
+# Long-edge pixel sizes a thumbnail may be requested at. A fixed set, so the cache can't grow without bound.
+THUMBNAIL_SIZES = (128, 256, 512)
+
+
+def thumbnail_key(source_key: str, size: int) -> str:
+    """Where the cached thumbnail of `source_key` lives. Mirrors the original's path, so deleting
+    an object (or a snapshot's preprocessed/augmented prefix) can find and delete its thumbnails."""
+    return f"thumbnails/{size}/{source_key}.jpg"
+
+
+def thumbnail_prefixes(source_prefix: str) -> list[str]:
+    """One prefix per cached size covering the thumbnails of everything under `source_prefix`
+    (a project's pool folder, a snapshot's folder), for prefix deletes."""
+    return [f"thumbnails/{size}/{source_prefix}" for size in THUMBNAIL_SIZES]
 
 
 def training_config_key(run_id: str) -> str:
@@ -227,6 +244,11 @@ def delete_prefix(bucket: str, prefix: str) -> int:
     keys = list_keys(bucket, prefix)
     delete_files(bucket, keys)
     return len(keys)
+
+
+def delete_thumbnails(bucket: str, source_key: str) -> None:
+    """Drop every cached size of one object's thumbnail."""
+    delete_files(bucket, [thumbnail_key(source_key, size) for size in THUMBNAIL_SIZES])
 
 
 class PoolUpload(NamedTuple):

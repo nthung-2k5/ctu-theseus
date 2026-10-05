@@ -7,47 +7,62 @@ import {
   setItemsSplit,
   updateAnnotation,
 } from '@public/lib/api/generated/datasets/datasets'
+import type { SelectionRequest } from '@public/lib/itemSelection'
 import { invalidateProjectScope } from '@public/lib/queries'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import type { AxiosError } from 'axios'
+
+/** The one-item case of a bulk selection. */
+export const oneItem = (itemId: string): SelectionRequest => ({ itemIds: [itemId] })
+
+/** The server's own explanation when it gave one (e.g. "More than 5000 items match"), else `fallback`. */
+const failureMessage = (error: unknown, fallback: string) =>
+  (error as AxiosError<{ error?: { message?: string } }> | undefined)?.response?.data?.error?.message ?? fallback
 
 /**
  * The draft's item mutations, each notifying and invalidating project scope on
  * success (splits and classes both change counts rendered from project detail,
  * so invalidating just the items query isn't enough). Clearing the selection is
- * left to the caller: pass `onSuccess` to `mutate`.
+ * left to the caller: pass `onSuccess` to `mutate`. A selection is either explicit ids or a filter
+ * the server resolves, so the counts in the notifications come from the response, not the request.
  */
 export function useItemMutations(projectId: string) {
   const queryClient = useQueryClient()
   const invalidate = () => invalidateProjectScope(queryClient, projectId)
 
-  const onError = (message: string) => () => notifications.show({ title: 'Error', message, color: 'red' })
+  const onError = (message: string) => (error: unknown) =>
+    notifications.show({ title: 'Error', message: failureMessage(error, message), color: 'red' })
 
   const reassignSplit = useMutation({
-    mutationFn: ({ itemIds, split }: { itemIds: string[]; split: (typeof SPLIT_TYPES)[number] }) =>
-      setItemsSplit(projectId, { itemIds, split }),
-    onSuccess: (_data, { itemIds }) => {
-      notifications.show({ title: 'Split updated', message: `${itemIds.length} item(s) reassigned`, color: 'green' })
+    mutationFn: ({ selection, split }: { selection: SelectionRequest; split: (typeof SPLIT_TYPES)[number] }) =>
+      setItemsSplit(projectId, { ...selection, split }),
+    onSuccess: ({ updated }) => {
+      notifications.show({ title: 'Split updated', message: `${updated.length} item(s) reassigned`, color: 'green' })
       invalidate()
     },
     onError: onError('Failed to reassign split'),
   })
 
   const assignClass = useMutation({
-    mutationFn: ({ itemIds, classId }: { itemIds: string[]; classId: string }) =>
-      classifyItems(projectId, { itemIds, classId }),
-    onSuccess: (_data, { itemIds }) => {
-      notifications.show({ title: 'Class assigned', message: `${itemIds.length} item(s) updated`, color: 'green' })
+    mutationFn: ({ selection, classId }: { selection: SelectionRequest; classId: string }) =>
+      classifyItems(projectId, { ...selection, classId }),
+    onSuccess: ({ updated, failed }) => {
+      notifications.show({
+        title: 'Class assigned',
+        message: `${updated} item(s) updated${failed ? `, ${failed} failed` : ''}`,
+        color: failed ? 'yellow' : 'green',
+      })
       invalidate()
     },
     onError: onError('Failed to assign class'),
   })
 
   const removeItems = useMutation({
-    mutationFn: ({ itemIds }: { itemIds: string[] }) => deleteItems(projectId, { itemIds }),
-    onSuccess: (_data, { itemIds }) => {
+    mutationFn: ({ selection }: { selection: SelectionRequest }) => deleteItems(projectId, selection),
+    onSuccess: ({ results }) => {
       notifications.show({
         title: 'Deleted',
-        message: `${itemIds.length} item(s) removed from the draft`,
+        message: `${results.length} item(s) removed from the draft`,
         color: 'green',
       })
       invalidate()

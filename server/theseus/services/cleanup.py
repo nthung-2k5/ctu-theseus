@@ -34,6 +34,11 @@ async def _run(steps: Iterable[tuple[Callable[..., Any], tuple[Any, ...]]]) -> N
     await asyncio.gather(*(loop.run_in_executor(None, _best_effort, fn, *args) for fn, args in steps))
 
 
+def _thumbnail_steps(source_prefix: str) -> list[tuple[Callable[..., Any], tuple]]:
+    # One step per cached size, so a failed delete of one size can't stop the others.
+    return [(storage.delete_prefix, (C.BUCKET_DATASETS, p)) for p in storage.thumbnail_prefixes(source_prefix)]
+
+
 def _version_steps(version_id: uuid.UUID | str, version_tag: str | None) -> list[tuple[Callable[..., Any], tuple]]:
     # The draft (no version tag) has no parquet or manifest; only real snapshots do.
     if version_tag is None:
@@ -44,6 +49,7 @@ def _version_steps(version_id: uuid.UUID | str, version_tag: str | None) -> list
         (storage.delete_file, (C.BUCKET_DATASETS, storage.snapshot_manifest_key(v))),
         (storage.delete_prefix, (C.BUCKET_DATASETS, storage.preprocessed_prefix(v))),
         (storage.delete_prefix, (C.BUCKET_DATASETS, storage.augmented_prefix(v))),
+        *_thumbnail_steps(f"snapshots/{v}/"),
     ]
 
 
@@ -96,6 +102,8 @@ async def cleanup_project_storage(session: AsyncSession, project_id: uuid.UUID) 
     steps: list[tuple[Callable[..., Any], tuple]] = []
     if storage_urls:
         steps.append((storage.delete_files, (C.BUCKET_DATASETS, list(storage_urls))))
+    # By prefix, not per object: it also catches the thumbnails of items that were deleted earlier.
+    steps.extend(_thumbnail_steps(f"pool/{project_id}/"))
     for version_id, tag in versions:
         steps.extend(_version_steps(version_id, tag))
     for run_id in runs:

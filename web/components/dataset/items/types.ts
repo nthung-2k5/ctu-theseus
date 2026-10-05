@@ -14,6 +14,8 @@ export interface DatasetListItem {
   createdAt: string | Date
   annotations?: Annotation[]
   downloadUrl?: string | null
+  /** A small JPEG of an image item, for grids; absent for anything that isn't an image. */
+  thumbnailUrl?: string | null
   textFeatures?: { rawText: string } | null
   visionFeatures?: { width: number; height: number; imageFormat: string | null } | null
   audioFeatures?: { durationSeconds: string | number; sampleRateHz: number } | null
@@ -29,7 +31,7 @@ export interface DatasetListItem {
 
 /** Per-item checkbox selection, for pages with batch operations (e.g. the Dataset draft page). */
 export interface ItemSelection {
-  selectedIds: ReadonlySet<string>
+  isSelected: (itemId: string) => boolean
   /** Toggle one item; `range` (shift-click) selects everything between the last toggled item and this one. */
   onToggle: (itemId: string, range?: boolean) => void
   /**

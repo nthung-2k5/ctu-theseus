@@ -241,9 +241,9 @@ async def delete_item_from_pool(session: AsyncSession, item_id: uuid.UUID, datas
         return "not_found"
     if storage_url[0]:
         try:
-            await asyncio.get_running_loop().run_in_executor(
-                None, storage.delete_file, C.BUCKET_DATASETS, storage_url[0]
-            )
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, storage.delete_file, C.BUCKET_DATASETS, storage_url[0])
+            await loop.run_in_executor(None, storage.delete_thumbnails, C.BUCKET_DATASETS, storage_url[0])
         except Exception:
             logger.warning("Could not delete pool object %s", storage_url[0], exc_info=True)
     return "deleted"

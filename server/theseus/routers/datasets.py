@@ -16,8 +16,10 @@ from typing import Annotated, Any, Literal
 
 import sqlalchemy as sa
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from theseus import constants as C
 from theseus.augmentation.config import MAX_AUGMENTED_ITEMS
@@ -30,6 +32,7 @@ from theseus.db.models import (
     DatasetVersion,
     DatasetVersionItem,
     LabelClass,
+    Project,
     TabularFeatures,
     TextFeatures,
     VisionFeatures,
@@ -74,6 +77,7 @@ from theseus.schemas.datasets import (
     ItemOut,
     ItemRow,
     ItemRowWithDuplicate,
+    ItemSelection,
     MinMaxAvg,
     PreprocessingListResponse,
     SetSplitBody,
@@ -94,11 +98,12 @@ from theseus.schemas.datasets import (
 )
 from theseus.schemas.projects import DatasetSplit, VersionOut
 from theseus.services import datasets as svc
-from theseus.services import storage
+from theseus.services import storage, thumbnails
 from theseus.services.cleanup import cleanup_version_storage
 from theseus.services.dataset_views import split_counts_for_dataset
 from theseus.services.derived_items import delete_derived_items
 from theseus.services.image_size import read_image_dimensions
+from theseus.services.item_filter import TooManyMatches, build_item_filters, matching_item_ids
 from theseus.services.snapshot import build_snapshot
 from theseus.services.task_registry import get_task_descriptor, is_classification_task
 
@@ -303,51 +308,25 @@ async def list_items(
     ground_truth = get_task_descriptor(project.task).annotation.type
     vi = DatasetVersionItem
 
-    split_value = split if split in svc.SPLITS else None
     order = {
         "oldest": (DatasetItem.created_at.asc(), DatasetItem.id.asc()),
         "filename": (DatasetItem.external_id.asc(), DatasetItem.id.asc()),
     }.get(sort or "newest", (DatasetItem.created_at.desc(), DatasetItem.id.desc()))
 
-    def classification_of(cid: uuid.UUID | None = None) -> sa.Exists:
-        clauses = [Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"]
-        if cid is not None:
-            clauses.append(Annotation.class_id == cid)
-        return sa.exists().where(*clauses)
-
-    # Split/search-scoped but deliberately WITHOUT the class filter: the class-count breakdown groups
-    # over this, so every class count reflects the current split and search whatever class is selected.
-    base = [vi.version_id == version.id]
-    if origin != "all":
-        # "original" here means "not an augmented copy": a preprocessed replacement counts as
-        # original too, since it still stands in for exactly one real item. correlate(vi) only:
-        # the listing query joins DatasetItem itself, and auto-correlation would otherwise strip
-        # it from this subquery's FROM.
-        is_original = sa.exists().where(DatasetItem.id == vi.item_id, DatasetItem.augmentation.is_(None)).correlate(vi)
-        base.append(is_original if origin == "original" else ~is_original)
-    if split_value:
-        base.append(vi.split_type == split_value)
-    if search:
-        base.append(
-            vi.item_id.in_(
-                sa.select(DatasetItem.id).where(
-                    DatasetItem.dataset_id == project.id, DatasetItem.external_id.icontains(search, autoescape=True)
-                )
-            )
+    try:
+        filters = build_item_filters(
+            version_id=version.id,
+            dataset_id=project.id,
+            ground_truth=ground_truth,
+            origin=origin,
+            split=split,
+            class_id=class_id,
+            search=search,
+            labeled=labeled_filter,
         )
-    raw = list(base)
-    if class_id == "unassigned":
-        raw.append(~classification_of())
-    elif class_id:
-        try:
-            raw.append(classification_of(uuid.UUID(class_id)))
-        except ValueError:
-            raise HTTPException(400, "classId must be a class id or 'unassigned'") from None
-    if labeled_filter is not None:
-        has_ground_truth = sa.exists().where(
-            Annotation.item_id == vi.item_id, Annotation.annotation_type == ground_truth
-        )
-        raw.append(has_ground_truth if labeled_filter else ~has_ground_truth)
+    except ValueError:
+        raise HTTPException(400, "classId must be a class id or 'unassigned'") from None
+    base, raw = filters.base, filters.raw
 
     total = (await session.execute(sa.select(sa.func.count()).select_from(vi).where(*raw))).scalar_one()
     labeled = (
@@ -442,6 +421,9 @@ async def list_items(
                     download_url=storage.get_download_url(C.BUCKET_DATASETS, item.storage_url, 3600)
                     if item.storage_url
                     else None,
+                    thumbnail_url=f"/api/items/{item_id}/thumbnail?size={thumbnails.LIST_SIZE}"
+                    if thumbnails.is_thumbnailable(item.storage_url)
+                    else None,
                     source_item_id=item.source_item_id,
                     source_external_id=source_names.get(item.source_item_id) if item.source_item_id else None,
                     preprocessing=item.preprocessing,
@@ -458,6 +440,26 @@ async def list_items(
         page=page,
         per_page=per_page,
     )
+
+
+@router.get("/items/{item_id}/thumbnail", status_code=307, response_class=Response)
+async def get_item_thumbnail(item: ItemDep, size: Annotated[int, Query()] = thumbnails.LIST_SIZE) -> RedirectResponse:
+    """A cached JPEG thumbnail of an image item, made on first request. Redirects to object storage."""
+    if size not in storage.THUMBNAIL_SIZES:
+        raise HTTPException(422, f"size must be one of {', '.join(str(s) for s in storage.THUMBNAIL_SIZES)}")
+    if not thumbnails.is_thumbnailable(item.storage_url):
+        raise HTTPException(404, "This item has no thumbnail")
+    assert item.storage_url is not None
+    loop = asyncio.get_running_loop()
+    try:
+        key = await loop.run_in_executor(None, thumbnails.ensure_thumbnail, item.storage_url, size)
+    except Exception:
+        # An undecodable or oversized image: the client falls back to the full-size download.
+        logger.warning("Could not make a thumbnail for item %s", item.id, exc_info=True)
+        raise HTTPException(422, "Could not make a thumbnail for this item") from None
+    url = storage.get_download_url(C.BUCKET_DATASETS, key, 3600)
+    # Cached for less than the presigned URL lives, so the browser never replays an expired redirect.
+    return RedirectResponse(url, status_code=307, headers={"Cache-Control": "private, max-age=1800"})
 
 
 # -- Adding items ----------------------------------------------------------------------------
@@ -605,6 +607,40 @@ async def upload_items(
 # -- Deleting, splitting, labeling -----------------------------------------------------------
 
 
+async def _selected_item_ids(
+    body: ItemSelection, project: Project, session: AsyncSession, draft_id: uuid.UUID | None = None
+) -> list[uuid.UUID]:
+    """The explicit ids, or whatever the filter matches in the draft right now (bulk edits only touch the draft)."""
+    if body.item_ids is not None:
+        return body.item_ids
+    assert body.filter is not None  # ItemSelection guarantees exactly one selector
+    if draft_id is None:
+        draft_id = (
+            await session.execute(
+                sa.select(DatasetVersion.id).where(
+                    DatasetVersion.dataset_id == project.id, DatasetVersion.version_tag.is_(None)
+                )
+            )
+        ).scalar_one_or_none()
+        if draft_id is None:
+            raise HTTPException(404, "Draft dataset not found")
+    try:
+        filters = build_item_filters(
+            version_id=draft_id,
+            dataset_id=project.id,
+            ground_truth=get_task_descriptor(project.task).annotation.type,
+            split=body.filter.split,
+            class_id=body.filter.class_id,
+            search=body.filter.search,
+            labeled=body.filter.labeled,
+        )
+        return await matching_item_ids(session, filters, body.exclude_item_ids)
+    except ValueError:
+        raise HTTPException(400, "classId must be a class id or 'unassigned'") from None
+    except TooManyMatches as e:
+        raise HTTPException(400, str(e)) from None
+
+
 @router.delete("/items/{item_id}", status_code=204)
 async def delete_item(item: ItemDep, session: SessionDep) -> None:
     if item.source_item_id is not None:
@@ -615,9 +651,10 @@ async def delete_item(item: ItemDep, session: SessionDep) -> None:
 
 @router.delete("/projects/{project_id}/items", response_model=DeleteItemsResponse)
 async def delete_items(body: DeleteItemsBody, project: ProjectDep, session: SessionDep) -> DeleteItemsResponse:
+    item_ids = await _selected_item_ids(body, project, session)
     outcomes = [
         DeleteOutcome(item_id=item_id, outcome=await svc.delete_item_from_pool(session, item_id, project.id))
-        for item_id in body.item_ids
+        for item_id in item_ids
     ]
     await session.commit()
     return DeleteItemsResponse(results=outcomes)
@@ -626,11 +663,12 @@ async def delete_items(body: DeleteItemsBody, project: ProjectDep, session: Sess
 @router.patch("/projects/{project_id}/items/split", response_model=SetSplitResponse)
 async def set_items_split(body: SetSplitBody, draft: DraftDep, session: SessionDep) -> SetSplitResponse:
     """Bulk-reassign the draft split of pool items."""
+    item_ids = await _selected_item_ids(body, draft.project, session, draft.draft.id)
     updated = (
         (
             await session.execute(
                 sa.update(DatasetVersionItem)
-                .where(DatasetVersionItem.version_id == draft.draft.id, DatasetVersionItem.item_id.in_(body.item_ids))
+                .where(DatasetVersionItem.version_id == draft.draft.id, DatasetVersionItem.item_id.in_(item_ids))
                 .values(split_type=body.split)
                 .returning(DatasetVersionItem.item_id)
             )
@@ -649,8 +687,9 @@ async def classify_items(body: ClassifyBody, project: ProjectDep, session: Sessi
         raise HTTPException(400, svc.NO_LABEL_CLASSES)
     if not await svc.class_in_dataset(session, body.class_id, project.id):
         raise HTTPException(400, "Unknown label class")
+    item_ids = await _selected_item_ids(body, project, session)
     updated = failed = 0
-    for item_id in body.item_ids:
+    for item_id in item_ids:
         try:
             async with session.begin_nested():
                 owned = (

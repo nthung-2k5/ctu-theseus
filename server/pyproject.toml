@@ -28,6 +28,9 @@ dependencies = [
   'pyyaml',
   'uuid-utils',
 
+  # Image thumbnails and augmentation
+  'pillow',
+
   # S3-compatible storage
   'boto3',
   's3fs',

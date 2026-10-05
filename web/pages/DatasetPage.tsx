@@ -8,7 +8,6 @@
 
 import { Button, Modal, Paper, Stack, Tabs } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { notifications } from '@mantine/notifications'
 import { DatabaseIcon, HeartbeatIcon, PlusIcon, ShuffleIcon } from '@phosphor-icons/react'
 import { AutoSplitForm } from '@public/components/dataset/AutoSplitForm'
 import { BulkActionsToolbar } from '@public/components/dataset/BulkActionsToolbar'
@@ -18,24 +17,15 @@ import { type ItemLabeled, ItemsFilterBar } from '@public/components/dataset/Ite
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
 import { SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { EmptyState, LinkButton, PageHeader } from '@public/components/ui'
-import { useItemMutations } from '@public/hooks/useItemMutations'
+import { oneItem, useItemMutations } from '@public/hooks/useItemMutations'
 import { useItemSelection } from '@public/hooks/useItemSelection'
-import {
-  projectDetailQueryOptions,
-  projectItemsQueryOptions,
-  useLabelClasses,
-  useProjectItems,
-} from '@public/lib/queries'
+import type { MatchFilter } from '@public/lib/itemSelection'
+import { projectDetailQueryOptions, useLabelClasses, useProjectItems } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
-import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 
 const routeApi = getRouteApi('/_app/project/$projectId/dataset')
-
-// Bulk mutations cap at 1000 item ids per request (server-side), so
-// "select all matching items" fetches at most that many even if the
-// filtered total is larger.
-const BULK_SELECTION_CAP = 1000
 
 /* ── Main Dataset page ── */
 export function DatasetPage() {
@@ -49,7 +39,6 @@ export function DatasetPage() {
   const descriptor = getTaskDescriptor(activeProject.task)
 
   const [autoSplitOpened, { open: openAutoSplit, close: closeAutoSplit }] = useDisclosure(false)
-  const queryClient = useQueryClient()
 
   const { data: classesData } = useLabelClasses(descriptor.annotation.requiresLabelClasses ? projectId : undefined)
   const classes = classesData?.classes ?? []
@@ -75,31 +64,18 @@ export function DatasetPage() {
   const classCounts: Record<string, number> = { unassigned: data?.unassignedCount ?? 0 }
   for (const c of data?.classCounts ?? []) classCounts[c.classId] = c.count
 
-  // Selection is scoped to the current split/class/search filter — changing
-  // any of them invalidates any selection made under the previous filter.
-  const { selection, selectedIds, clear, replace } = useItemSelection({
+  // Selection is scoped to the current split/class/search/labeled filter — changing any of them
+  // invalidates any selection made under the previous filter. It survives paging, and "select all
+  // matching" is a filter the server resolves, not a list of ids fetched here.
+  const matchFilter: MatchFilter = {
+    split: filters.split,
+    classId: filters.classId,
+    search: filters.search,
+    labeled: filters.labeled,
+  }
+  const bulk = useItemSelection({
     visibleIds: items.map((i) => i.id),
     resetKey: `${split ?? ''}|${classId ?? ''}|${search ?? ''}|${labeled ?? ''}`,
-  })
-
-  const selectAllMatching = useMutation({
-    mutationFn: async () => {
-      const result = await queryClient.fetchQuery(
-        projectItemsQueryOptions(projectId, { ...filters, page: 1, perPage: Math.min(total, BULK_SELECTION_CAP) }),
-      )
-      return result.items.map((item) => item.id)
-    },
-    onSuccess: (ids) => {
-      replace(ids)
-      if (total > BULK_SELECTION_CAP) {
-        notifications.show({
-          title: 'Selection capped',
-          message: `Selected the first ${BULK_SELECTION_CAP} of ${total} matching items — bulk actions support at most ${BULK_SELECTION_CAP} at a time.`,
-          color: 'yellow',
-        })
-      }
-    },
-    onError: () => notifications.show({ title: 'Error', message: 'Failed to select all matching items', color: 'red' }),
   })
 
   // Free-text ground truth (captioning/ASR/generation) is edited per-item from the detail
@@ -128,12 +104,12 @@ export function DatasetPage() {
   // so they notify and invalidate exactly as the bulk toolbar does.
   const editing: ItemEditing = {
     classes: descriptor.annotation.requiresLabelClasses ? classes : [],
-    onSetSplit: (itemId, split) => reassignSplit.mutate({ itemIds: [itemId], split }),
-    onSetClass: (itemId, classId) => assignClass.mutate({ itemIds: [itemId], classId }),
+    onSetSplit: (itemId, split) => reassignSplit.mutate({ selection: oneItem(itemId), split }),
+    onSetClass: (itemId, classId) => assignClass.mutate({ selection: oneItem(itemId), classId }),
     onSaveTarget: async (itemId, existingAnnotationId, value) => {
       await saveTarget.mutateAsync({ itemId, existingAnnotationId, value })
     },
-    onDelete: (itemId) => removeItems.mutate({ itemIds: [itemId] }),
+    onDelete: (itemId) => removeItems.mutate({ selection: oneItem(itemId) }),
   }
 
   const draftSplitCounts = dataset?.draft ? splitCounts(dataset.draft) : null
@@ -224,7 +200,7 @@ export function DatasetPage() {
                 onRetry={() => refetch()}
                 classNameById={classNameById}
                 emptyMessage="No items in the draft yet — add some from the Upload page."
-                selection={selection}
+                selection={bulk.selection}
                 captionEditing={captionEditing}
                 editing={editing}
               />
@@ -232,14 +208,15 @@ export function DatasetPage() {
               {items.length > 0 && (
                 <BulkActionsToolbar
                   projectId={projectId}
-                  selectedIds={selectedIds}
-                  onClear={clear}
+                  request={bulk.request(matchFilter)}
+                  count={bulk.count(total)}
+                  exclusionCount={bulk.exclusionCount}
+                  onClear={bulk.clear}
                   requiresLabelClasses={descriptor.annotation.requiresLabelClasses}
                   pageCount={items.length}
                   total={total}
-                  onSelectPage={() => replace(items.map((i) => i.id))}
-                  onSelectAllMatching={() => selectAllMatching.mutate()}
-                  selectingAll={selectAllMatching.isPending}
+                  onSelectPage={() => bulk.selectPage(items.map((i) => i.id))}
+                  onSelectAllMatching={bulk.selectAllMatching}
                 />
               )}
 

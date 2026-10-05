@@ -8,6 +8,7 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
+from theseus import constants as C
 from theseus.db.models import Annotation
 from theseus.services import datasets as svc
 from theseus.services import storage
@@ -18,6 +19,7 @@ def fake_s3(monkeypatch):
     store: dict[tuple[str, str], bytes] = {}
     monkeypatch.setattr(storage, "upload_bytes", lambda b, k, data, content_type=None: store.__setitem__((b, k), data))
     monkeypatch.setattr(storage, "file_exists", lambda b, k: (b, k) in store)
+    monkeypatch.setattr(storage, "download_bytes", lambda b, k: store[(b, k)])
     monkeypatch.setattr(storage, "get_download_url", lambda b, k, expires_in=3600: f"https://s3.test/{b}/{k}")
     for name in ("delete_file", "delete_files", "delete_prefix"):
         monkeypatch.setattr(storage, name, lambda *a, **k: None)
@@ -103,6 +105,172 @@ async def test_labeled_filter_follows_the_tasks_ground_truth_type(client, new_us
     assert [i["id"] for i in (await page(c, cap["id"], labeled="true"))["items"]] == [x]
     assert [i["id"] for i in (await page(c, cap["id"], labeled="false"))["items"]] == [y]
     assert (await c.get(f"/api/projects/{cap['id']}/items", params={"labeled": "maybe"})).status_code == 422
+
+
+# -- Thumbnails ------------------------------------------------------------------------------
+
+
+def real_png(w, h):
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 30, 30)).save(out, "PNG")
+    return out.getvalue()
+
+
+async def upload_image(c, pid, data):
+    r = await c.post(
+        f"/api/projects/{pid}/upload", data={"split": "train"}, files=[("files", ("a.png", data, "image/png"))]
+    )
+    assert r.json()["results"][0]["status"] != "rejected", r.text
+    return (await page(c, pid))["items"][0]
+
+
+async def test_a_thumbnail_is_made_once_cached_and_served_by_redirect(client, new_user, fake_s3):
+    c = await new_user()
+    p = await project(c, "image_classification")
+    item_ = await upload_image(c, p["id"], real_png(800, 400))
+    assert item_["thumbnailUrl"] == f"/api/items/{item_['id']}/thumbnail?size=256"
+
+    r = await c.get(item_["thumbnailUrl"], follow_redirects=False)
+    assert r.status_code == 307
+    cached = [k for (b, k) in fake_s3 if k.startswith("thumbnails/256/pool/")]
+    assert len(cached) == 1 and r.headers["location"].endswith(cached[0])
+    thumb = fake_s3[(C.BUCKET_DATASETS, cached[0])]
+
+    from io import BytesIO
+
+    from PIL import Image
+
+    with Image.open(BytesIO(thumb)) as im:
+        assert im.format == "JPEG" and im.size == (256, 128)  # fitted inside 256, aspect kept
+
+    fake_s3[(C.BUCKET_DATASETS, cached[0])] = b"already cached"
+    await c.get(item_["thumbnailUrl"], follow_redirects=False)
+    assert fake_s3[(C.BUCKET_DATASETS, cached[0])] == b"already cached"  # the second request did not regenerate it
+
+
+async def test_a_small_image_is_never_upscaled(client, new_user, fake_s3):
+    c = await new_user()
+    p = await project(c, "image_classification")
+    item_ = await upload_image(c, p["id"], real_png(40, 30))
+    await c.get(f"/api/items/{item_['id']}/thumbnail?size=512", follow_redirects=False)
+    from io import BytesIO
+
+    from PIL import Image
+
+    (key,) = [k for (b, k) in fake_s3 if k.startswith("thumbnails/512/")]
+    with Image.open(BytesIO(fake_s3[(C.BUCKET_DATASETS, key)])) as im:
+        assert im.size == (40, 30)
+
+
+async def test_thumbnail_rejects_odd_sizes_unthumbnailable_items_and_undecodable_images(client, new_user):
+    c = await new_user()
+    p = await project(c, "image_classification")
+    item_ = await upload_image(c, p["id"], png(10, 10))  # a valid header, but no image data behind it
+    assert (await c.get(f"/api/items/{item_['id']}/thumbnail?size=300")).status_code == 422
+    assert (await c.get(f"/api/items/{item_['id']}/thumbnail", follow_redirects=False)).status_code == 422
+
+    t = await project(c)
+    (text_id,) = await add(c, t["id"], item("not an image"))
+    assert (await c.get(f"/api/items/{text_id}/thumbnail")).status_code == 404
+    assert (await page(c, t["id"]))["items"][0]["thumbnailUrl"] is None
+
+
+async def test_thumbnails_are_owner_only(client, new_user):
+    owner, stranger = await new_user(), await new_user()
+    p = await project(owner, "image_classification")
+    item_ = await upload_image(owner, p["id"], real_png(20, 20))
+    assert (await stranger.get(item_["thumbnailUrl"], follow_redirects=False)).status_code in (403, 404)
+
+
+async def test_deleting_an_item_drops_its_cached_thumbnails(client, new_user, monkeypatch):
+    dropped: list[str] = []
+    monkeypatch.setattr(storage, "delete_thumbnails", lambda bucket, key: dropped.append(key))
+    c = await new_user()
+    p = await project(c, "image_classification")
+    item_ = await upload_image(c, p["id"], real_png(20, 20))
+    assert (await c.delete(f"/api/items/{item_['id']}")).status_code == 204
+    assert len(dropped) == 1 and dropped[0].startswith("pool/")
+
+
+# -- Filter-based bulk -----------------------------------------------------------------------
+
+
+async def test_bulk_split_by_filter_acts_on_everything_matching_minus_the_exclusions(client, new_user):
+    c = await new_user()
+    p = await project(c)
+    ids = await add(c, p["id"], *[item(f"t{i}", split="train") for i in range(5)], item("v", split="validation"))
+    train, keep = ids[:5], ids[1]
+    r = await c.patch(
+        f"/api/projects/{p['id']}/items/split",
+        json={"filter": {"split": "train"}, "excludeItemIds": [keep], "split": "test"},
+    )
+    assert r.status_code == 200, r.text
+    assert sorted(r.json()["updated"]) == sorted(set(train) - {keep})
+    splits = {i["id"]: i["splitType"] for i in (await page(c, p["id"]))["items"]}
+    assert (
+        splits[keep] == "train" and splits[ids[5]] == "validation"
+    )  # the excluded and non-matching items are untouched
+    assert sorted(i for i, s in splits.items() if s == "test") == sorted(set(train) - {keep})
+
+
+async def test_bulk_classify_and_delete_by_filter(client, new_user):
+    c = await new_user()
+    p = await project(c)
+    cat, dog = await make_class(c, p["id"], "cat"), await make_class(c, p["id"], "dog")
+    await add(c, p["id"], item("a"), item("b"), item("c", cls=dog), item("d"))
+
+    r = await c.post(
+        f"/api/projects/{p['id']}/items/classify", json={"filter": {"classId": "unassigned"}, "classId": cat}
+    )
+    assert r.json() == {"updated": 3, "failed": 0}  # c already had a class, so it is not in the match
+    labels = {
+        i["externalId"] or i["textFeatures"]["rawText"]: i["annotations"][0]["classId"]
+        for i in (await page(c, p["id"]))["items"]
+    }
+    assert sorted(labels.values()) == sorted([cat, cat, cat, dog])
+
+    r = await c.request("DELETE", f"/api/projects/{p['id']}/items", json={"filter": {"classId": dog}})
+    assert [o["outcome"] for o in r.json()["results"]] == ["deleted"]
+    remaining = (await page(c, p["id"]))["items"]
+    assert len(remaining) == 3 and all(
+        i["annotations"][0]["classId"] == cat for i in remaining
+    )  # only the dog item went
+
+
+async def test_a_selection_is_exactly_one_of_ids_or_filter(client, new_user):
+    c = await new_user()
+    p = await project(c)
+    (a,) = await add(c, p["id"], item("a"))
+    url = f"/api/projects/{p['id']}/items/split"
+    assert (await c.patch(url, json={"split": "test"})).status_code == 422  # neither
+    assert (await c.patch(url, json={"itemIds": [a], "filter": {}, "split": "test"})).status_code == 422  # both
+    assert (await c.patch(url, json={"itemIds": [a], "excludeItemIds": [a], "split": "test"})).status_code == 422
+    assert (await c.patch(url, json={"filter": {"classId": "nope"}, "split": "test"})).status_code == 400
+
+
+async def test_a_filter_matching_too_many_items_is_refused_not_truncated(client, new_user, monkeypatch):
+    from theseus.services import item_filter
+
+    monkeypatch.setattr(item_filter, "MAX_FILTER_BULK", 3)
+    c = await new_user()
+    p = await project(c)
+    await add(c, p["id"], *[item(f"r{i}") for i in range(4)])
+    r = await c.patch(f"/api/projects/{p['id']}/items/split", json={"filter": {}, "split": "test"})
+    assert r.status_code == 400 and "narrow the filter" in r.json()["error"]["message"]
+    assert {i["splitType"] for i in (await page(c, p["id"]))["items"]} == {"train"}  # nothing was changed
+
+
+async def test_a_filter_never_reaches_another_projects_items(client, new_user):
+    c = await new_user()
+    mine, other = await project(c), await project(c)
+    await add(c, mine["id"], item("m"))
+    await add(c, other["id"], item("o"))
+    await c.patch(f"/api/projects/{mine['id']}/items/split", json={"filter": {}, "split": "test"})
+    assert (await page(c, other["id"]))["items"][0]["splitType"] == "train"
 
 
 # -- Classify --------------------------------------------------------------------------------

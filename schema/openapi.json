@@ -1079,6 +1079,53 @@
         }
       }
     },
+    "/api/items/{item_id}/thumbnail": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Item Thumbnail",
+        "description": "A cached JPEG thumbnail of an image item, made on first request. Redirects to object storage.",
+        "operationId": "get_item_thumbnail",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 256,
+              "title": "Size"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{project_id}/upload": {
       "post": {
         "tags": [
@@ -5226,14 +5273,40 @@
       "ClassifyBody": {
         "properties": {
           "itemIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array",
+                "maxItems": 1000,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Itemids"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemFilter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "excludeItemIds": {
             "items": {
               "type": "string",
               "format": "uuid"
             },
             "type": "array",
             "maxItems": 1000,
-            "minItems": 1,
-            "title": "Itemids"
+            "title": "Excludeitemids"
           },
           "classId": {
             "type": "string",
@@ -5243,7 +5316,6 @@
         },
         "type": "object",
         "required": [
-          "itemIds",
           "classId"
         ],
         "title": "ClassifyBody"
@@ -6206,20 +6278,43 @@
       "DeleteItemsBody": {
         "properties": {
           "itemIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array",
+                "maxItems": 1000,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Itemids"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemFilter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "excludeItemIds": {
             "items": {
               "type": "string",
               "format": "uuid"
             },
             "type": "array",
             "maxItems": 1000,
-            "minItems": 1,
-            "title": "Itemids"
+            "title": "Excludeitemids"
           }
         },
         "type": "object",
-        "required": [
-          "itemIds"
-        ],
         "title": "DeleteItemsBody"
       },
       "DeleteItemsResponse": {
@@ -6828,6 +6923,62 @@
         ],
         "title": "ItemFailure"
       },
+      "ItemFilter": {
+        "properties": {
+          "split": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "train",
+                  "test",
+                  "validation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "classId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classid"
+          },
+          "search": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search"
+          },
+          "labeled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labeled"
+          }
+        },
+        "type": "object",
+        "title": "ItemFilter",
+        "description": "The item listing's filters, to act on \"everything matching\" instead of on listed ids."
+      },
       "ItemIn": {
         "properties": {
           "split": {
@@ -7101,6 +7252,17 @@
               }
             ],
             "title": "Downloadurl"
+          },
+          "thumbnailUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnailurl"
           },
           "sourceItemId": {
             "anyOf": [
@@ -8963,14 +9125,40 @@
       "SetSplitBody": {
         "properties": {
           "itemIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array",
+                "maxItems": 1000,
+                "minItems": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Itemids"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemFilter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "excludeItemIds": {
             "items": {
               "type": "string",
               "format": "uuid"
             },
             "type": "array",
             "maxItems": 1000,
-            "minItems": 1,
-            "title": "Itemids"
+            "title": "Excludeitemids"
           },
           "split": {
             "type": "string",
@@ -8984,7 +9172,6 @@
         },
         "type": "object",
         "required": [
-          "itemIds",
           "split"
         ],
         "title": "SetSplitBody"
