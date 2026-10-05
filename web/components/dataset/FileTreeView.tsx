@@ -31,9 +31,9 @@ import type { DropContext, LayoutKind } from '@public/lib/upload/types'
 import type { FileStaging } from '@public/lib/upload/useFileStaging'
 import type { LabelClass, SplitType } from '@public/store/types'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { type ChangeEvent, type DragEvent, type MouseEvent, useMemo, useRef, useState } from 'react'
+import { type ChangeEvent, type DragEvent, type KeyboardEvent, type MouseEvent, useMemo, useRef, useState } from 'react'
 import { FilePreview } from './FilePreview'
-import { ClassRow, FileRow, type FolderActions, ROW_HEIGHT, SplitRow } from './FileTreeRows'
+import { ClassRow, FileRow, type FolderActions, ROW_HEIGHT, RowNavContext, SplitRow } from './FileTreeRows'
 import { openMapToClass, openRenameFolder } from './FolderModals'
 
 /** Extensions that always go through the file picker, whatever the task accepts. */
@@ -147,6 +147,56 @@ export function FileTreeView({
     overscan: 12,
     getItemKey: (i) => rows[i].key,
   })
+
+  // Keyboard: one row is tabbable at a time (a roving tabindex), and the arrow keys move it.
+  const [activeRow, setActiveRow] = useState(0)
+  const mountedRows = virtualizer.getVirtualItems()
+  // If the active row has scrolled out of the virtualized window the tree would have no tab stop at all.
+  const tabbableRow = mountedRows.some((v) => v.index === activeRow) ? activeRow : (mountedRows[0]?.index ?? 0)
+
+  const focusRow = (target: number) => {
+    const index = Math.max(0, Math.min(rows.length - 1, target))
+    setActiveRow(index)
+    virtualizer.scrollToIndex(index)
+    // The row may not be mounted until after the scroll, so focus it on the next frame.
+    requestAnimationFrame(() =>
+      parentRef.current?.querySelector<HTMLElement>(`[role="treeitem"][data-row-index="${index}"]`)?.focus(),
+    )
+  }
+
+  const onTreeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const row = event.target as HTMLElement
+    if (row.getAttribute('role') !== 'treeitem') return // a checkbox or menu inside a row keeps its own keys
+    const index = Number(row.dataset.rowIndex)
+    const expanded = row.getAttribute('aria-expanded')
+    switch (event.key) {
+      case 'ArrowDown':
+        focusRow(index + 1)
+        break
+      case 'ArrowUp':
+        focusRow(index - 1)
+        break
+      case 'Home':
+        focusRow(0)
+        break
+      case 'End':
+        focusRow(rows.length - 1)
+        break
+      case 'ArrowRight':
+        if (expanded === 'false') row.click()
+        break
+      case 'ArrowLeft':
+        if (expanded === 'true') row.click()
+        break
+      case 'Enter':
+      case ' ':
+        row.click() // opens or closes a folder, selects a file
+        break
+      default:
+        return
+    }
+    event.preventDefault()
+  }
 
   // Files that were uploaded (or removed) since they were selected drop out of the selection.
   const selectedIds = useMemo(() => [...selected].filter((id) => state.files.has(id)), [selected, state.files])
@@ -399,6 +449,8 @@ export function FileTreeView({
         <div
           ref={parentRef}
           role="tree"
+          aria-label="Files to upload"
+          onKeyDown={onTreeKeyDown}
           onDragOver={rootDrop.onDragOver}
           onDrop={rootDrop.onDrop}
           onDragLeave={(event) => {
@@ -439,7 +491,15 @@ export function FileTreeView({
                     transform: `translateY(${item.start}px)`,
                   }}
                 >
-                  {renderRow(rows[item.index], item.index)}
+                  <RowNavContext.Provider
+                    value={{
+                      index: item.index,
+                      tabbable: item.index === tabbableRow,
+                      onFocus: () => setActiveRow(item.index),
+                    }}
+                  >
+                    {renderRow(rows[item.index], item.index)}
+                  </RowNavContext.Provider>
                 </div>
               ))}
             </div>

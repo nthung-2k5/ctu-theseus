@@ -6,9 +6,10 @@
 import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Table, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon, MagicWandIcon, StackIcon, TrashIcon } from '@phosphor-icons/react'
+import { BuildStatus } from '@public/components/dataset/BuildStatus'
 import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { type ItemOrigin, type ItemSort, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
-import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
+import { ItemsFooter } from '@public/components/dataset/ItemsFooter'
 import { opLabel } from '@public/components/dataset/items/ops'
 import { SPLIT_TYPES, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import {
@@ -69,6 +70,9 @@ export function SnapshotDetailPage() {
   })
   const items = data?.items ?? []
   const total = data?.total ?? 0
+  // Per-class counts for the current split/search, like the draft page: the filter shows "cat (12)".
+  const classCounts: Record<string, number> = { unassigned: data?.unassignedCount ?? 0 }
+  for (const c of data?.classCounts ?? []) classCounts[c.classId] = c.count
 
   const goToList = () => navigate({ to: '/project/$projectId/snapshots', params: { projectId } })
 
@@ -148,6 +152,8 @@ export function SnapshotDetailPage() {
           </>
         }
       />
+
+      {version.status === 'building' && <BuildStatus />}
 
       <SimpleGrid cols={{ base: 2, md: 5 }} spacing="sm">
         <StatCard label="Items" value={version.itemCount ?? 0} />
@@ -302,6 +308,7 @@ export function SnapshotDetailPage() {
           classes={classes}
           classId={classId ?? null}
           onClassChange={(c) => setSearch({ classId: c ?? undefined })}
+          classCounts={classCounts}
           search={search ?? ''}
           onSearchChange={(s) => setSearch({ search: s || undefined })}
           sort={(sort ?? 'newest') as ItemSort}
@@ -320,7 +327,7 @@ export function SnapshotDetailPage() {
           emptyMessage="No items in this split"
         />
         {items.length > 0 && (
-          <ItemsPaginationBar
+          <ItemsFooter
             total={total}
             page={page}
             perPage={perPage}

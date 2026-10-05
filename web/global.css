@@ -99,6 +99,12 @@ body {
     border-color: var(--mantine-color-cyan-5);
   }
 
+  /* A card's open button is tiny; when it takes keyboard focus the whole card shows it. */
+  .card-elevated:has([data-grid-item]:focus-visible) {
+    outline: 2px solid var(--mantine-primary-color-filled);
+    outline-offset: 2px;
+  }
+
   /* The active nav row's tint is ~1.1-1.2:1 against the sidebar, so a solid accent bar
      (>=3:1 in both schemes) carries the "you are here" state; dark also gets a stronger tint. */
   .mantine-NavLink-root[data-active] {

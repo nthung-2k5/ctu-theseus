@@ -27,7 +27,7 @@ import { formatBytes } from '@public/lib/format'
 import { fileIssues, NO_CLASS_MESSAGE } from '@public/lib/upload/fileTree'
 import type { TreeRow } from '@public/lib/upload/rows'
 import type { DropContext } from '@public/lib/upload/types'
-import type { CSSProperties, DragEvent, MouseEvent, ReactNode } from 'react'
+import { type CSSProperties, createContext, type DragEvent, type MouseEvent, type ReactNode, useContext } from 'react'
 
 export const ROW_HEIGHT = 32
 const INDENT = 22
@@ -43,8 +43,17 @@ export interface FolderActions {
   onMapToClass?: () => void
 }
 
+/**
+ * Which row this is and whether it is the tree's one tabbable row (a roving tabindex): Tab then enters and
+ * leaves the whole tree in one stop, and the arrow keys move between rows (see FileTreeView). The row index
+ * rides in context so the three row kinds below need no extra props.
+ */
+export const RowNavContext = createContext<{ index: number; tabbable: boolean; onFocus: () => void } | null>(null)
+
 interface RowFrame {
   depth: number
+  /** Set on folder rows: whether they are open, announced to assistive tech and used by Left/Right. */
+  expanded?: boolean
   selected?: boolean
   dropActive?: boolean
   children: ReactNode
@@ -55,7 +64,8 @@ interface RowFrame {
   }
 }
 
-function RowFrame({ depth, selected, dropActive, children, onClick, dragHandlers }: RowFrame) {
+function RowFrame({ depth, expanded, selected, dropActive, children, onClick, dragHandlers }: RowFrame) {
+  const nav = useContext(RowNavContext)
   const style: CSSProperties = {
     height: ROW_HEIGHT,
     paddingLeft: 8 + depth * INDENT,
@@ -69,14 +79,20 @@ function RowFrame({ depth, selected, dropActive, children, onClick, dragHandlers
     outlineOffset: -1,
   }
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Enter/Space/arrows are handled once, on the tree container (FileTreeView's onTreeKeyDown), so every row doesn't carry its own handler
     <div
       role="treeitem"
       aria-selected={selected}
-      tabIndex={-1}
-      className="flex items-center gap-2 cursor-default select-none hover:bg-[var(--mantine-color-default-hover)]"
+      aria-expanded={expanded}
+      data-row-index={nav?.index}
+      tabIndex={nav?.tabbable ? 0 : -1}
+      className="mantine-focus-auto flex items-center gap-2 cursor-default select-none hover:bg-[var(--mantine-color-default-hover)]"
       style={style}
       onClick={onClick}
-      onKeyDown={undefined}
+      // Only the row itself taking focus counts: its checkbox and menu are focusable too.
+      onFocus={(event) => {
+        if (event.target === event.currentTarget) nav?.onFocus()
+      }}
       {...dragHandlers}
     >
       {children}
@@ -161,7 +177,7 @@ export function ClassRow({
 }) {
   const { node, open } = row
   return (
-    <RowFrame depth={0} dropActive={dropActive} dragHandlers={dragHandlers} onClick={actions.onToggle}>
+    <RowFrame depth={0} expanded={open} dropActive={dropActive} dragHandlers={dragHandlers} onClick={actions.onToggle}>
       {open ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
       <RowCheckbox selection={selection} onSelect={onSelect} disabled={disabled} />
       {open ? <FolderOpenIcon size={18} weight="fill" /> : <FolderIcon size={18} weight="fill" />}
@@ -208,7 +224,13 @@ export function SplitRow({
 }) {
   const { node, split, count, open, depth } = row
   return (
-    <RowFrame depth={depth} dropActive={dropActive} dragHandlers={dragHandlers} onClick={actions.onToggle}>
+    <RowFrame
+      depth={depth}
+      expanded={open}
+      dropActive={dropActive}
+      dragHandlers={dragHandlers}
+      onClick={actions.onToggle}
+    >
       {open ? <CaretDownIcon size={12} /> : <CaretRightIcon size={12} />}
       <RowCheckbox selection={selection} onSelect={onSelect} disabled={disabled || count === 0} />
       {open ? <FolderOpenIcon size={18} /> : <FolderIcon size={18} />}

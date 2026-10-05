@@ -2,38 +2,26 @@ import { Group, Pagination, Paper, Select, Text } from '@mantine/core'
 
 export const PER_PAGE_OPTIONS = [20, 50, 100, 200, 500, 1000] as const
 
-/**
- * Bottom toolbar for an item list: total count, per-page size, and page
- * controls. Attached to the end of the list (not a floating overlay), but
- * sticky so it stays on screen at the bottom of the viewport while the list
- * scrolls past it. Shared by the Dataset draft view and the Snapshot detail
- * view — both browse the same paginated item list shape.
- */
-export function ItemsPaginationBar({
-  total,
-  page,
-  perPage,
-  onPageChange,
-  onPerPageChange,
-}: {
+export interface ItemsPaginationBarProps {
   total: number
   page: number
   perPage: number
   onPageChange: (page: number) => void
   onPerPageChange: (perPage: number) => void
-}) {
+}
+
+/**
+ * Total count, per-page size, and page controls for an item list. It doesn't
+ * stick to the viewport itself: put it in an `ItemsFooter`, which keeps it (and
+ * any bulk-action bar above it) on screen while the list scrolls past. Shared
+ * by the Dataset draft view and the Snapshot detail view — both browse the same
+ * paginated item list shape.
+ */
+export function ItemsPaginationBar({ total, page, perPage, onPageChange, onPerPageChange }: ItemsPaginationBarProps) {
   const totalPages = Math.max(1, Math.ceil(total / perPage))
 
   return (
-    <Paper
-      p="xs"
-      bdrs={0}
-      mx={'-1.25rem'}
-      pos="sticky"
-      bottom={0}
-      withBorder
-      style={{ width: 'calc(100% + 2.5rem)', borderWidth: '1px 0 0 0' }}
-    >
+    <Paper p="xs" withBorder radius="md">
       <Group justify="space-between" wrap="wrap" gap="sm">
         <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
           {total} items

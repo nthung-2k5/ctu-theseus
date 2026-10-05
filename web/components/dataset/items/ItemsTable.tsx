@@ -1,9 +1,10 @@
-import { Checkbox, Group, Text } from '@mantine/core'
+import { Checkbox, Group, Text, UnstyledButton } from '@mantine/core'
 import { DataTable, type DataTableColumn, StatusBadge } from '@public/components/ui'
 import { SPLIT_COLORS } from '@public/lib/constants'
 import type { ReactNode } from 'react'
 import { type GroundTruthSpec, groundTruthKind, groundTruthLabel } from './groundTruth'
 import { AugmentedBadge, PreprocessedBadge } from './ItemBadges'
+import { ItemsSkeleton } from './ItemsSkeleton'
 import type { CaptionEditing, DatasetListItem, ItemSelection } from './types'
 import { tabularRow } from './types'
 
@@ -31,6 +32,8 @@ export const ItemsTable = <T extends DatasetListItem>({
   selection?: ItemSelection
   captionEditing?: CaptionEditing
 }) => {
+  if (isLoading) return <ItemsSkeleton variant="table" />
+
   const columns: DataTableColumn<T>[] = []
   const kind = groundTruthKind(spec)
 
@@ -73,7 +76,17 @@ export const ItemsTable = <T extends DatasetListItem>({
     header: 'External ID',
     render: (item) => (
       <Group gap={6} wrap="nowrap">
-        <Text size="xs">{item.externalId ?? '—'}</Text>
+        {/* The keyboard way into a row (the row itself also opens on click). */}
+        <UnstyledButton
+          className="mantine-focus-auto"
+          aria-label={`Open ${item.externalId ?? 'item'}`}
+          onClick={(e) => {
+            e.stopPropagation() // the row's own click already opens it
+            onOpen(item)
+          }}
+        >
+          <Text size="xs">{item.externalId ?? '—'}</Text>
+        </UnstyledButton>
         <PreprocessedBadge item={item} />
         <AugmentedBadge item={item} />
       </Group>
@@ -148,7 +161,6 @@ export const ItemsTable = <T extends DatasetListItem>({
       columns={columns}
       data={items}
       getRowKey={(item) => item.id}
-      loading={isLoading}
       emptyMessage={emptyMessage}
       onRowClick={onOpen}
     />

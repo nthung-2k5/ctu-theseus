@@ -1,10 +1,24 @@
-import { Badge, Box, Card, Center, Checkbox, Group, Image, SimpleGrid, Text, ThemeIcon } from '@mantine/core'
+import {
+  Badge,
+  Box,
+  Card,
+  Center,
+  Checkbox,
+  Group,
+  Image,
+  SimpleGrid,
+  Text,
+  ThemeIcon,
+  UnstyledButton,
+} from '@mantine/core'
 import { SpeakerHighIcon } from '@phosphor-icons/react'
 import { EmptyState, StatusBadge, VirtualGrid } from '@public/components/ui'
 import { SPLIT_COLORS } from '@public/lib/constants'
-import { Fragment, type ReactNode } from 'react'
+import { type Direction, nextInDirection, type Box as Rect } from '@public/lib/gridNav'
+import { Fragment, type KeyboardEvent, type ReactNode, useRef } from 'react'
 import { type GroundTruthSpec, groundTruthKind, groundTruthLabel } from './groundTruth'
 import { AugmentedBadge, PreprocessedBadge } from './ItemBadges'
+import { ItemsSkeleton } from './ItemsSkeleton'
 import type { CaptionEditing, DatasetListItem, ItemSelection } from './types'
 
 /**
@@ -13,7 +27,14 @@ import type { CaptionEditing, DatasetListItem, ItemSelection } from './types'
  */
 export const VIRTUALIZE_ABOVE = 100
 
-/** Media (vision/audio) item grid: click a card to open it in the item drawer. */
+const ARROW_DIRECTIONS: Record<string, Direction> = {
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+}
+
+/** Media (vision/audio) item grid: click a card (or press Enter on its name) to open it in the item drawer. */
 export const MediaGrid = <T extends DatasetListItem>({
   items,
   modality,
@@ -37,16 +58,42 @@ export const MediaGrid = <T extends DatasetListItem>({
   selection?: ItemSelection
   captionEditing?: CaptionEditing
 }) => {
-  if (isLoading) return <EmptyState loading compact />
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  if (isLoading) return <ItemsSkeleton variant="grid" />
   if (items.length === 0) return <EmptyState description={emptyMessage} compact />
 
   const kind = groundTruthKind(spec)
 
+  // Arrow keys move between the cards' open buttons by where they are on screen (so it is right at any
+  // breakpoint and for the virtualized grid, where only some rows exist); Escape drops the selection.
+  const onGridKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    if (!target.hasAttribute('data-grid-item')) return
+    if (event.key === 'Escape') {
+      selection?.onClear?.()
+      return
+    }
+    const direction = ARROW_DIRECTIONS[event.key]
+    if (!direction || !containerRef.current) return
+    const buttons = [...containerRef.current.querySelectorAll<HTMLElement>('[data-grid-item]')]
+    const boxes: Rect[] = buttons.map(
+      (b) => b.closest<HTMLElement>('[data-grid-card]')?.getBoundingClientRect() ?? b.getBoundingClientRect(),
+    )
+    const next = nextInDirection(boxes, buttons.indexOf(target), direction)
+    if (next !== null) {
+      event.preventDefault()
+      buttons[next].focus()
+    }
+  }
+
   const renderCard = (item: T) => {
     const label = groundTruthLabel(item.annotations, spec, classNameById)
     const isSelected = selection?.isSelected(item.id) ?? false
+    const name = item.externalId ?? 'Untitled'
     return (
       <Card
+        data-grid-card
         withBorder
         p={0}
         radius="md"
@@ -63,7 +110,8 @@ export const MediaGrid = <T extends DatasetListItem>({
           {modality === 'vision' ? (
             <Image
               src={item.thumbnailUrl ?? item.downloadUrl ?? undefined}
-              alt={item.externalId ?? ''}
+              // Decorative: the "Open <name>" button beside it is what names the item.
+              alt=""
               h={110}
               fit="cover"
               loading="lazy"
@@ -79,6 +127,7 @@ export const MediaGrid = <T extends DatasetListItem>({
           )}
           {selection && (
             <Checkbox
+              aria-label={`Select ${name}`}
               checked={isSelected}
               // Shift-click arrives as the click that produced this change event.
               onChange={(e) => selection.onToggle(item.id, (e.nativeEvent as MouseEvent).shiftKey === true)}
@@ -96,9 +145,28 @@ export const MediaGrid = <T extends DatasetListItem>({
           )}
         </Box>
         <Box p={6}>
-          <Text size="xs" truncate>
-            {item.externalId ?? 'Untitled'}
-          </Text>
+          {/* The keyboard way in: Enter opens the item, Space ticks it (Shift+Space ticks a range). */}
+          <UnstyledButton
+            data-grid-item
+            className="mantine-focus-auto"
+            aria-label={`Open ${name}`}
+            aria-pressed={selection ? isSelected : undefined}
+            w="100%"
+            ta="left"
+            onClick={(e) => {
+              e.stopPropagation() // the card's own click already opens it
+              onOpen(item)
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== ' ' || !selection) return
+              e.preventDefault()
+              selection.onToggle(item.id, e.shiftKey)
+            }}
+          >
+            <Text size="xs" truncate>
+              {name}
+            </Text>
+          </UnstyledButton>
           <Group gap={4} mt={4}>
             <StatusBadge value={item.splitType} colorMap={SPLIT_COLORS} size="xs" />
             <PreprocessedBadge item={item} />
@@ -119,15 +187,18 @@ export const MediaGrid = <T extends DatasetListItem>({
     )
   }
 
-  if (items.length > VIRTUALIZE_ABOVE) {
-    return <VirtualGrid items={items} getKey={(item) => item.id} renderItem={renderCard} />
-  }
-
   return (
-    <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }} spacing="sm">
-      {items.map((item) => (
-        <Fragment key={item.id}>{renderCard(item)}</Fragment>
-      ))}
-    </SimpleGrid>
+    // biome-ignore lint/a11y/noStaticElementInteractions: not a widget itself; it only routes key presses from the cards' buttons
+    <div ref={containerRef} onKeyDown={onGridKeyDown}>
+      {items.length > VIRTUALIZE_ABOVE ? (
+        <VirtualGrid items={items} getKey={(item) => item.id} renderItem={renderCard} />
+      ) : (
+        <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }} spacing="sm">
+          {items.map((item) => (
+            <Fragment key={item.id}>{renderCard(item)}</Fragment>
+          ))}
+        </SimpleGrid>
+      )}
+    </div>
   )
 }

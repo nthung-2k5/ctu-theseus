@@ -6,6 +6,7 @@
 import { Badge, Button, Group, Paper, Text, Timeline } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ArchiveIcon, GitCommitIcon, MagicWandIcon, PlusIcon, StackIcon, TrashIcon } from '@phosphor-icons/react'
+import { BuildStatus } from '@public/components/dataset/BuildStatus'
 import { splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { confirmDelete, EmptyState, LinkButton, PageHeader, StatusBadge } from '@public/components/ui'
 import { deleteVersion as deleteVersionRequest } from '@public/lib/api/generated/datasets/datasets'
@@ -124,6 +125,7 @@ export function SnapshotsPage() {
                     </Group>
                   }
                 >
+                  {version.status === 'building' && <BuildStatus />}
                   <Text size="xs" c="dimmed" className="tnum">
                     {formatDateTime(version.createdAt)} · {version.itemCount ?? 0} items · train {counts.train} · val{' '}
                     {counts.validation} · test {counts.test}

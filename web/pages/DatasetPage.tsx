@@ -14,7 +14,7 @@ import { BulkActionsToolbar } from '@public/components/dataset/BulkActionsToolba
 import { DatasetHealthPanel } from '@public/components/dataset/DatasetHealthPanel'
 import { type ItemEditing, ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { type ItemLabeled, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
-import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
+import { ItemsFooter } from '@public/components/dataset/ItemsFooter'
 import { SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { EmptyState, LinkButton, PageHeader } from '@public/components/ui'
 import { oneItem, useItemMutations } from '@public/hooks/useItemMutations'
@@ -206,22 +206,21 @@ export function DatasetPage() {
               />
 
               {items.length > 0 && (
-                <BulkActionsToolbar
-                  projectId={projectId}
-                  request={bulk.request(matchFilter)}
-                  count={bulk.count(total)}
-                  exclusionCount={bulk.exclusionCount}
-                  onClear={bulk.clear}
-                  requiresLabelClasses={descriptor.annotation.requiresLabelClasses}
-                  pageCount={items.length}
-                  total={total}
-                  onSelectPage={() => bulk.selectPage(items.map((i) => i.id))}
-                  onSelectAllMatching={bulk.selectAllMatching}
-                />
-              )}
-
-              {items.length > 0 && (
-                <ItemsPaginationBar
+                <ItemsFooter
+                  bulk={
+                    <BulkActionsToolbar
+                      projectId={projectId}
+                      request={bulk.request(matchFilter)}
+                      count={bulk.count(total)}
+                      exclusionCount={bulk.exclusionCount}
+                      onClear={bulk.clear}
+                      requiresLabelClasses={descriptor.annotation.requiresLabelClasses}
+                      pageCount={items.length}
+                      total={total}
+                      onSelectPage={() => bulk.selectPage(items.map((i) => i.id))}
+                      onSelectAllMatching={bulk.selectAllMatching}
+                    />
+                  }
                   total={total}
                   page={page}
                   perPage={perPage}

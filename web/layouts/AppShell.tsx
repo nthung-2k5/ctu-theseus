@@ -42,7 +42,7 @@ import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useMatch, useNavigate } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 
 const hasReadyVersion = (project: ProjectDetail) =>
   project.dataset?.versions?.some((v) => v.status === 'ready') ?? false
@@ -61,6 +61,8 @@ interface ProjectNavItem {
     | '/project/$projectId/export'
   /** Overview must match exactly; everything else matches by prefix. */
   exact?: boolean
+  /** A heading shown above the first visible item of each group, so the data steps read as one flow. */
+  group?: string
   color?: string
   hidden?: (project: ProjectDetail) => boolean
   disabled?: (project: ProjectDetail) => boolean
@@ -75,7 +77,7 @@ function filledBadgeColor(color: string | undefined) {
 
 const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
   { label: 'Overview', icon: DatabaseIcon, to: '/project/$projectId', exact: true },
-  { label: 'Upload', icon: UploadSimpleIcon, to: '/project/$projectId/upload', color: 'primary' },
+  { label: 'Upload', icon: UploadSimpleIcon, to: '/project/$projectId/upload', color: 'primary', group: 'Data' },
   {
     label: 'Classes',
     icon: TagIcon,
@@ -84,6 +86,7 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
     hidden: (project) => !isClassificationTask(project.task),
     count: (project) => project.dataset?.classes?.length ?? 0,
     color: 'violet',
+    group: 'Data',
   },
   {
     label: 'Dataset',
@@ -91,6 +94,7 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
     to: '/project/$projectId/dataset',
     count: (project) => project.dataset?.draft?.itemCount ?? 0,
     color: 'blue',
+    group: 'Data',
   },
   {
     label: 'Snapshots',
@@ -98,6 +102,7 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
     to: '/project/$projectId/snapshots',
     count: (project) => project.dataset?.versions?.length ?? project.versionCount ?? 0,
     color: 'grape',
+    group: 'Data',
   },
   {
     label: 'Training',
@@ -106,18 +111,21 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
     disabled: (project) => !hasReadyVersion(project),
     count: (project) => project.runCount ?? 0,
     color: 'teal',
+    group: 'Models',
   },
   {
     label: 'Playground',
     icon: PlayIcon,
     to: '/project/$projectId/playground',
     disabled: (project) => (project.runCount ?? 0) === 0,
+    group: 'Models',
   },
   {
     label: 'Export',
     icon: ExportIcon,
     to: '/project/$projectId/export',
     disabled: (project) => (project.runCount ?? 0) === 0,
+    group: 'Models',
   },
 ]
 
@@ -165,6 +173,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     enabled: !!projectId,
   })
   const activeProject = projectData?.project
+  const visibleNavItems = activeProject ? PROJECT_NAV_ITEMS.filter((item) => !item.hidden?.(activeProject)) : []
 
   const handleLogout = async () => {
     await logout().catch(() => undefined) // the cookies are cleared server-side; a network failure must not trap the user
@@ -293,7 +302,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <SectionLabel px="xs" pt="sm" pb={2} truncate>
                   {activeProject.name}
                 </SectionLabel>
-                {PROJECT_NAV_ITEMS.filter((item) => !item.hidden?.(activeProject)).map((item) => {
+                {visibleNavItems.map((item, index) => {
                   const resolvedPath = item.to.replace('$projectId', activeProject.id)
                   const count = item.count?.(activeProject)
                   const isActive = item.exact
@@ -301,26 +310,32 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : location.pathname === resolvedPath || location.pathname.startsWith(`${resolvedPath}/`)
 
                   return (
-                    <NavLink
-                      key={item.to}
-                      label={item.label}
-                      leftSection={<item.icon size={18} />}
-                      rightSection={
-                        count !== undefined ? (
-                          <Badge
-                            size="xs"
-                            variant={isActive ? 'filled' : 'light'}
-                            color={isActive ? filledBadgeColor(item.color) : (item.color ?? 'gray')}
-                          >
-                            {count}
-                          </Badge>
-                        ) : null
-                      }
-                      active={isActive}
-                      onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
-                      variant="light"
-                      disabled={item.disabled?.(activeProject)}
-                    />
+                    <Fragment key={item.to}>
+                      {item.group && item.group !== visibleNavItems[index - 1]?.group && (
+                        <SectionLabel px="xs" pt="xs" pb={2}>
+                          {item.group}
+                        </SectionLabel>
+                      )}
+                      <NavLink
+                        label={item.label}
+                        leftSection={<item.icon size={18} />}
+                        rightSection={
+                          count !== undefined ? (
+                            <Badge
+                              size="xs"
+                              variant={isActive ? 'filled' : 'light'}
+                              color={isActive ? filledBadgeColor(item.color) : (item.color ?? 'gray')}
+                            >
+                              {count}
+                            </Badge>
+                          ) : null
+                        }
+                        active={isActive}
+                        onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
+                        variant="light"
+                        disabled={item.disabled?.(activeProject)}
+                      />
+                    </Fragment>
                   )
                 })}
               </>

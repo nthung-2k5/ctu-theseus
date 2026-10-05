@@ -32,6 +32,7 @@ export function useItemSelection({ visibleIds, resetKey }: { visibleIds: readonl
     onToggle: (itemId, range) =>
       setState((prev) => (range ? selectRange(prev, visibleIds, itemId) : toggleItem(prev, itemId))),
     onToggleMany: (itemIds, selected) => setState((prev) => setMany(prev, itemIds, selected)),
+    onClear: () => setState(emptySelection),
   }
 
   return {

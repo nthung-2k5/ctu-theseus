@@ -41,6 +41,8 @@ export interface ItemSelection {
    * header checkbox means.
    */
   onToggleMany: (itemIds: string[], selected: boolean) => void
+  /** Drop the whole selection (Escape in the grid). */
+  onClear?: () => void
 }
 
 /**

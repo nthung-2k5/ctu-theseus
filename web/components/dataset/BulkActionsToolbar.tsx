@@ -52,17 +52,7 @@ export const BulkActionsToolbar = ({
     })
 
   return (
-    <Card
-      withBorder
-      p="xs"
-      radius="md"
-      shadow="lg"
-      style={{
-        position: 'sticky',
-        bottom: '4rem',
-        zIndex: 200,
-      }}
-    >
+    <Card withBorder p="xs" radius="md" shadow="lg">
       <Group justify="space-between">
         <Text size="sm" fw={600}>
           {count} selected

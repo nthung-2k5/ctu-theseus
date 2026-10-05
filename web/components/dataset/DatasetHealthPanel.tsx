@@ -19,7 +19,7 @@ import {
   TextTIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react'
-import { EmptyState, StatCard } from '@public/components/ui'
+import { EmptyState, QueryBoundary, StatCard } from '@public/components/ui'
 import { useDatasetHealth } from '@public/lib/queries'
 import type { DatasetHealthReport } from '@public/store/types'
 
@@ -189,7 +189,7 @@ function ModalitySection({ report }: { report: DatasetHealthReport }) {
 }
 
 export function DatasetHealthPanel({ projectId, active }: { projectId: string; active: boolean }) {
-  const { data, isLoading } = useDatasetHealth(projectId, active)
+  const { data, isLoading, isError, refetch } = useDatasetHealth(projectId, active)
 
   if (isLoading) {
     return (
@@ -199,6 +199,9 @@ export function DatasetHealthPanel({ projectId, active }: { projectId: string; a
       </Stack>
     )
   }
+
+  // Without this a failed request rendered nothing, indistinguishable from "no data".
+  if (isError) return <QueryBoundary isLoading={false} isError onRetry={() => refetch()} compact />
 
   const report = data?.health as DatasetHealthReport | undefined
   if (!report) return null
