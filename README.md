@@ -350,7 +350,7 @@ web/                      React SPA
   lib/api/                axios client + Orval output (generated/ is gitignored)
   lib/queries.ts          query-option/invalidation facade over the generated client
   routes/, pages/         TanStack Router route tree (code-based) and one component per route
-  components/dataset/     Per-modality labeling UI (vision grid, text list, audio list, CSV importer)
+  components/dataset/     Dataset browsing, upload staging and snapshot UI (item grid/table in items/, file tree, CSV importer, bulk actions)
   components/ui/          Shared design-system primitives (PageHeader, EmptyState, DataTable, ...)
   components/models/      Imported-model table, import form and file upload (Imported models + admin)
   pages/admin/            Administration: users, models, plugins & availability

@@ -9,6 +9,7 @@ import { ArrowLeftIcon, MagicWandIcon, StackIcon, TrashIcon } from '@phosphor-ic
 import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { type ItemOrigin, type ItemSort, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
+import { opLabel } from '@public/components/dataset/items/ops'
 import { SPLIT_TYPES, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import {
   CopyField,
@@ -35,9 +36,6 @@ import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-q
 import { getRouteApi } from '@tanstack/react-router'
 
 const routeApi = getRouteApi('/_app/project/$projectId/snapshots/$versionId')
-
-/** "image_horizontal_flip" -> "horizontal flip": the op ids are `<modality>_<name>`. */
-const opLabel = (id: string) => id.split('_').slice(1).join(' ')
 
 const VERSION_STATUS_COLORS: Record<string, string> = { building: 'cyan', ready: 'teal', failed: 'red' }
 
@@ -240,7 +238,7 @@ export function SnapshotDetailPage() {
               <Table.Tbody>
                 {preConfig.ops.map((op) => (
                   <Table.Tr key={op.id}>
-                    <Table.Td tt="capitalize">{opLabel(op.id)}</Table.Td>
+                    <Table.Td>{opLabel(op.id)}</Table.Td>
                     <Table.Td tt="capitalize">{(op.splits ?? []).join(', ')}</Table.Td>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
@@ -278,7 +276,7 @@ export function SnapshotDetailPage() {
               <Table.Tbody>
                 {config.ops.map((op) => (
                   <Table.Tr key={op.id}>
-                    <Table.Td tt="capitalize">{opLabel(op.id)}</Table.Td>
+                    <Table.Td>{opLabel(op.id)}</Table.Td>
                     <Table.Td ta="right">{Math.round((op.probability ?? 1) * 100)}%</Table.Td>
                     <Table.Td>
                       <Text size="xs" c="dimmed">
