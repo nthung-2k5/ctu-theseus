@@ -52,6 +52,10 @@ const paginationDefaults = { page: 1, perPage: 20 }
 
 const itemSortSchema = z.enum(['newest', 'oldest', 'filename']).optional().catch(undefined)
 
+// Only for tasks whose ground truth isn't a class (captioning, regression, ...): class tasks use
+// classId=unassigned instead. Absent means no filtering.
+const itemLabeledSchema = z.enum(['labeled', 'unlabeled']).optional().catch(undefined)
+
 // classId also carries the 'unassigned' sentinel (items with no
 // classification annotation), so it isn't a plain uuid.
 const itemClassIdSchema = z
@@ -67,6 +71,7 @@ const datasetSearchSchema = z.object({
   classId: itemClassIdSchema,
   search: z.string().optional().catch(undefined),
   sort: itemSortSchema,
+  labeled: itemLabeledSchema,
   // Absent means Browse.
   tab: z.enum(['browse', 'distribution']).optional().catch(undefined),
 })

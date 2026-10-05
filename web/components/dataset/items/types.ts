@@ -1,4 +1,5 @@
-import type { Annotation } from '@public/store/types'
+import type { Annotation, LabelClass } from '@public/store/types'
+import type { SPLIT_TYPES } from '../VersionBrowsing'
 
 /**
  * The item shape both the Dataset page's draft viewer and the Snapshot detail
@@ -41,18 +42,30 @@ export interface ItemSelection {
 }
 
 /**
- * Free-text ground truth (image/audio captioning, ASR) has no shared value to
- * bulk-assign across items the way a class does — every item needs its own
- * caption/transcript — so this is the one annotation type edited per-item,
- * from the detail modal, rather than through the bulk toolbar.
+ * Free-text ground truth (captioning, ASR, text generation) has no shared value
+ * to bulk-assign across items the way a class does — every item needs its own
+ * text — so it is edited per-item, from the detail drawer, rather than through
+ * the bulk toolbar.
  */
 export interface CaptionEditing {
-  /** e.g. "Caption" or "Transcript" — used as the field label and placeholder. */
+  /** e.g. "Caption", "Transcript" or "Completion" — used as the field label and placeholder. */
   label: string
   onSave: (itemId: string, existingAnnotationId: string | null, text: string) => Promise<void>
 }
 
-export const findClassAnnotation = (annotations: Annotation[] | undefined) => annotations?.find((a) => a.classId)
+/**
+ * What the draft page lets you change about one item from its drawer and row menu. Omit it for a
+ * read-only view (a snapshot is immutable), and the drawer and menu drop every control that would write.
+ */
+export interface ItemEditing {
+  /** Empty unless the task labels with classes. */
+  classes: LabelClass[]
+  onSetSplit: (itemId: string, split: (typeof SPLIT_TYPES)[number]) => void
+  onSetClass: (itemId: string, classId: string) => void
+  /** A regression target: creates the annotation, or updates `existingAnnotationId` in place. */
+  onSaveTarget: (itemId: string, existingAnnotationId: string | null, value: number) => Promise<void>
+  onDelete: (itemId: string) => void
+}
 
 export const findTextSequenceAnnotation = (annotations: Annotation[] | undefined) =>
   annotations?.find((a) => a.annotationType === 'text_sequence')

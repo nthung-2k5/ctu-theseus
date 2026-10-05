@@ -2,28 +2,37 @@ import { Checkbox, Group, Text } from '@mantine/core'
 import { DataTable, type DataTableColumn, StatusBadge } from '@public/components/ui'
 import { SPLIT_COLORS } from '@public/lib/constants'
 import type { ReactNode } from 'react'
+import { type GroundTruthSpec, groundTruthKind, groundTruthLabel } from './groundTruth'
 import { AugmentedBadge, PreprocessedBadge } from './ItemBadges'
-import { type DatasetListItem, findClassAnnotation, type ItemSelection, tabularRow } from './types'
+import type { CaptionEditing, DatasetListItem, ItemSelection } from './types'
+import { tabularRow } from './types'
 
-/** Text/tabular item table. */
+/** Text/tabular item table: click a row to open it in the item drawer. */
 export const ItemsTable = <T extends DatasetListItem>({
   items,
   modality,
   isLoading,
+  spec,
   classNameById,
   emptyMessage,
+  onOpen,
   renderActions,
   selection,
+  captionEditing,
 }: {
   items: T[]
   modality: 'text' | 'tabular'
   isLoading?: boolean
+  spec: GroundTruthSpec
   classNameById: Map<string, string>
   emptyMessage: string
+  onOpen: (item: T) => void
   renderActions?: (item: T) => ReactNode
   selection?: ItemSelection
+  captionEditing?: CaptionEditing
 }) => {
   const columns: DataTableColumn<T>[] = []
+  const kind = groundTruthKind(spec)
 
   if (selection) {
     const allSelected = items.length > 0 && items.every((i) => selection.selectedIds.has(i.id))
@@ -51,6 +60,8 @@ export const ItemsTable = <T extends DatasetListItem>({
           checked={selection.selectedIds.has(item.id)}
           // Shift-click arrives as the click that produced this change event.
           onChange={(e) => selection.onToggle(item.id, (e.nativeEvent as MouseEvent).shiftKey === true)}
+          // Selecting a row must not also open it.
+          onClick={(e) => e.stopPropagation()}
           size="xs"
         />
       ),
@@ -99,16 +110,13 @@ export const ItemsTable = <T extends DatasetListItem>({
     },
     {
       key: 'label',
-      header: 'Label',
-      fit: true,
-      render: (item) => {
-        const classId = findClassAnnotation(item.annotations)?.classId
-        return (
-          <Text size="xs" c="dimmed">
-            {classId ? (classNameById.get(classId) ?? '—') : '—'}
-          </Text>
-        )
-      },
+      header: kind === 'number' ? 'Target' : (captionEditing?.label ?? 'Label'),
+      fit: kind !== 'text',
+      render: (item) => (
+        <Text size="xs" c="dimmed" lineClamp={kind === 'text' ? 2 : undefined} maw={kind === 'text' ? 320 : undefined}>
+          {groundTruthLabel(item.annotations, spec, classNameById) ?? '—'}
+        </Text>
+      ),
     },
     {
       key: 'createdAt',
@@ -126,7 +134,12 @@ export const ItemsTable = <T extends DatasetListItem>({
       key: 'actions',
       header: '',
       fit: true,
-      render: renderActions,
+      // The menu's clicks must not also open the row.
+      render: (item) => (
+        // biome-ignore lint/a11y/noStaticElementInteractions: only stops the click reaching the row's open handler
+        // biome-ignore lint/a11y/useKeyWithClickEvents: same
+        <span onClick={(e) => e.stopPropagation()}>{renderActions(item)}</span>
+      ),
     })
   }
 
@@ -137,6 +150,7 @@ export const ItemsTable = <T extends DatasetListItem>({
       getRowKey={(item) => item.id}
       loading={isLoading}
       emptyMessage={emptyMessage}
+      onRowClick={onOpen}
     />
   )
 }

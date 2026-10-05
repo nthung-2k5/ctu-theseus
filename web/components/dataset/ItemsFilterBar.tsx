@@ -8,6 +8,13 @@ import { useEffect, useState } from 'react'
 
 export type ItemSort = 'newest' | 'oldest' | 'filename'
 export type ItemOrigin = 'original' | 'augmented'
+export type ItemLabeled = 'labeled' | 'unlabeled'
+
+const LABELED_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'labeled', label: 'Labeled' },
+  { value: 'unlabeled', label: 'Unlabeled' },
+]
 
 const ORIGIN_OPTIONS = [
   { value: 'all', label: 'All' },
@@ -41,6 +48,8 @@ export function ItemsFilterBar({
   onSortChange,
   origin,
   onOriginChange,
+  labeled,
+  onLabeledChange,
 }: {
   version: DatasetVersion
   split: (typeof SPLIT_TYPES)[number] | null
@@ -55,6 +64,9 @@ export function ItemsFilterBar({
   onSortChange: (sort: ItemSort) => void
   origin?: ItemOrigin | null
   onOriginChange?: (origin: ItemOrigin | null) => void
+  /** Pass for a task whose ground truth isn't a class (captioning, regression, ...); class tasks filter by class instead. */
+  labeled?: ItemLabeled | null
+  onLabeledChange?: (labeled: ItemLabeled | null) => void
 }) {
   const [searchDraft, setSearchDraft] = useState(search)
   const [debounced] = useDebouncedValue(searchDraft, 300)
@@ -82,6 +94,14 @@ export function ItemsFilterBar({
           data={ORIGIN_OPTIONS}
           value={origin ?? 'all'}
           onChange={(v) => onOriginChange(v === 'all' ? null : (v as ItemOrigin))}
+        />
+      )}
+      {onLabeledChange && (
+        <SegmentedControl
+          aria-label="Labeled"
+          data={LABELED_OPTIONS}
+          value={labeled ?? 'all'}
+          onChange={(v) => onLabeledChange(v === 'all' ? null : (v as ItemLabeled))}
         />
       )}
       <SplitFilter version={version} value={split} onChange={onSplitChange} />

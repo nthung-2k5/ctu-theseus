@@ -803,7 +803,7 @@
           "datasets"
         ],
         "summary": "List Items",
-        "description": "Paginated pool items for the draft (default) or a given version.\n\n`origin` narrows a snapshot to its real items or to its augmented copies (the draft has no copies).",
+        "description": "Paginated pool items for the draft (default) or a given version.\n\n`origin` narrows a snapshot to its real items or to its augmented copies (the draft has no copies).\n`labeled` keeps only items that do (true) or do not (false) carry the task's ground-truth annotation\ntype, which `classId=unassigned` can't express for tasks whose ground truth isn't a class.",
         "operationId": "list_items",
         "parameters": [
           {
@@ -933,6 +933,22 @@
               "type": "string",
               "default": "all",
               "title": "Origin"
+            }
+          },
+          {
+            "name": "labeled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Labeled"
             }
           }
         ],

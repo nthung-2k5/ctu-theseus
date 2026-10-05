@@ -62,6 +62,8 @@ export const projectItemsQueryOptions = (
     perPage?: number
     sort?: 'newest' | 'oldest' | 'filename'
     origin?: 'all' | 'original' | 'augmented'
+    /** Only items that do (true) or do not (false) have the task's ground-truth annotation. */
+    labeled?: boolean
   },
 ) => defined(getListItemsQueryOptions(projectId, query))
 
@@ -137,6 +139,8 @@ export function useProjectItems(
     perPage?: number
     sort?: 'newest' | 'oldest' | 'filename'
     origin?: 'all' | 'original' | 'augmented'
+    /** Only items that do (true) or do not (false) have the task's ground-truth annotation. */
+    labeled?: boolean
   },
 ) {
   return useQuery({ ...projectItemsQueryOptions(projectId ?? '', query), enabled: !!projectId })

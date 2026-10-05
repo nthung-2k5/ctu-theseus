@@ -78,6 +78,33 @@ async def test_split_validation_and_ownership(client, new_user):
     assert (await stranger.patch(url, json={"itemIds": [a], "split": "test"})).status_code == 403
 
 
+# -- Labeled filter --------------------------------------------------------------------------
+
+
+async def test_labeled_filter_follows_the_tasks_ground_truth_type(client, new_user):
+    c = await new_user()
+    # Regression ground truth is a classification-typed annotation carrying {value}, with no class.
+    reg = await project(c, "tabular_regression")
+    a, b = await add(
+        c, reg["id"], *[{"split": "train", "tabularFeatures": {"featuresJson": {"x": i}}} for i in range(2)]
+    )
+    body = {"annotationType": "classification", "labelStructured": {"value": 1.5}}
+    assert (await c.post(f"/api/items/{a}/annotations", json=body)).status_code == 200
+
+    assert [i["id"] for i in (await page(c, reg["id"], labeled="true"))["items"]] == [a]
+    assert [i["id"] for i in (await page(c, reg["id"], labeled="false"))["items"]] == [b]
+    assert (await page(c, reg["id"]))["total"] == 2  # absent means no filtering
+
+    # Captioning-style tasks are labeled by a text_sequence annotation, not a class.
+    cap = await project(c, "text_generation")
+    x, y = await add(c, cap["id"], item("x"), item("y"))
+    ann = {"annotationType": "text_sequence", "labelTextSequence": "done"}
+    assert (await c.post(f"/api/items/{x}/annotations", json=ann)).status_code == 200
+    assert [i["id"] for i in (await page(c, cap["id"], labeled="true"))["items"]] == [x]
+    assert [i["id"] for i in (await page(c, cap["id"], labeled="false"))["items"]] == [y]
+    assert (await c.get(f"/api/projects/{cap['id']}/items", params={"labeled": "maybe"})).status_code == 422
+
+
 # -- Classify --------------------------------------------------------------------------------
 
 

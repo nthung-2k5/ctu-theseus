@@ -275,10 +275,13 @@ async def list_items(
     per_page: Annotated[int, Query(alias="perPage", ge=1, le=1000)] = 30,
     sort: str | None = None,
     origin: Annotated[Literal["all", "original", "augmented"], Query()] = "all",
+    labeled_filter: Annotated[bool | None, Query(alias="labeled")] = None,
 ) -> ItemListResponse:
     """Paginated pool items for the draft (default) or a given version.
 
     `origin` narrows a snapshot to its real items or to its augmented copies (the draft has no copies).
+    `labeled` keeps only items that do (true) or do not (false) carry the task's ground-truth annotation
+    type, which `classId=unassigned` can't express for tasks whose ground truth isn't a class.
     """
     if version_id is not None:
         version = await session.get(DatasetVersion, version_id)
@@ -340,6 +343,11 @@ async def list_items(
             raw.append(classification_of(uuid.UUID(class_id)))
         except ValueError:
             raise HTTPException(400, "classId must be a class id or 'unassigned'") from None
+    if labeled_filter is not None:
+        has_ground_truth = sa.exists().where(
+            Annotation.item_id == vi.item_id, Annotation.annotation_type == ground_truth
+        )
+        raw.append(has_ground_truth if labeled_filter else ~has_ground_truth)
 
     total = (await session.execute(sa.select(sa.func.count()).select_from(vi).where(*raw))).scalar_one()
     labeled = (

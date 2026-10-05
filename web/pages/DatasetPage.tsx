@@ -13,8 +13,8 @@ import { DatabaseIcon, HeartbeatIcon, PlusIcon, ShuffleIcon } from '@phosphor-ic
 import { AutoSplitForm } from '@public/components/dataset/AutoSplitForm'
 import { BulkActionsToolbar } from '@public/components/dataset/BulkActionsToolbar'
 import { DatasetHealthPanel } from '@public/components/dataset/DatasetHealthPanel'
-import { ItemsByModality } from '@public/components/dataset/ItemsByModality'
-import { ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
+import { type ItemEditing, ItemsByModality } from '@public/components/dataset/ItemsByModality'
+import { type ItemLabeled, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsPaginationBar } from '@public/components/dataset/ItemsPaginationBar'
 import { SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
 import { EmptyState, LinkButton, PageHeader } from '@public/components/ui'
@@ -40,7 +40,7 @@ const BULK_SELECTION_CAP = 1000
 /* ── Main Dataset page ── */
 export function DatasetPage() {
   const { projectId } = routeApi.useParams()
-  const { page, perPage, split, classId, search, sort, tab = 'browse' } = routeApi.useSearch()
+  const { page, perPage, split, classId, search, sort, labeled, tab = 'browse' } = routeApi.useSearch()
   const navigate = routeApi.useNavigate()
   const {
     data: { project: activeProject },
@@ -62,6 +62,7 @@ export function DatasetPage() {
     classId: classId ?? undefined,
     search: search ?? undefined,
     sort: sort ?? undefined,
+    labeled: labeled === undefined ? undefined : labeled === 'labeled',
   }
   const { data, isLoading, isError, refetch } = useProjectItems(dataset?.draft ? projectId : undefined, {
     ...filters,
@@ -78,7 +79,7 @@ export function DatasetPage() {
   // any of them invalidates any selection made under the previous filter.
   const { selection, selectedIds, clear, replace } = useItemSelection({
     visibleIds: items.map((i) => i.id),
-    resetKey: `${split ?? ''}|${classId ?? ''}|${search ?? ''}`,
+    resetKey: `${split ?? ''}|${classId ?? ''}|${search ?? ''}|${labeled ?? ''}`,
   })
 
   const selectAllMatching = useMutation({
@@ -101,15 +102,19 @@ export function DatasetPage() {
     onError: () => notifications.show({ title: 'Error', message: 'Failed to select all matching items', color: 'red' }),
   })
 
-  // Free-text ground truth (captioning/ASR) is edited per-item from the detail
-  // modal instead of in bulk — see items/CaptionEditor.tsx.
-  const { saveCaption } = useItemMutations(projectId)
+  // Free-text ground truth (captioning/ASR/generation) is edited per-item from the detail
+  // drawer instead of in bulk — see items/CaptionEditor.tsx.
+  const { saveCaption, saveTarget, reassignSplit, assignClass, removeItems } = useItemMutations(projectId)
+  const outputColumn = descriptor.output?.column ?? 'text'
   const captionLabel =
-    activeProject.task === 'automatic_speech_recognition'
-      ? 'Transcript'
-      : descriptor.annotation.type === 'text_sequence'
-        ? 'Caption'
-        : null
+    descriptor.annotation.type !== 'text_sequence'
+      ? null
+      : activeProject.task === 'automatic_speech_recognition'
+        ? 'Transcript'
+        : descriptor.itemSpec.payload === 'file'
+          ? 'Caption'
+          : // An inline-text task labels with its output column ("completion", "summary", "answer", ...).
+            outputColumn.charAt(0).toUpperCase() + outputColumn.slice(1)
   const captionEditing = captionLabel
     ? {
         label: captionLabel,
@@ -118,6 +123,18 @@ export function DatasetPage() {
         },
       }
     : undefined
+
+  // Everything the drawer and the per-item menu may change. Each is the one-item case of a bulk mutation,
+  // so they notify and invalidate exactly as the bulk toolbar does.
+  const editing: ItemEditing = {
+    classes: descriptor.annotation.requiresLabelClasses ? classes : [],
+    onSetSplit: (itemId, split) => reassignSplit.mutate({ itemIds: [itemId], split }),
+    onSetClass: (itemId, classId) => assignClass.mutate({ itemIds: [itemId], classId }),
+    onSaveTarget: async (itemId, existingAnnotationId, value) => {
+      await saveTarget.mutateAsync({ itemId, existingAnnotationId, value })
+    },
+    onDelete: (itemId) => removeItems.mutate({ itemIds: [itemId] }),
+  }
 
   const draftSplitCounts = dataset?.draft ? splitCounts(dataset.draft) : null
 
@@ -188,11 +205,20 @@ export function DatasetPage() {
                 onSearchChange={(s) => navigate({ search: (prev) => ({ ...prev, search: s || undefined, page: 1 }) })}
                 sort={sort ?? 'newest'}
                 onSortChange={(sort) => navigate({ search: (prev) => ({ ...prev, sort, page: 1 }) })}
+                // Class tasks filter by class (incl. "Unassigned"); the rest have no class to filter on.
+                {...(descriptor.annotation.requiresLabelClasses
+                  ? {}
+                  : {
+                      labeled: labeled ?? null,
+                      onLabeledChange: (l: ItemLabeled | null) =>
+                        navigate({ search: (prev) => ({ ...prev, labeled: l ?? undefined, page: 1 }) }),
+                    })}
               />
 
               <ItemsByModality
                 items={items}
                 modality={dataset.modality}
+                annotation={descriptor.annotation}
                 isLoading={isLoading}
                 isError={isError}
                 onRetry={() => refetch()}
@@ -200,6 +226,7 @@ export function DatasetPage() {
                 emptyMessage="No items in the draft yet — add some from the Upload page."
                 selection={selection}
                 captionEditing={captionEditing}
+                editing={editing}
               />
 
               {items.length > 0 && (

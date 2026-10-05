@@ -312,6 +312,7 @@ export function SnapshotDetailPage() {
         <ItemsByModality
           items={items}
           modality={descriptor.modality}
+          annotation={descriptor.annotation}
           isLoading={isLoading}
           isError={isError}
           onRetry={() => refetch()}

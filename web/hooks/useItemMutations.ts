@@ -74,5 +74,23 @@ export function useItemMutations(projectId: string) {
     onError: onError('Failed to save'),
   })
 
-  return { reassignSplit, assignClass, removeItems, saveCaption }
+  // A regression target is a classification-typed annotation with no class; the number is `labelStructured.value`.
+  const saveTarget = useMutation({
+    mutationFn: async ({
+      itemId,
+      existingAnnotationId,
+      value,
+    }: {
+      itemId: string
+      existingAnnotationId: string | null
+      value: number
+    }) => {
+      if (existingAnnotationId) await updateAnnotation(existingAnnotationId, { labelStructured: { value } })
+      else await createAnnotation(itemId, { annotationType: 'classification', labelStructured: { value } })
+    },
+    onSuccess: invalidate,
+    onError: onError('Failed to save'),
+  })
+
+  return { reassignSplit, assignClass, removeItems, saveCaption, saveTarget }
 }
