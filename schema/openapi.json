@@ -423,7 +423,7 @@
           "classes"
         ],
         "summary": "Save Classes",
-        "description": "Replace the whole class list in one transaction: rename, recolor, describe, add and delete.\n\n`classes` is the desired final set:\n  * an entry with `classId` updates that class (name, description, and colour when given);\n  * an entry without one creates a class, or revives a deleted class of the same name;\n  * an active class missing from the list is deleted (soft, like DELETE).\nNames must be unique ignoring case. Renames may swap or reuse names freely, including the name of a\nclass deleted earlier. Concurrent saves serialize on a row lock: the last one wins.",
+        "description": "Replace the whole class list in one transaction: rename, recolor, describe, add and delete.\n\n`classes` is the desired final set:\n  * an entry with `classId` updates that class (name, description, and colour when given);\n  * an entry without one creates a class, or revives a deleted class of the same name;\n  * an active class missing from the list is deleted (soft, like DELETE);\n  * `merges` relabel a removed class's items to a kept class before it goes, so they are not left unlabelled.\nNames must be unique ignoring case. Renames may swap or reuse names freely, including the name of a\nclass deleted earlier. Concurrent saves serialize on a row lock: the last one wins.",
         "operationId": "save_classes",
         "parameters": [
           {
@@ -454,6 +454,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClassListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{project_id}/classes/stats": {
+      "get": {
+        "tags": [
+          "classes"
+        ],
+        "summary": "Class Stats",
+        "description": "Per-class item counts for the draft, in total and per split, for every active class (zeros included).\n\nOne grouped query, so unlike the dataset health report it is cheap to fetch on every visit to the page.",
+        "operationId": "class_stats",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassStatsResponse"
                 }
               }
             }
@@ -5258,6 +5302,27 @@
         ],
         "title": "ClassListResponse"
       },
+      "ClassMerge": {
+        "properties": {
+          "fromClassId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Fromclassid"
+          },
+          "intoClassId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Intoclassid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fromClassId",
+          "intoClassId"
+        ],
+        "title": "ClassMerge",
+        "description": "Move every item labelled `from_class_id` to `into_class_id` as part of a save.\n\nThe source must be an active class that this save removes; the target must be a class the save keeps."
+      },
       "ClassResponse": {
         "properties": {
           "class": {
@@ -5269,6 +5334,77 @@
           "class"
         ],
         "title": "ClassResponse"
+      },
+      "ClassStat": {
+        "properties": {
+          "classId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Classid"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "train": {
+            "type": "integer",
+            "title": "Train"
+          },
+          "validation": {
+            "type": "integer",
+            "title": "Validation"
+          },
+          "test": {
+            "type": "integer",
+            "title": "Test"
+          }
+        },
+        "type": "object",
+        "required": [
+          "classId",
+          "total",
+          "train",
+          "validation",
+          "test"
+        ],
+        "title": "ClassStat",
+        "description": "How many draft items carry one class, in total and per split."
+      },
+      "ClassStatsResponse": {
+        "properties": {
+          "stats": {
+            "items": {
+              "$ref": "#/components/schemas/ClassStat"
+            },
+            "type": "array",
+            "title": "Stats"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "unassigned": {
+            "type": "integer",
+            "title": "Unassigned"
+          },
+          "retired": {
+            "type": "integer",
+            "title": "Retired"
+          },
+          "minItemsPerClass": {
+            "type": "integer",
+            "title": "Minitemsperclass"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stats",
+          "total",
+          "unassigned",
+          "retired",
+          "minItemsPerClass"
+        ],
+        "title": "ClassStatsResponse"
       },
       "ClassifyBody": {
         "properties": {
@@ -9082,6 +9218,14 @@
             "type": "array",
             "maxItems": 200,
             "title": "Classes"
+          },
+          "merges": {
+            "items": {
+              "$ref": "#/components/schemas/ClassMerge"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Merges"
           }
         },
         "type": "object",

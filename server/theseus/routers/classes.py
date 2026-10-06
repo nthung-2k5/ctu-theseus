@@ -9,16 +9,19 @@ import uuid
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException
 
-from theseus.db.models import LabelClass
+from theseus.db.models import Annotation, DatasetVersion, DatasetVersionItem, LabelClass
 from theseus.deps import ProjectDep, SessionDep
 from theseus.schemas.projects import (
     ClassListResponse,
     ClassResponse,
+    ClassStat,
+    ClassStatsResponse,
     CreateClassBody,
     LabelClassOut,
     SaveClassesBody,
     UpdateClassBody,
 )
+from theseus.services import datasets as svc
 
 router = APIRouter(prefix="/projects/{project_id}/classes", tags=["classes"])
 
@@ -57,6 +60,61 @@ async def list_classes(project: ProjectDep, session: SessionDep) -> ClassListRes
     return ClassListResponse(classes=[LabelClassOut.model_validate(c) for c in rows])
 
 
+@router.get("/stats", response_model=ClassStatsResponse)
+async def class_stats(project: ProjectDep, session: SessionDep) -> ClassStatsResponse:
+    """Per-class item counts for the draft, in total and per split, for every active class (zeros included).
+
+    One grouped query, so unlike the dataset health report it is cheap to fetch on every visit to the page.
+    """
+    if not svc.task_uses_label_classes(project.task):
+        raise HTTPException(400, svc.NO_LABEL_CLASSES)
+    classes = await _active_classes(session, project.id)
+    draft_id = (
+        await session.execute(
+            sa.select(DatasetVersion.id).where(
+                DatasetVersion.dataset_id == project.id, DatasetVersion.version_tag.is_(None)
+            )
+        )
+    ).scalar_one_or_none()
+
+    by_class: dict[uuid.UUID | None, dict[str, int]] = {}
+    if draft_id is not None:
+        vi = DatasetVersionItem
+        rows = await session.execute(
+            sa.select(Annotation.class_id, vi.split_type, sa.func.count())
+            .select_from(vi)
+            .outerjoin(
+                Annotation,
+                sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"),
+            )
+            .where(vi.version_id == draft_id)
+            .group_by(Annotation.class_id, vi.split_type)
+        )
+        for class_id, split, n in rows.all():
+            by_class.setdefault(class_id, {})[split] = n
+
+    active = {c.class_id for c in classes}
+    stats = []
+    for c in classes:
+        splits = by_class.get(c.class_id, {})
+        stats.append(
+            ClassStat(
+                class_id=c.class_id,
+                total=sum(splits.values()),
+                train=splits.get("train", 0),
+                validation=splits.get("validation", 0),
+                test=splits.get("test", 0),
+            )
+        )
+    return ClassStatsResponse(
+        stats=stats,
+        total=sum(sum(s.values()) for s in by_class.values()),
+        unassigned=sum(by_class.get(None, {}).values()),
+        retired=sum(sum(s.values()) for cid, s in by_class.items() if cid is not None and cid not in active),
+        min_items_per_class=svc.MIN_ITEMS_PER_CLASS,
+    )
+
+
 @router.post("", response_model=ClassResponse)
 async def create_class(body: CreateClassBody, project: ProjectDep, session: SessionDep) -> ClassResponse:
     # Includes soft-deleted rows: (dataset_id, name) is unique across them.
@@ -92,7 +150,8 @@ async def save_classes(body: SaveClassesBody, project: ProjectDep, session: Sess
     `classes` is the desired final set:
       * an entry with `classId` updates that class (name, description, and colour when given);
       * an entry without one creates a class, or revives a deleted class of the same name;
-      * an active class missing from the list is deleted (soft, like DELETE).
+      * an active class missing from the list is deleted (soft, like DELETE);
+      * `merges` relabel a removed class's items to a kept class before it goes, so they are not left unlabelled.
     Names must be unique ignoring case. Renames may swap or reuse names freely, including the name of a
     class deleted earlier. Concurrent saves serialize on a row lock: the last one wins.
     """
@@ -117,6 +176,19 @@ async def save_classes(body: SaveClassesBody, project: ProjectDep, session: Sess
         if folded in seen_names:
             raise HTTPException(400, f'Duplicate class name "{entry.name}"')
         seen_names.add(folded)
+
+    merged_from: set[uuid.UUID] = set()
+    for merge in body.merges:
+        source, target = by_id.get(merge.from_class_id), by_id.get(merge.into_class_id)
+        if source is None or not source.is_active:
+            raise HTTPException(404, f"Class not found: {merge.from_class_id}")
+        if merge.from_class_id in seen_ids:
+            raise HTTPException(400, f"Cannot merge a class this save keeps: {merge.from_class_id}")
+        if target is None or not target.is_active or merge.into_class_id not in seen_ids:
+            raise HTTPException(400, f"A merge must move items into a class this save keeps: {merge.into_class_id}")
+        if merge.from_class_id in merged_from:
+            raise HTTPException(400, f"Class merged more than once: {merge.from_class_id}")
+        merged_from.add(merge.from_class_id)
 
     # Rows that are not in the final list: earlier soft-deletes, plus the ones this save deletes.
     dropped = [c for c in rows if c.class_id not in seen_ids]
@@ -147,6 +219,14 @@ async def save_classes(body: SaveClassesBody, project: ProjectDep, session: Sess
         if tombstone.class_id not in revived and tombstone.name in wanted:
             tombstone.name = f"{tombstone.name[:80]} (deleted {str(tombstone.class_id)[:8]})"
     await session.flush()
+
+    # One classification per item (partial unique index), so moving a class's items can't collide with anything.
+    for merge in body.merges:
+        await session.execute(
+            sa.update(Annotation)
+            .where(Annotation.class_id == merge.from_class_id, Annotation.annotation_type == "classification")
+            .values(class_id=merge.into_class_id)
+        )
 
     created = len(rows)
     for entry, cls in plan:

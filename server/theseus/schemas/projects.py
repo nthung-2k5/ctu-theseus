@@ -165,7 +165,37 @@ class SaveClassEntry(ApiModel):
         return collapsed
 
 
+class ClassMerge(ApiModel):
+    """Move every item labelled `from_class_id` to `into_class_id` as part of a save.
+
+    The source must be an active class that this save removes; the target must be a class the save keeps.
+    """
+
+    from_class_id: uuid.UUID
+    into_class_id: uuid.UUID
+
+
 class SaveClassesBody(ApiModel):
     """The whole desired class list. Active classes missing from it are deleted."""
 
     classes: list[SaveClassEntry] = Field(max_length=MAX_CLASSES)
+    # Relabel a removed class's items instead of leaving them unlabelled. Applied in the save's transaction.
+    merges: list[ClassMerge] = Field(default_factory=list, max_length=MAX_CLASSES)
+
+
+class ClassStat(ApiModel):
+    """How many draft items carry one class, in total and per split."""
+
+    class_id: uuid.UUID
+    total: int
+    train: int
+    validation: int
+    test: int
+
+
+class ClassStatsResponse(ApiModel):
+    stats: list[ClassStat]  # every active class, in creation order, empty ones included (with zeros)
+    total: int  # draft items
+    unassigned: int  # draft items with no classification
+    retired: int  # draft items labelled with a class that has since been removed
+    min_items_per_class: int  # below this a class can't be stratified into splits

@@ -1,7 +1,12 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 import type { SplitType } from './api/enums'
-import { getListClassesQueryKey, getListClassesQueryOptions } from './api/generated/classes/classes'
+import {
+  getClassStatsQueryKey,
+  getClassStatsQueryOptions,
+  getListClassesQueryKey,
+  getListClassesQueryOptions,
+} from './api/generated/classes/classes'
 import {
   getGetDatasetHealthQueryOptions,
   getListItemsQueryKey,
@@ -48,6 +53,8 @@ export const projectDetailQueryOptions = (projectId: string) => ({
 })
 
 export const labelClassesQueryOptions = (projectId: string) => defined(getListClassesQueryOptions(projectId))
+
+export const classStatsQueryOptions = (projectId: string) => defined(getClassStatsQueryOptions(projectId))
 
 export const datasetHealthQueryOptions = (projectId: string) => defined(getGetDatasetHealthQueryOptions(projectId))
 
@@ -124,6 +131,11 @@ export function useLabelClasses(projectId: string | undefined) {
   return useQuery({ ...labelClassesQueryOptions(projectId ?? ''), enabled: !!projectId })
 }
 
+/** Per-class item counts (total and per split) for the draft, empty classes included. */
+export function useClassStats(projectId: string | undefined, enabled = true) {
+  return useQuery({ ...classStatsQueryOptions(projectId ?? ''), enabled: !!projectId && enabled })
+}
+
 export function useDatasetHealth(projectId: string | undefined, enabled: boolean) {
   return useQuery({ ...datasetHealthQueryOptions(projectId ?? ''), enabled: !!projectId && enabled })
 }
@@ -193,6 +205,9 @@ export function invalidateProjectScope(queryClient: QueryClient, projectId: stri
     queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) }),
     queryClient.invalidateQueries({ queryKey: getListItemsQueryKey(projectId) }),
     queryClient.invalidateQueries({ queryKey: getListClassesQueryKey(projectId) }),
+    // Not a prefix of the list key above (Orval keys are the exact URL), so it needs its own entry: every
+    // upload, relabel and class edit changes these counts.
+    queryClient.invalidateQueries({ queryKey: getClassStatsQueryKey(projectId) }),
   ])
 }
 
