@@ -10,6 +10,7 @@ import {
   TagIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
+import Logo from '@public/assets/CTU_logo.png'
 import { LinkButton } from '@public/components/ui'
 import { type CSSProperties, type ReactNode, useEffect, useRef } from 'react'
 import { LiveCard } from './LiveCard'
@@ -111,7 +112,7 @@ export function Landing() {
     <div className="ot-landing" ref={root} tabIndex={-1}>
       <header className="ot-nav">
         <div className="ot-logo">
-          <span className="ot-logo-mark" /> CTU OmniTrain
+          <img className="ot-logo-mark" src={Logo} alt="" width={28} height={28} /> CTU OmniTrain
         </div>
         <nav className="ot-nav-links" aria-label="Sections">
           <a href="#how">How it works</a>

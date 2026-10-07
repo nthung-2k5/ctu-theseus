@@ -46,11 +46,12 @@
   font-size: 18px;
 }
 .ot-logo-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, var(--ot-blue), var(--ot-cyan));
-  box-shadow: 0 0 18px #00afef66;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex: none;
+  /* a soft glow that follows the diamond's outline (the PNG's corners are transparent) */
+  filter: drop-shadow(0 0 8px #00afef66);
 }
 .ot-nav-links {
   display: flex;
