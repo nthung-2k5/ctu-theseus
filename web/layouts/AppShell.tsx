@@ -4,6 +4,7 @@ import {
   Badge,
   Box,
   Group,
+  Image,
   AppShell as MantineAppShell,
   Menu,
   NavLink,
@@ -34,7 +35,8 @@ import {
   TagIcon,
   UploadSimpleIcon,
 } from '@phosphor-icons/react'
-import { BrandMark, SectionLabel } from '@public/components/ui'
+import Logo from '@public/assets/CTU_logo.png'
+import { SectionLabel } from '@public/components/ui'
 import { logout } from '@public/lib/api/generated/auth/auth'
 import { sessionQueryOptions } from '@public/lib/auth'
 import { projectDetailQueryOptions, useProjects } from '@public/lib/queries'
@@ -217,7 +219,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </ActionIcon>
             <UnstyledButton onClick={() => navigate({ to: '/projects' })} aria-label="CTU OmniTrain home">
               <Group gap={8} wrap="nowrap">
-                <BrandMark />
+                <Image src={Logo} alt="" w={28} h={28} fit="contain" flex="none" />
                 <Text fw={600} size="md" style={{ letterSpacing: 0.3 }}>
                   CTU OmniTrain
                 </Text>
