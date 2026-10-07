@@ -48,7 +48,11 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `run.output_uri` the way Ludwig does through s3fs: it reads the parquet, downloads each image into
   `run.workdir`, trains there, and uploads the results with `storage.upload_dir` (`yolo/data.py`,
   `yolo/train.py`). Its class folders are named by zero-padded class *index*, never by class name,
-  so Ultralytics' `model.names` can be mapped back exactly.
+  so Ultralytics' `model.names` can be mapped back exactly. A backend whose framework doesn't squash
+  images to a square (YOLO resizes the shorter edge, then centre-crops) says so with
+  `inputs[].imageResize.mode = "shorter_edge_center_crop"` in its `preprocessing_manifest`; every
+  generated client implements that mode and, without the key, squashes (Ludwig's behaviour). A client
+  must refuse a mode it doesn't know rather than fall back to squashing.
   `training_runs.backend` / `sweeps.backend` are free text (a plugin id), like `exports.format`,
   never a Postgres enum. A backend module's own top level must not import its heavy ML
   dependency (torch, ludwig, sklearn, ...) — listing installed backends has to work without a GPU

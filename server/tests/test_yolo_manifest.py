@@ -27,8 +27,8 @@ def test_input_describes_how_to_prepare_an_image_for_this_model():
     (entry,) = build_preprocessing_manifest("r", {}, META)["inputs"]
 
     assert (entry["name"], entry["type"], entry["column"]) == ("images", "image", "image_path")
-    assert entry["yoloPreprocessing"]["size"] == [320, 320]
-    assert entry["yoloPreprocessing"]["resize"] == "shorter_edge" and entry["yoloPreprocessing"]["crop"] == "center"
+    # Crop, not squash: the generated clients only do that when the manifest asks for it.
+    assert entry["imageResize"]["mode"] == "shorter_edge_center_crop"
     assert entry["imageNormalization"] == {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]}
     # The key the generated clients take the target size from; without it they would fall back to 224.
     assert entry["ludwigPreprocessing"] == {"height": 320, "width": 320}

@@ -27,11 +27,24 @@ from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task
 pytestmark = pytest.mark.skipif(not os.environ.get("YOLO_SMOKE"), reason="set YOLO_SMOKE=1 to train for real")
 
 CLASSES = ["cat", "dog", "bird"]
+# Enough for a network trained from scratch on a handful of images to respond to its input at all (see below).
+EPOCHS = 15
 
 
 def softmax(x):
     e = np.exp(x - x.max())
     return e / e.sum()
+
+
+# Each class is a different colour. Pure noise would not do: pooling averages noise away, so even a random network
+# gives the same output for every noise image, and a "the two pipelines agree" check then passes vacuously.
+BASE_COLOURS = {"cat": (200, 40, 40), "dog": (40, 200, 40), "bird": (40, 40, 200)}
+
+
+def coloured_image(label, rng, width=64, height=64):
+    base = np.array(BASE_COLOURS[label], dtype=np.float32)
+    noise = rng.normal(0, 25, (height, width, 3))
+    return Image.fromarray(np.clip(base + noise, 0, 255).astype(np.uint8))
 
 
 def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, monkeypatch):
@@ -43,7 +56,7 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
         for label in CLASSES:
             for i in range(count):
                 item_id = f"{split}-{label}-{i}"
-                Image.fromarray(rng.integers(0, 255, (64, 64, 3), dtype=np.uint8)).save(source / f"{item_id}.png")
+                coloured_image(label, rng).save(source / f"{item_id}.png")
                 rows.append(
                     {
                         "image_path": f"s3://theseus-datasets/pool/{item_id}.png",
@@ -80,7 +93,7 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     config = compile_yolo_config(
         get_task_descriptor("image_classification"),
         ctx_snapshot,
-        YoloHyperparameters(epochs=2, batch_size=4, image_size=32, pretrained=False),
+        YoloHyperparameters(epochs=EPOCHS, batch_size=4, image_size=32, pretrained=False, learning_rate=0.01),
     )
     reports = []
     ctx = TrainContext(
@@ -99,7 +112,10 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     assert isinstance(model, YoloLoadedModel)
     assert not (tmp_path / "work").exists()
     assert sorted(p.name for p in uploaded.iterdir()) == ["args.yaml", "best.pt", "names.json", "results.csv"]
-    assert [(e, s) for e, s, _ in reports] == [(1, "train"), (1, "validation"), (2, "train"), (2, "validation")]
+    # Early stopping (patience 10) may end training before EPOCHS; whatever ran is reported once per epoch, in order.
+    epochs_run = [e for e, s, _ in reports if s == "validation"]
+    assert epochs_run == list(range(1, len(epochs_run) + 1)) and 1 <= len(epochs_run) <= EPOCHS
+    assert [(e, s) for e, s, _ in reports] == [(e, s) for e in epochs_run for s in ("train", "validation")]
     assert all("loss" in m for _, _, m in reports) and "accuracy" in reports[1][2]
     # Whatever order the model learned, labels are real class names and a permutation of the snapshot's.
     assert sorted(model.output.labels or []) == sorted(CLASSES)
@@ -128,7 +144,10 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     path = YoloBackend.convert(loaded, "onnx", str(tmp_path / "export"))
     assert Path(path).name == "model.onnx"
     session = ort.InferenceSession(path)
-    pixels = np.asarray(Image.open(image).convert("RGB").resize((32, 32)), dtype=np.float32) / 255.0
+    pixels = (
+        np.asarray(Image.open(image).convert("RGB").resize((32, 32), Image.Resampling.BILINEAR), dtype=np.float32)
+        / 255.0
+    )
     logits = session.run(None, {session.get_inputs()[0].name: pixels.transpose(2, 0, 1)[None]})[0].reshape(-1)
     assert not logits.sum() == pytest.approx(1.0)  # raw logits, not probabilities
     np.testing.assert_allclose(softmax(logits), probs, atol=1e-3)
@@ -137,6 +156,56 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     meta = loaded.meta
     manifest = YoloBackend.preprocessing_manifest("smoke", config, meta)
     assert manifest["outputs"][0]["classes"] == loaded.output.labels
+
+    # -- the generated Python devkit client, driven only by model.onnx + preprocessing.json, must agree with
+    # Ultralytics' own prediction on a NON-square image (where cropping and squashing give different pixels)
+    import json
+    import types
+
+    import theseus.export
+
+    client_path = Path(theseus.export.__file__).parent / "templates" / "python" / "theseus_client.py"
+    # Compiled from source, not imported: an import would leave a __pycache__ inside the templates directory.
+    client_module = types.ModuleType("generated_client")
+    client_module.__file__ = str(client_path)  # the template locates model.onnx next to itself
+    exec(compile(client_path.read_text(encoding="utf-8"), str(client_path), "exec"), client_module.__dict__)  # noqa: S102
+
+    # Red bands on the sides and blue in the middle: the centre crop sees almost only blue, the squashed whole
+    # image sees about half red, so a model that tells the colours apart answers differently for the two.
+    wide_pixels = np.zeros((60, 90, 3), dtype=np.uint8)
+    wide_pixels[:, :] = BASE_COLOURS["cat"]
+    wide_pixels[:, 22:68] = BASE_COLOURS["bird"]
+    wide = tmp_path / "wide.png"
+    Image.fromarray(wide_pixels).save(wide)
+    in_process = loaded.predict(pd.DataFrame({"image_path": [str(wide)]}))["class_probabilities"].iloc[0]
+
+    # Guard against a vacuous comparison: the model must respond to its input at all.
+    reds = tmp_path / "reds.png"
+    coloured_image("cat", rng).save(reds)
+    blues = tmp_path / "blues.png"
+    coloured_image("bird", rng).save(blues)
+    red_p, blue_p = (
+        np.array(loaded.predict(pd.DataFrame({"image_path": [str(p)]}))["class_probabilities"].iloc[0])
+        for p in (reds, blues)
+    )
+    assert np.abs(red_p - blue_p).max() > 1e-3, f"model ignores its input: {red_p} vs {blue_p}"
+
+    def worst_difference(manifest_for_client: dict) -> float:
+        """Largest per-class gap between the generated client and Ultralytics on the wide image."""
+        (tmp_path / "preprocessing.json").write_text(json.dumps(manifest_for_client))
+        client = client_module.TheseusClient(model_path=path, preprocessing_path=tmp_path / "preprocessing.json")
+        # Unrounded: the client's own rounding to 4 decimals would hide small differences.
+        pixels = client._preprocess_image(wide)
+        logits = client.session.run(None, {client.session.get_inputs()[0].name: pixels})[0].reshape(-1)
+        return float(np.abs(softmax(logits) - np.array(in_process)).max())
+
+    assert worst_difference(manifest) < 1e-5
+
+    # Negative control: without the crop mode the client squashes, and must be measurably off. If this stopped
+    # holding, the assertion above would no longer prove anything about the crop.
+    squashing = json.loads(json.dumps(manifest))
+    del squashing["inputs"][0]["imageResize"]
+    assert worst_difference(squashing) > 1e-4
 
     loaded.close()
     model.close()

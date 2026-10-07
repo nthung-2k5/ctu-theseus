@@ -28,21 +28,13 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
                 "type": "image",
                 "column": meta["imageColumn"],
                 # What Ultralytics' own inference does to an image (ultralytics.data.augment.classify_transforms):
-                # resize the SHORTER edge to `size` (bilinear, keeping the aspect ratio), centre-crop a size x size
-                # square, read as RGB, scale to 0..1. Its mean/std are 0/1, i.e. no further normalisation.
-                "yoloPreprocessing": {
-                    "resize": "shorter_edge",
-                    "interpolation": "bilinear",
-                    "crop": "center",
-                    "size": [size, size],
-                    "colorSpace": "RGB",
-                    "scale": 1 / 255,
-                    "layout": "NCHW",
-                },
+                # resize the SHORTER edge to `size` (bilinear, keeping the aspect ratio), then centre-crop a
+                # size x size square. Colour is RGB, scaled to 0..1, and its mean/std are 0/1: no further
+                # normalisation. Every generated client implements this mode; without an `imageResize` they squash
+                # the whole image to height x width, which is what Ludwig does and would distort a non-square image.
+                "imageResize": {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"},
                 "imageNormalization": {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]},
-                # The key the generated clients read the target size from (they fall back to 224 without it). Those
-                # clients squash the image to height x width, whereas `yoloPreprocessing` above crops, so
-                # predictions on a non-square image can differ slightly from Ultralytics' own.
+                # The key the generated clients read the target size from (they fall back to 224 without it).
                 "ludwigPreprocessing": {"height": size, "width": size},
             }
         ],

@@ -76,10 +76,31 @@ public final class TheseusClient implements AutoCloseable {
     private float[] preprocessImage(Path path, int width, int height) throws IOException {
         BufferedImage original = ImageIO.read(path.toFile());
         if (original == null) throw new IOException("Could not decode image: " + path);
+        // Absent: squash the whole image to width x height.
+        String mode = inputSpec.path("imageResize").path("mode").asText(null);
         BufferedImage resized = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g = resized.createGraphics();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        g.drawImage(original, 0, 0, width, height, null);
+        if (mode == null) {
+            g.drawImage(original, 0, 0, width, height, null);
+        } else if ("shorter_edge_center_crop".equals(mode)) {
+            // Scale so the SHORTER edge is `size` (the other edge truncated to a whole pixel), then centre-crop a
+            // size x size square: the same arithmetic as torchvision's Resize(size) + CenterCrop(size), which is
+            // what the model was evaluated with. Drawing the scaled image at a negative offset crops it.
+            int size = Math.min(width, height);
+            int sourceWidth = original.getWidth(), sourceHeight = original.getHeight();
+            int newWidth = sourceWidth <= sourceHeight ? size : (int) ((long) size * sourceWidth / sourceHeight);
+            int newHeight = sourceWidth <= sourceHeight ? (int) ((long) size * sourceHeight / sourceWidth) : size;
+            // rint rounds .5 to the nearest even integer, as Python's round() does.
+            int left = (int) Math.rint((newWidth - size) / 2.0);
+            int top = (int) Math.rint((newHeight - size) / 2.0);
+            g.drawImage(original, -left, -top, newWidth, newHeight, null);
+        } else {
+            g.dispose();
+            throw new UnsupportedOperationException(
+                "Unsupported imageResize mode '" + mode + "'. " +
+                "See preprocessing.json's inputs[0].imageResize and adapt this client.");
+        }
         g.dispose();
 
         JsonNode norm = inputSpec.get("imageNormalization");

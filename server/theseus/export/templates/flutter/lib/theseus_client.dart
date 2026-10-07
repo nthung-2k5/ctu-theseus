@@ -31,6 +31,7 @@ class PreprocessingInput {
     required this.type,
     required this.column,
     this.ludwigPreprocessing,
+    this.imageResizeMode,
     this.normMean,
     this.normStd,
   });
@@ -41,6 +42,7 @@ class PreprocessingInput {
       type: json['type'] as String,
       column: json['column'] as String,
       ludwigPreprocessing: json['ludwigPreprocessing'] as Map<String, dynamic>?,
+      imageResizeMode: (json['imageResize'] as Map<String, dynamic>?)?['mode'] as String?,
       normMean: (norm?['mean'] as List?)?.map((e) => (e as num).toDouble()).toList(),
       normStd: (norm?['std'] as List?)?.map((e) => (e as num).toDouble()).toList(),
     );
@@ -49,6 +51,8 @@ class PreprocessingInput {
   final String type;
   final String column;
   final Map<String, dynamic>? ludwigPreprocessing;
+  /// `imageResize.mode`. Null: squash the whole image to width x height.
+  final String? imageResizeMode;
   final List<double>? normMean;
   final List<double>? normStd;
 }
@@ -136,11 +140,49 @@ class TheseusClient {
     return (width, height);
   }
 
+  /// Rounds .5 to the nearest even integer, as Python's round() does (and torchvision's CenterCrop relies on).
+  static int _roundHalfEven(double x) {
+    final floor = x.floor();
+    final diff = x - floor;
+    if (diff < 0.5) return floor;
+    if (diff > 0.5) return floor + 1;
+    return floor.isEven ? floor : floor + 1;
+  }
+
   Float32List _preprocessImage(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
     if (decoded == null) throw const FormatException('Could not decode image bytes');
     final (width, height) = _imageDims;
-    final resized = img.copyResize(decoded, width: width, height: height);
+    final mode = _inputSpec.imageResizeMode;
+    final img.Image resized;
+    if (mode == null) {
+      resized = img.copyResize(decoded, width: width, height: height);
+    } else if (mode == 'shorter_edge_center_crop') {
+      // Scale so the SHORTER edge is `size` (the other edge truncated to a whole pixel), then centre-crop a
+      // size x size square: the same arithmetic as torchvision's Resize(size) + CenterCrop(size), which is
+      // what the model was evaluated with.
+      final size = math.min(width, height);
+      final landscape = decoded.width > decoded.height;
+      final newWidth = landscape ? decoded.width * size ~/ decoded.height : size;
+      final newHeight = landscape ? size : decoded.height * size ~/ decoded.width;
+      final scaled = img.copyResize(
+        decoded,
+        width: newWidth,
+        height: newHeight,
+        interpolation: img.Interpolation.linear,
+      );
+      resized = img.copyCrop(
+        scaled,
+        x: _roundHalfEven((newWidth - size) / 2),
+        y: _roundHalfEven((newHeight - size) / 2),
+        width: width,
+        height: height,
+      );
+    } else {
+      throw UnsupportedError(
+        "Unsupported imageResize mode '$mode'. See preprocessing.json inputs[0].imageResize and adapt this client.",
+      );
+    }
 
     final mean = _inputSpec.normMean;
     final std = _inputSpec.normStd;

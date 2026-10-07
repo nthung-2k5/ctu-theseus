@@ -48,6 +48,31 @@ async function init() {
   onnxOutputName = matchTensorName(session.outputNames, outputSpec.column)
 }
 
+/** Rounds .5 to the nearest even integer, as Python's round() does (and torchvision's CenterCrop relies on). */
+function roundHalfEven(x) {
+  const floor = Math.floor(x)
+  const diff = x - floor
+  if (diff < 0.5) return floor
+  if (diff > 0.5) return floor + 1
+  return floor % 2 === 0 ? floor : floor + 1
+}
+
+/**
+ * For `imageResize.mode === 'shorter_edge_center_crop'`: scale so the SHORTER edge is `size` (the other edge is
+ * truncated to a whole pixel), then centre-crop a size x size square. Same arithmetic as torchvision's
+ * Resize(size) followed by CenterCrop(size), which is what the model was evaluated with.
+ */
+function shorterEdgeGeometry(width, height, size) {
+  const [newWidth, newHeight] =
+    width <= height ? [size, Math.floor((size * height) / width)] : [Math.floor((size * width) / height), size]
+  return {
+    width: newWidth,
+    height: newHeight,
+    left: roundHalfEven((newWidth - size) / 2),
+    top: roundHalfEven((newHeight - size) / 2),
+  }
+}
+
 /** Decode an ImageBitmap into a CHW float32 tensor. */
 function preprocessImage(imageBitmap) {
   const pp = inputSpec.ludwigPreprocessing ?? {}
@@ -58,7 +83,21 @@ function preprocessImage(imageBitmap) {
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
-  ctx.drawImage(imageBitmap, 0, 0, width, height)
+  const mode = inputSpec.imageResize?.mode
+  if (mode === undefined) {
+    ctx.drawImage(imageBitmap, 0, 0, width, height) // the whole image squashed to the target size
+  } else if (mode === 'shorter_edge_center_crop') {
+    const g = shorterEdgeGeometry(imageBitmap.width, imageBitmap.height, Math.min(width, height))
+    // Draw the part of the SOURCE that the centre crop of the resized image covers, so it is resampled once.
+    const scaleX = imageBitmap.width / g.width
+    const scaleY = imageBitmap.height / g.height
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(imageBitmap, g.left * scaleX, g.top * scaleY, width * scaleX, height * scaleY, 0, 0, width, height)
+  } else {
+    throw new Error(
+      `Unsupported imageResize mode '${mode}'. See preprocessing.json inputs[0].imageResize and adapt app.js.`,
+    )
+  }
   const { data } = ctx.getImageData(0, 0, width, height) // RGBA, HWC, uint8
 
   const norm = inputSpec.imageNormalization

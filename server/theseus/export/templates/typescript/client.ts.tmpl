@@ -35,6 +35,8 @@ interface PreprocessingInput {
   type: string
   column: string
   ludwigPreprocessing?: Record<string, unknown>
+  /** Absent: squash the whole image to height x width. */
+  imageResize?: { mode?: string }
   imageNormalization?: { mean: [number, number, number]; std: [number, number, number] }
   numberNormalization?: {
     type: 'zscore' | 'minmax' | 'log1p' | 'iq'
@@ -71,6 +73,31 @@ function matchTensorName(candidates: string[], preferred: string): string {
     )
   }
   return match
+}
+
+/** Rounds .5 to the nearest even integer, as Python's round() does (and torchvision's CenterCrop relies on). */
+function roundHalfEven(x: number): number {
+  const floor = Math.floor(x)
+  const diff = x - floor
+  if (diff < 0.5) return floor
+  if (diff > 0.5) return floor + 1
+  return floor % 2 === 0 ? floor : floor + 1
+}
+
+/**
+ * For `imageResize.mode === 'shorter_edge_center_crop'`: scale so the SHORTER edge is `size` (the other edge is
+ * truncated to a whole pixel), then centre-crop a size x size square. Same arithmetic as torchvision's
+ * Resize(size) followed by CenterCrop(size), which is what the model was evaluated with.
+ */
+function shorterEdgeGeometry(width: number, height: number, size: number) {
+  const [newWidth, newHeight] =
+    width <= height ? [size, Math.floor((size * height) / width)] : [Math.floor((size * width) / height), size]
+  return {
+    width: newWidth,
+    height: newHeight,
+    left: roundHalfEven((newWidth - size) / 2),
+    top: roundHalfEven((newHeight - size) / 2),
+  }
 }
 
 function softmax(x: Float32Array): Float32Array {
@@ -146,11 +173,23 @@ export class TheseusClient {
     const height = pp.height ?? 224
     const width = pp.width ?? 224
 
-    const { data } = await sharp(path)
-      .resize(width, height)
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true })
+    const mode = this.inputSpec.imageResize?.mode
+    let pipeline = sharp(path)
+    if (mode === undefined) {
+      pipeline = pipeline.resize(width, height) // the whole image squashed to the target size
+    } else if (mode === 'shorter_edge_center_crop') {
+      const { width: sourceWidth, height: sourceHeight } = await sharp(path).metadata()
+      if (!sourceWidth || !sourceHeight) throw new Error(`Could not read the size of image: ${path}`)
+      const g = shorterEdgeGeometry(sourceWidth, sourceHeight, Math.min(width, height))
+      // `extract` after `resize` crops the resized image, not the source.
+      pipeline = pipeline.resize(g.width, g.height).extract({ left: g.left, top: g.top, width, height })
+    } else {
+      throw new Error(
+        `Unsupported imageResize mode '${mode}'. See preprocessing.json's inputs[0].imageResize and adapt this client.`,
+      )
+    }
+
+    const { data } = await pipeline.removeAlpha().raw().toBuffer({ resolveWithObject: true })
 
     // HWC uint8 -> CHW float32, [0,1], optionally normalized.
     const norm = this.inputSpec.imageNormalization

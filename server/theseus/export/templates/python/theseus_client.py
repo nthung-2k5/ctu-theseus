@@ -40,6 +40,18 @@ def _softmax(x: np.ndarray) -> np.ndarray:
     return e / e.sum()
 
 
+def _shorter_edge_geometry(width: int, height: int, size: int) -> tuple[int, int, int, int]:
+    """(resized_width, resized_height, crop_left, crop_top) for `imageResize.mode == "shorter_edge_center_crop"`:
+    scale so the SHORTER edge is `size` (the other edge is truncated to a whole pixel), then centre-crop a
+    size x size square. The same arithmetic as torchvision's Resize(size) followed by CenterCrop(size), including
+    its round-half-to-even for an odd leftover."""
+    if width <= height:
+        new_width, new_height = size, int(size * height / width)
+    else:
+        new_width, new_height = int(size * width / height), size
+    return new_width, new_height, round((new_width - size) / 2.0), round((new_height - size) / 2.0)
+
+
 class TheseusClient:
     def __init__(
         self,
@@ -84,7 +96,20 @@ class TheseusClient:
         height = pp.get("height", 224)
         width = pp.get("width", 224)
 
-        img = Image.open(path).convert("RGB").resize((width, height))
+        img = Image.open(path).convert("RGB")
+        mode = (self.input_spec.get("imageResize") or {}).get("mode")
+        if mode is None:
+            img = img.resize((width, height))  # the whole image squashed to the target size
+        elif mode == "shorter_edge_center_crop":
+            size = min(width, height)
+            new_width, new_height, left, top = _shorter_edge_geometry(img.width, img.height, size)
+            img = img.resize((new_width, new_height), Image.Resampling.BILINEAR)
+            img = img.crop((left, top, left + width, top + height))
+        else:
+            raise NotImplementedError(
+                f"Unsupported imageResize mode {mode!r}. "
+                "See preprocessing.json's `inputs[0].imageResize` and adapt this client."
+            )
         arr = np.asarray(img, dtype=np.float32) / 255.0  # HWC, [0, 1]
 
         norm = self.input_spec.get("imageNormalization")

@@ -33,6 +33,8 @@ internal sealed class PreprocessingInput
     public string Type { get; set; } = "";
     public string Column { get; set; } = "";
     public Dictionary<string, JsonElement>? LudwigPreprocessing { get; set; }
+    // Absent: squash the whole image to height x width.
+    public Dictionary<string, JsonElement>? ImageResize { get; set; }
     public ImageNormalization? ImageNormalization { get; set; }
 }
 
@@ -103,7 +105,33 @@ public sealed class TheseusClient : IDisposable
     {
         var (width, height) = GetImageDims();
         using var image = Image.Load<Rgb24>(path);
-        image.Mutate(x => x.Resize(width, height));
+        string? mode = null;
+        if (_inputSpec.ImageResize is { } resize && resize.TryGetValue("mode", out var m) && m.ValueKind == JsonValueKind.String)
+            mode = m.GetString();
+
+        if (mode is null)
+        {
+            image.Mutate(x => x.Resize(width, height)); // the whole image squashed to the target size
+        }
+        else if (mode == "shorter_edge_center_crop")
+        {
+            // Scale so the SHORTER edge is `size` (the other edge truncated to a whole pixel), then centre-crop a
+            // size x size square: the same arithmetic as torchvision's Resize(size) + CenterCrop(size), which is
+            // what the model was evaluated with. Triangle is bilinear.
+            var size = Math.Min(width, height);
+            var landscape = image.Width > image.Height;
+            var newWidth = landscape ? (int)((long)size * image.Width / image.Height) : size;
+            var newHeight = landscape ? size : (int)((long)size * image.Height / image.Width);
+            // ToEven rounds .5 to the nearest even integer, as Python's round() does.
+            var left = (int)Math.Round((newWidth - size) / 2.0, MidpointRounding.ToEven);
+            var top = (int)Math.Round((newHeight - size) / 2.0, MidpointRounding.ToEven);
+            image.Mutate(x => x.Resize(newWidth, newHeight, KnownResamplers.Triangle).Crop(new Rectangle(left, top, width, height)));
+        }
+        else
+        {
+            throw new NotSupportedException(
+                $"Unsupported imageResize mode '{mode}'. See preprocessing.json's inputs[0].imageResize and adapt this client.");
+        }
 
         var norm = _inputSpec.ImageNormalization;
         var data = new float[3 * height * width];
