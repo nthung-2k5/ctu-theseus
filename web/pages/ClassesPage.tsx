@@ -35,7 +35,7 @@ export function ClassesPage() {
   const stats = useClassStats(projectId, usesClasses)
 
   return (
-    <div className="flex flex-col gap-3 p-3" style={{ maxWidth: 1180 }}>
+    <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title="Classes"
         description={`The labels this project's ${descriptor.label.toLowerCase()} model predicts.`}
