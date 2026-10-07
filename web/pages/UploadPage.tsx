@@ -3,8 +3,8 @@
  *
  * File tasks (vision/audio) get a filesystem view: class folders holding
  * train/validation/test folders, filled by dropping files, folders or archives
- * (see FileTreeView). Text tasks type items inline and tabular tasks import a
- * CSV; for those the left column *stages* items and the right column previews
+ * (see FileTreeView). Text tasks type items inline or import many at once from
+ * .txt/.md files and CSV/TSV/JSONL rows, and tabular tasks import a CSV; for those the left column *stages* items and the right column previews
  * the batch, with each item's split and class editable, and owns the Upload
  * button that actually sends it.
  *
@@ -13,10 +13,11 @@
  * This page doesn't browse the pool itself — see DatasetPage.
  */
 
-import { Button, Group, Paper, Select, Stack, Textarea } from '@mantine/core'
+import { Button, Group, Paper, Select, Stack, Tabs, Textarea } from '@mantine/core'
 import { FileTreeView } from '@public/components/dataset/FileTreeView'
 import { FileUploadBar } from '@public/components/dataset/FileUploadBar'
 import { TabularCsvImporter } from '@public/components/dataset/TabularCsvImporter'
+import { TextBatchImporter } from '@public/components/dataset/TextBatchImporter'
 import { UploadQueuePanel } from '@public/components/dataset/UploadQueuePanel'
 import { PageHeader, SectionLabel } from '@public/components/ui'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
@@ -104,19 +105,32 @@ function TextStagePanel({ classes, onStage }: { classes: LabelClass[]; onStage: 
         onClassChange={setClassId}
         classes={classes}
       />
-      <Textarea
-        label="Text"
-        placeholder="Paste or type the text content for this item"
-        autosize
-        minRows={4}
-        value={text}
-        onChange={(e) => setText(e.currentTarget.value)}
-      />
-      <Group justify="flex-end">
-        <Button onClick={handleAdd} disabled={!text.trim()}>
-          Add item
-        </Button>
-      </Group>
+      <Tabs defaultValue="type" keepMounted={false}>
+        <Tabs.List mb="sm">
+          <Tabs.Tab value="type">Type or paste</Tabs.Tab>
+          <Tabs.Tab value="files">Import files</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="type">
+          <Stack gap="sm">
+            <Textarea
+              label="Text"
+              placeholder="Paste or type the text content for this item"
+              autosize
+              minRows={4}
+              value={text}
+              onChange={(e) => setText(e.currentTarget.value)}
+            />
+            <Group justify="flex-end">
+              <Button onClick={handleAdd} disabled={!text.trim()}>
+                Add item
+              </Button>
+            </Group>
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="files">
+          <TextBatchImporter split={split} classId={classId} classes={classes} onStage={onStage} />
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   )
 }

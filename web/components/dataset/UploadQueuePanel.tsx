@@ -21,6 +21,9 @@ import type { LabelClass, SplitType } from '@public/store/types'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
+/** Items per POST /items request. */
+const UPLOAD_CHUNK_SIZE = 500
+
 /** The `items.post` payload for one staged item. */
 function toItemPayload(item: StagedItem) {
   const annotations =
@@ -73,12 +76,21 @@ export function UploadQueuePanel({
 
   const upload = useMutation({
     mutationFn: async () => {
-      try {
-        const data = await createItems(projectId, { items: items.map(toItemPayload) })
-        return { uploaded: data.created.length, failed: data.failed.length }
-      } catch {
-        return { uploaded: 0, failed: items.length }
+      // Chunked so a big import (thousands of files or rows) is not one enormous request, and so one rejected
+      // chunk costs only its own items.
+      let uploaded = 0
+      let failed = 0
+      for (let start = 0; start < items.length; start += UPLOAD_CHUNK_SIZE) {
+        const chunk = items.slice(start, start + UPLOAD_CHUNK_SIZE)
+        try {
+          const data = await createItems(projectId, { items: chunk.map(toItemPayload) })
+          uploaded += data.created.length
+          failed += data.failed.length
+        } catch {
+          failed += chunk.length
+        }
       }
+      return { uploaded, failed }
     },
     onSuccess: ({ uploaded, failed }) => {
       invalidateProjectScope(queryClient, projectId)
