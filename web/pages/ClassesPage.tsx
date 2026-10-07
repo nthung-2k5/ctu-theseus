@@ -52,6 +52,7 @@ export function ClassesPage() {
             key={saved.map((c) => `${c.classId}:${c.name}:${c.description}:${c.uiColorHex}`).join('|')}
             projectId={projectId}
             saved={saved}
+            supportsMerge={descriptor.annotation.type === 'classification'}
             stats={stats.data}
             statsFailed={stats.isError}
             onRetryStats={() => stats.refetch()}

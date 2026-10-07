@@ -5372,6 +5372,10 @@
       },
       "ClassStatsResponse": {
         "properties": {
+          "counted": {
+            "type": "boolean",
+            "title": "Counted"
+          },
           "stats": {
             "items": {
               "$ref": "#/components/schemas/ClassStat"
@@ -5398,6 +5402,7 @@
         },
         "type": "object",
         "required": [
+          "counted",
           "stats",
           "total",
           "unassigned",

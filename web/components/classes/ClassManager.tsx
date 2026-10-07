@@ -54,13 +54,19 @@ const SORT_OPTIONS: { value: SortMode; label: string }[] = [
 export function ClassManager({
   projectId,
   saved,
-  stats,
+  supportsMerge,
+  stats: loadedStats,
   statsFailed,
   onRetryStats,
   onSaved,
 }: {
   projectId: string
   saved: SavedClass[]
+  /**
+   * Whether a task's items carry one `classification` annotation each, which is what a merge relabels. Token
+   * classification labels spans instead, so there a merge would delete the class and change nothing.
+   */
+  supportsMerge: boolean
   /** Per-class counts for the draft; undefined until loaded. */
   stats: ClassStatsResponse | undefined
   statsFailed: boolean
@@ -79,6 +85,9 @@ export function ClassManager({
   const [bulk, setBulk] = useState<{ open: boolean; text: string }>({ open: false, text: '' })
 
   /* ── What the counts say ── */
+  // A task that can't be counted per class (`counted: false`) gets no counts at all: zeros would read as
+  // "every class is empty and every item unlabelled".
+  const stats = loadedStats?.counted ? loadedStats : undefined
   const statsById = useMemo(() => (stats ? new Map(stats.stats.map((s) => [s.classId, s])) : undefined), [stats])
   const min = stats?.minItemsPerClass ?? 3
   const splitsInUse = useMemo(() => usedSplits(stats?.stats ?? []), [stats])
@@ -162,8 +171,8 @@ export function ClassManager({
 
   const requestRemove = (row: DraftClass) => {
     const n = countOf(row)
-    // Nothing to decide about: never saved, or known to hold no items.
-    if (!row.classId || n === 0) return removeRow(row, null)
+    // Nothing to decide about: never saved, known to hold no items, or no way to move them (see `supportsMerge`).
+    if (!row.classId || n === 0 || !supportsMerge) return removeRow(row, null)
     openRemoveClass({
       name: row.name,
       count: n,
@@ -214,6 +223,12 @@ export function ClassManager({
           attentionOnly={attentionOnly}
           onToggleAttention={() => setAttentionOnly((v) => !v)}
         />
+      )}
+      {loadedStats && !loadedStats.counted && (
+        <Text size="xs" c="dimmed">
+          Per-class item counts aren't available for this task: its labels mark spans inside each item rather than
+          giving each item one class.
+        </Text>
       )}
       {statsFailed && (
         <Alert color="yellow" icon={<WarningCircleIcon size={16} />} p="xs" title="Item counts unavailable">
@@ -337,7 +352,7 @@ export function ClassManager({
             <ClassRowMenu
               name={row.name}
               canViewItems={!!row.classId}
-              mergeTargets={row.classId && (countOf(row) ?? 1) > 0 ? targetsFor(row) : []}
+              mergeTargets={supportsMerge && row.classId && (countOf(row) ?? 1) > 0 ? targetsFor(row) : []}
               onViewItems={() =>
                 void navigate({
                   to: '/project/$projectId/dataset',

@@ -229,6 +229,7 @@ async def test_stats_cover_every_active_class_including_empty_ones_with_per_spli
     assert by_id[empty] == {"classId": empty, "total": 0, "train": 0, "validation": 0, "test": 0}
     assert (body["total"], body["unassigned"], body["retired"]) == (6, 2, 0)
     assert body["minItemsPerClass"] == 3
+    assert body["counted"] is True
 
 
 async def test_items_of_a_removed_class_count_as_retired_not_as_a_class(client, new_user):
@@ -329,3 +330,34 @@ async def test_a_save_without_merges_still_leaves_removed_items_unlabelled(clien
     assert (await save(c, p["id"], [{"classId": a["classId"], "name": "a"}])).status_code == 200
     body = await stats(c, p["id"])
     assert body["retired"] == 1 and body["stats"][0]["total"] == 0
+
+
+async def test_token_classification_reports_counts_as_unavailable_instead_of_all_empty(client, new_user):
+    c = await new_user()
+    p = await project(c, "token_classification")
+    await make_class(c, p["id"], "PER")
+    await make_class(c, p["id"], "LOC")
+    await add_items(c, p["id"], ("train", None), ("train", None))
+    body = await stats(c, p["id"])
+    # Its labels are token_tags spans, not classification annotations: zeros here would read as "every class is
+    # empty" and "every item is unlabelled", which is not true.
+    assert body["counted"] is False
+    assert body["stats"] == []
+    assert (body["total"], body["unassigned"], body["retired"]) == (0, 0, 0)
+
+
+async def test_token_classification_refuses_a_merge_that_would_change_nothing(client, new_user):
+    c = await new_user()
+    p = await project(c, "token_classification")
+    a, b = [await make_class(c, p["id"], n) for n in ("A", "B")]
+    r = await c.put(
+        f"/api/projects/{p['id']}/classes",
+        json={
+            "classes": [{"classId": b["classId"], "name": "B"}],
+            "merges": [{"fromClassId": a["classId"], "intoClassId": b["classId"]}],
+        },
+    )
+    assert r.status_code == 400
+    assert names(await listing(c, p["id"])) == ["A", "B"]  # rejected before anything was deleted
+    # A plain save (no merges) still works for this task.
+    assert (await save(c, p["id"], [{"classId": b["classId"], "name": "B"}])).status_code == 200

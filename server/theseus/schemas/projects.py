@@ -194,6 +194,9 @@ class ClassStat(ApiModel):
 
 
 class ClassStatsResponse(ApiModel):
+    # False for a task whose labels are not one `classification` annotation per item (token classification keeps
+    # tag spans), where per-class item counts can't be derived: `stats` is then empty and the totals are zero.
+    counted: bool
     stats: list[ClassStat]  # every active class, in creation order, empty ones included (with zeros)
     total: int  # draft items
     unassigned: int  # draft items with no classification

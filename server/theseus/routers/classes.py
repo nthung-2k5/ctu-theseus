@@ -22,6 +22,7 @@ from theseus.schemas.projects import (
     UpdateClassBody,
 )
 from theseus.services import datasets as svc
+from theseus.services.task_registry import get_task_descriptor
 
 router = APIRouter(prefix="/projects/{project_id}/classes", tags=["classes"])
 
@@ -43,6 +44,12 @@ async def _class_in_project(session, project_id: uuid.UUID, class_id: uuid.UUID,
     if cls.dataset_id != project_id:
         raise HTTPException(403, "Unauthorized")
     return cls
+
+
+def _labels_are_classifications(task: str) -> bool:
+    """Whether an item's class is its one `classification` annotation. Token classification labels spans, so
+    its class usage lives in tag data that neither the per-class counts nor a merge can read."""
+    return get_task_descriptor(task).annotation.type == "classification"  # type: ignore[arg-type]
 
 
 async def _active_classes(session, project_id: uuid.UUID) -> list[LabelClass]:
@@ -68,6 +75,11 @@ async def class_stats(project: ProjectDep, session: SessionDep) -> ClassStatsRes
     """
     if not svc.task_uses_label_classes(project.task):
         raise HTTPException(400, svc.NO_LABEL_CLASSES)
+    if not _labels_are_classifications(project.task):
+        # Say so instead of returning zeros that would read as "every class is empty".
+        return ClassStatsResponse(
+            counted=False, stats=[], total=0, unassigned=0, retired=0, min_items_per_class=svc.MIN_ITEMS_PER_CLASS
+        )
     classes = await _active_classes(session, project.id)
     draft_id = (
         await session.execute(
@@ -107,6 +119,7 @@ async def class_stats(project: ProjectDep, session: SessionDep) -> ClassStatsRes
             )
         )
     return ClassStatsResponse(
+        counted=True,
         stats=stats,
         total=sum(sum(s.values()) for s in by_class.values()),
         unassigned=sum(by_class.get(None, {}).values()),
@@ -155,6 +168,9 @@ async def save_classes(body: SaveClassesBody, project: ProjectDep, session: Sess
     Names must be unique ignoring case. Renames may swap or reuse names freely, including the name of a
     class deleted earlier. Concurrent saves serialize on a row lock: the last one wins.
     """
+    if body.merges and not _labels_are_classifications(project.task):
+        # A merge relabels classification annotations; on this task it would change nothing and still delete the class.
+        raise HTTPException(400, "Merging classes isn't supported for this task")
     rows = list(
         (await session.execute(sa.select(LabelClass).where(LabelClass.dataset_id == project.id).with_for_update()))
         .scalars()
