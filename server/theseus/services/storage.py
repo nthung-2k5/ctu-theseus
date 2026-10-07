@@ -28,6 +28,7 @@ import logging
 import os
 import re
 import shutil
+from collections.abc import Callable
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -284,6 +285,23 @@ def download_file(bucket: str, key: str, local_path: str) -> str:
 
 def upload_file(bucket: str, key: str, local_path: str) -> None:
     s3().upload_file(local_path, bucket, key)
+
+
+def upload_dir(bucket: str, prefix: str, local_dir: str, *, include: Callable[[str], bool] | None = None) -> int:
+    """Upload files under local_dir to `prefix`, keeping relative paths (posix separators).
+
+    `include` receives each file's relative posix path and returns whether to upload it.
+    """
+    count = 0
+    for root, _dirs, files in os.walk(local_dir):
+        for name in sorted(files):
+            rel = os.path.relpath(os.path.join(root, name), local_dir).replace(os.sep, "/")
+            if include is not None and not include(rel):
+                continue
+            upload_file(bucket, f"{prefix.rstrip('/')}/{rel}", os.path.join(root, name))
+            count += 1
+    logger.info("Uploaded %d files to s3://%s/%s", count, bucket, prefix)
+    return count
 
 
 def upload_json(bucket: str, key: str, data: Any) -> None:

@@ -43,6 +43,8 @@ dependencies = [
   'torchvision',
   'torchmetrics',
   'ludwig',
+  # YOLO trainer backend (AGPL-3.0)
+  'ultralytics',
   'pandas',
   # ONNX export: torch.onnx.export needs both
   'onnx',

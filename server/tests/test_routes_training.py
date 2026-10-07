@@ -61,12 +61,26 @@ async def test_project_training_backends_gives_ludwig_its_task_specific_models_a
     c = await new_user()
     p = await project(c, "image_classification")
     backends = (await c.get(f"/api/projects/{p['id']}/training-backends")).json()["backends"]
-    assert [b["id"] for b in backends] == ["ludwig"]
+    # Sorted by id, so Ludwig (the default backend) stays first.
+    assert [b["id"] for b in backends] == ["ludwig", "yolo"]
     ludwig = backends[0]
     assert ludwig["models"][0]["id"] == "resnet18"
     assert ludwig["modelParamName"] == "encoderId"
     param_names = {p["name"] for p in ludwig["params"]}
     assert {"epochs", "batchSize", "learningRate", "imageSize", "useClassWeights"} <= param_names
+
+
+async def test_project_training_backends_gives_yolo_its_own_models_and_params(client, new_user):
+    c = await new_user()
+    p = await project(c, "image_classification")
+    backends = (await c.get(f"/api/projects/{p['id']}/training-backends")).json()["backends"]
+    yolo = next(b for b in backends if b["id"] == "yolo")
+    assert yolo["models"][0]["id"] == "yolo11n-cls"
+    assert yolo["modelParamName"] == "modelId"
+    param_names = {p["name"] for p in yolo["params"]}
+    assert {"epochs", "batchSize", "learningRate", "imageSize", "optimizer", "pretrained"} <= param_names
+    # Ludwig-only knobs must not appear: the form would send them and the backend would reject them.
+    assert not {"freezeBackbone", "headLayers", "useClassWeights"} & param_names
 
 
 async def test_a_stranger_cannot_see_another_users_project_training_backends(client, new_user):

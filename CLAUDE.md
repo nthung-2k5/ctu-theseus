@@ -42,7 +42,13 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `server/theseus/backends/` (subclass `TrainerBackend`, set `id`/`label`, a `Hyperparameters`
   pydantic model, and implement `supports`/`models`/`compile`/`train`/`load`/`convert`). Ludwig is
   the shipped one (`backends/ludwig/`); it owns every Ludwig-specific concept (encoders, feature
-  types, `ecd`/`llm` model types) so nothing outside that package should reference them.
+  types, `ecd`/`llm` model types) so nothing outside that package should reference them. The
+  Ultralytics YOLO backend (`backends/yolo/`, `image_classification` so far, AGPL-3.0) is the
+  second. A framework that only reads local files, as YOLO does, can't use `run.dataset_uri` /
+  `run.output_uri` the way Ludwig does through s3fs: it reads the parquet, downloads each image into
+  `run.workdir`, trains there, and uploads the results with `storage.upload_dir` (`yolo/data.py`,
+  `yolo/train.py`). Its class folders are named by zero-padded class *index*, never by class name,
+  so Ultralytics' `model.names` can be mapped back exactly.
   `training_runs.backend` / `sweeps.backend` are free text (a plugin id), like `exports.format`,
   never a Postgres enum. A backend module's own top level must not import its heavy ML
   dependency (torch, ludwig, sklearn, ...) — listing installed backends has to work without a GPU
@@ -55,7 +61,8 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   validation loss so far as a task-agnostic definition of a run's best epoch.
 - **Class list correctness for exports.** Any code touching model export must source the label
   index order from the trained model itself — for Ludwig, `training_set_metadata.json`'s
-  `idx2str` (written into `theseus-training/{runId}/results/**/model/`) — never from the
+  `idx2str` (written into `theseus-training/{runId}/results/**/model/`), for YOLO the `names.json`
+  that `yolo/train.py` writes from the trained `model.names` — never from the
   `label_classes` Postgres table. Postgres doesn't know what index a training run assigned to
   which class; getting this wrong produces a bundle that runs, returns confident predictions, and
   silently mislabels everything.

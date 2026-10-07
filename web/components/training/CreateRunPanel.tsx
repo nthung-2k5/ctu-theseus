@@ -141,10 +141,12 @@ export function CreateRunPanel({ project, prefill, loading, onStartTraining }: C
   }
 
   const setValue = (n: string, v: unknown) => setValues((prev) => ({ ...prev, [n]: v }))
-  // A model trained from scratch has no pretrained weights to freeze.
+  // A model trained from scratch has no pretrained weights to freeze. Only for a backend that has the switch: a
+  // value for a parameter it does not know would be rejected when the run is started.
   const changeModel = (id: string) => {
     setModelId(id)
-    if (!backend?.models.find((m) => m.id === id)?.pretrained) setValue('freezeBackbone', false)
+    const hasFreezeSwitch = backend?.params.some((p) => p.name === 'freezeBackbone')
+    if (hasFreezeSwitch && !backend?.models.find((m) => m.id === id)?.pretrained) setValue('freezeBackbone', false)
   }
 
   return (
