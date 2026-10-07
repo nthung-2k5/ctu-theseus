@@ -23,8 +23,28 @@ interface Props {
   density?: number
   /** Nodes lean toward and light up near the pointer. */
   interactive?: boolean
+  /** Which background it is drawn on. The landing page is always dark; the sign-in page follows the colour scheme. */
+  scheme?: 'dark' | 'light'
   className?: string
 }
+
+/** Canvas colours for each background: pale strokes read on dark, deeper blues on light. */
+const PALETTES = {
+  dark: {
+    edge: 'rgba(74,137,209,0.11)',
+    signal: '0,175,239',
+    signalHead: 0.95,
+    nodeIdle: 'rgba(120,160,215,0.55)',
+    nodeLit: (a: number) => `rgba(160,225,250,${a})`,
+  },
+  light: {
+    edge: 'rgba(31,92,169,0.18)',
+    signal: '0,122,190',
+    signalHead: 0.9,
+    nodeIdle: 'rgba(31,92,169,0.5)',
+    nodeLit: (a: number) => `rgba(0,122,190,${a})`,
+  },
+} as const
 
 // Small deterministic PRNG so the network layout is stable across resizes.
 function rng(seed: number) {
@@ -43,13 +63,14 @@ function rng(seed: number) {
  * travel layer to layer. Pauses when off-screen or when the tab is hidden, and renders one
  * static frame for users who prefer reduced motion.
  */
-export function NeuralCanvas({ density = 1, interactive = true, className }: Props) {
+export function NeuralCanvas({ density = 1, interactive = true, scheme = 'dark', className }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     const canvas = ref.current!
     const ctx = canvas.getContext('2d')!
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const palette = PALETTES[scheme]
     let w = 0,
       h = 0,
       dpr = 1
@@ -149,7 +170,7 @@ export function NeuralCanvas({ density = 1, interactive = true, className }: Pro
 
       // edges
       ctx.lineWidth = 1
-      ctx.strokeStyle = 'rgba(74,137,209,0.11)'
+      ctx.strokeStyle = palette.edge
       ctx.beginPath()
       for (const e of edges) {
         const a = P[e.from]!,
@@ -177,8 +198,8 @@ export function NeuralCanvas({ density = 1, interactive = true, className }: Pro
             y = a[1] + (b[1] - a[1]) * k
           const tail = Math.max(0, k - 0.22)
           const g = ctx.createLinearGradient(a[0] + (b[0] - a[0]) * tail, a[1] + (b[1] - a[1]) * tail, x, y)
-          g.addColorStop(0, 'rgba(0,175,239,0)')
-          g.addColorStop(1, 'rgba(0,175,239,0.95)')
+          g.addColorStop(0, `rgba(${palette.signal},0)`)
+          g.addColorStop(1, `rgba(${palette.signal},${palette.signalHead})`)
           ctx.strokeStyle = g
           ctx.lineWidth = 2
           ctx.beginPath()
@@ -204,14 +225,14 @@ export function NeuralCanvas({ density = 1, interactive = true, className }: Pro
         const r = 2.2 + n.glow * 3.2
         if (n.glow > 0.05) {
           const g = ctx.createRadialGradient(x, y, 0, x, y, r * 5)
-          g.addColorStop(0, `rgba(0,175,239,${0.5 * n.glow})`)
-          g.addColorStop(1, 'rgba(0,175,239,0)')
+          g.addColorStop(0, `rgba(${palette.signal},${0.5 * n.glow})`)
+          g.addColorStop(1, `rgba(${palette.signal},0)`)
           ctx.fillStyle = g
           ctx.beginPath()
           ctx.arc(x, y, r * 5, 0, Math.PI * 2)
           ctx.fill()
         }
-        ctx.fillStyle = n.glow > 0.05 ? `rgba(160,225,250,${0.6 + 0.4 * n.glow})` : 'rgba(120,160,215,0.55)'
+        ctx.fillStyle = n.glow > 0.05 ? palette.nodeLit(0.6 + 0.4 * n.glow) : palette.nodeIdle
         ctx.beginPath()
         ctx.arc(x, y, r, 0, Math.PI * 2)
         ctx.fill()
@@ -275,7 +296,7 @@ export function NeuralCanvas({ density = 1, interactive = true, className }: Pro
       document.removeEventListener('pointerleave', onLeave)
       document.removeEventListener('visibilitychange', onVis)
     }
-  }, [density, interactive])
+  }, [density, interactive, scheme])
 
   return (
     <canvas

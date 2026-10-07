@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   Title,
+  useComputedColorScheme,
 } from '@mantine/core'
 import { useForm } from '@mantine/form'
 import { notifications } from '@mantine/notifications'
@@ -23,6 +24,24 @@ import { getRouteApi, Link, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 
 const routeApi = getRouteApi('/_guest/login')
+
+/**
+ * The page's own surfaces for each colour scheme. The form's text, inputs and tabs come from Mantine and follow
+ * the scheme, so a fixed dark card made dark text sit on a dark background in light mode. Both card tones keep
+ * the frosted look over the network animation; the light one is near-opaque so text never competes with it.
+ */
+const SURFACES = {
+  dark: {
+    page: 'radial-gradient(1200px 600px at 20% 0%, #14305e55, transparent), #070b14',
+    card: 'rgba(15,23,42,.72)',
+    border: 'rgba(148,163,184,.18)',
+  },
+  light: {
+    page: 'radial-gradient(1200px 600px at 20% 0%, #bcd6f566, transparent), #eef3fa',
+    card: 'rgba(255,255,255,.9)',
+    border: 'rgba(15,23,42,.14)',
+  },
+} as const
 
 interface AuthValues {
   name: string
@@ -39,6 +58,8 @@ export function AuthPage() {
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const isRegister = mode === 'register'
+  const scheme = useComputedColorScheme('dark')
+  const surface = SURFACES[scheme]
 
   const form = useForm<AuthValues>({
     initialValues: { name: '', email: '', password: '', confirmPassword: '' },
@@ -81,10 +102,10 @@ export function AuthPage() {
         display: 'grid',
         placeItems: 'center',
         overflow: 'hidden',
-        background: 'radial-gradient(1200px 600px at 20% 0%, #14305e55, transparent), #070b14',
+        background: surface.page,
       }}
     >
-      <NeuralCanvas density={0.55} interactive={false} />
+      <NeuralCanvas density={0.55} interactive={false} scheme={scheme} />
       <Anchor
         component={Link}
         to="/"
@@ -101,8 +122,8 @@ export function AuthPage() {
           position: 'relative',
           zIndex: 2,
           backdropFilter: 'blur(14px)',
-          background: 'rgba(15,23,42,.72)',
-          borderColor: 'rgba(148,163,184,.18)',
+          background: surface.card,
+          borderColor: surface.border,
         }}
       >
         <form
