@@ -9,7 +9,7 @@ import pytest
 import sqlalchemy as sa
 
 from theseus import constants as C
-from theseus.db.models import Annotation
+from theseus.db.models import Annotation, DatasetItem, DatasetVersion, DatasetVersionItem
 from theseus.services import datasets as svc
 from theseus.services import storage
 
@@ -572,3 +572,45 @@ async def test_classifying_many_items_in_one_request_all_succeed(client, new_use
     r = await c.post(f"/api/projects/{p['id']}/items/classify", json={"itemIds": ids, "classId": cat})
     assert r.json() == {"updated": 40, "failed": 0}
     assert all(len(i["annotations"]) == 1 for i in (await page(c, p["id"]))["items"])
+
+
+async def test_mass_operations_past_the_postgres_argument_limit(client, new_user, db):
+    """Regression: asyncpg refuses a statement with more than 32767 arguments, and auto-split used to put every
+    draft item id into one `IN (...)`, so a dataset past that size failed with an InterfaceError."""
+    c = await new_user()
+    p = await project(c)
+    cat = await make_class(c, p["id"], "cat")
+    pid, n = uuid.UUID(p["id"]), 33_000
+    ids = [uuid.uuid4() for _ in range(n)]
+    async with db() as s:
+        draft_id = (
+            await s.execute(
+                sa.select(DatasetVersion.id).where(
+                    DatasetVersion.dataset_id == pid, DatasetVersion.version_tag.is_(None)
+                )
+            )
+        ).scalar_one()
+        await s.execute(sa.insert(DatasetItem), [{"id": i, "dataset_id": pid, "content_hash": f"h{i}"} for i in ids])
+        await s.execute(
+            sa.insert(DatasetVersionItem),
+            [{"version_id": draft_id, "item_id": i, "split_type": "train"} for i in ids],
+        )
+        await s.execute(
+            sa.insert(Annotation),
+            [{"item_id": i, "annotation_type": "classification", "class_id": uuid.UUID(cat)} for i in ids],
+        )
+        await s.commit()
+
+    r = (await c.post(f"/api/projects/{p['id']}/items/auto-split", json={})).json()
+    assert (r["updated"], r["splits"]) == (n, {"train": 26_400, "validation": 3_300, "test": 3_300})
+    async with db() as s:
+        counts = dict(
+            (
+                await s.execute(
+                    sa.select(DatasetVersionItem.split_type, sa.func.count())
+                    .where(DatasetVersionItem.version_id == draft_id)
+                    .group_by(DatasetVersionItem.split_type)
+                )
+            ).all()
+        )
+    assert counts == {"train": 26_400, "validation": 3_300, "test": 3_300}

@@ -11,6 +11,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from theseus.db.chunks import chunked
 from theseus.db.models import (
     Annotation,
     AudioFeatures,
@@ -20,8 +21,6 @@ from theseus.db.models import (
     TextFeatures,
     VisionFeatures,
 )
-
-_DELETE_CHUNK = 5000
 
 
 @dataclass
@@ -67,25 +66,28 @@ async def load_items(
     }
     if not originals:
         return []
-    ids = list(originals)
 
-    if modality == "text":
-        for f in (await session.execute(sa.select(TextFeatures).where(TextFeatures.item_id.in_(ids)))).scalars():
-            originals[f.item_id].text = {
-                "raw_text": f.raw_text,
-                "language_code": f.language_code,
-                "meta_json": f.meta_json,
-            }
-    elif modality == "tabular":
-        for f in (await session.execute(sa.select(TabularFeatures).where(TabularFeatures.item_id.in_(ids)))).scalars():
-            originals[f.item_id].features_json = f.features_json
+    # A snapshot can hold far more items than one statement may bind (asyncpg caps it at 32767 arguments).
+    for ids in chunked(list(originals)):
+        if modality == "text":
+            for f in (await session.execute(sa.select(TextFeatures).where(TextFeatures.item_id.in_(ids)))).scalars():
+                originals[f.item_id].text = {
+                    "raw_text": f.raw_text,
+                    "language_code": f.language_code,
+                    "meta_json": f.meta_json,
+                }
+        elif modality == "tabular":
+            for f in (
+                await session.execute(sa.select(TabularFeatures).where(TabularFeatures.item_id.in_(ids)))
+            ).scalars():
+                originals[f.item_id].features_json = f.features_json
 
-    for a in (
-        await session.execute(
-            sa.select(Annotation).where(Annotation.item_id.in_(ids)).order_by(Annotation.created_at, Annotation.id)
-        )
-    ).scalars():
-        originals[a.item_id].annotations.append(a)
+        for a in (
+            await session.execute(
+                sa.select(Annotation).where(Annotation.item_id.in_(ids)).order_by(Annotation.created_at, Annotation.id)
+            )
+        ).scalars():
+            originals[a.item_id].annotations.append(a)
     return list(originals.values())
 
 
@@ -152,8 +154,7 @@ async def delete_derived_items(session: AsyncSession, version_id: uuid.UUID) -> 
         .scalars()
         .all()
     )
-    for start in range(0, len(ids), _DELETE_CHUNK):
-        chunk = ids[start : start + _DELETE_CHUNK]
+    for chunk in chunked(ids):
         await session.execute(
             sa.delete(DatasetVersionItem).where(
                 DatasetVersionItem.version_id == version_id, DatasetVersionItem.item_id.in_(chunk)

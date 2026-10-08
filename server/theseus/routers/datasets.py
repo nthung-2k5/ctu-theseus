@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from theseus import constants as C
 from theseus.augmentation.config import MAX_AUGMENTED_ITEMS
 from theseus.augmentation.registry import AugmentationConfigError, describe, list_augmentations, validate_config
+from theseus.db.chunks import chunked
 from theseus.db.models import (
     Annotation,
     AudioFeatures,
@@ -110,6 +111,9 @@ from theseus.services.snapshot import build_snapshot
 from theseus.services.task_registry import class_annotation_type, get_task_descriptor, is_classification_task
 
 logger = logging.getLogger(__name__)
+
+# Rows per multi-row classify upsert; each row binds 3 parameters.
+CLASSIFY_CHUNK = 2000
 
 router = APIRouter(tags=["datasets"])
 
@@ -739,20 +743,22 @@ async def delete_items(body: DeleteItemsBody, project: ProjectDep, session: Sess
 async def set_items_split(body: SetSplitBody, draft: DraftDep, session: SessionDep) -> SetSplitResponse:
     """Bulk-reassign the draft split of pool items."""
     item_ids = await _selected_item_ids(body, draft.project, session, draft.draft.id)
-    updated = (
-        (
-            await session.execute(
-                sa.update(DatasetVersionItem)
-                .where(DatasetVersionItem.version_id == draft.draft.id, DatasetVersionItem.item_id.in_(item_ids))
-                .values(split_type=body.split)
-                .returning(DatasetVersionItem.item_id)
+    updated: list[uuid.UUID] = []
+    for chunk in chunked(item_ids):
+        updated += (
+            (
+                await session.execute(
+                    sa.update(DatasetVersionItem)
+                    .where(DatasetVersionItem.version_id == draft.draft.id, DatasetVersionItem.item_id.in_(chunk))
+                    .values(split_type=body.split)
+                    .returning(DatasetVersionItem.item_id)
+                )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
-    )
     await session.commit()
-    return SetSplitResponse(updated=list(updated))
+    return SetSplitResponse(updated=updated)
 
 
 @router.post("/projects/{project_id}/items/classify", response_model=ClassifyResponse)
@@ -766,22 +772,29 @@ async def classify_items(body: ClassifyBody, project: ProjectDep, session: Sessi
     if not await svc.class_in_dataset(session, body.class_id, project.id):
         raise HTTPException(400, "Unknown label class")
     item_ids = await _selected_item_ids(body, project, session)
-    updated = failed = 0
-    for item_id in item_ids:
+    # Done in chunks of rows, never one statement per item and never one statement for everything: each
+    # chunk is one multi-row upsert (3 bind parameters per row), well under asyncpg's 32767-argument cap,
+    # and in its own savepoint so a failing chunk costs only its own items.
+    owned: set[uuid.UUID] = set()
+    for chunk in chunked(item_ids):
+        owned.update(
+            (
+                await session.execute(
+                    sa.select(DatasetItem.id).where(DatasetItem.id.in_(chunk), DatasetItem.dataset_id == project.id)
+                )
+            ).scalars()
+        )
+    valid = [i for i in dict.fromkeys(item_ids) if i in owned]  # de-duplicated: ON CONFLICT can't hit a row twice
+    updated = 0
+    failed = len(item_ids) - len(valid)
+    for chunk in chunked(valid, CLASSIFY_CHUNK):
         try:
             async with session.begin_nested():
-                owned = (
-                    await session.execute(
-                        sa.select(DatasetItem.id).where(DatasetItem.id == item_id, DatasetItem.dataset_id == project.id)
-                    )
-                ).first()
-                if owned is None:
-                    raise LookupError("Item not found")
                 # One statement instead of read-then-write: with the partial unique index on (item_id)
                 # WHERE annotation_type = 'classification', two concurrent classify calls can no
                 # longer both see "no existing annotation" and both insert.
                 stmt = pg_insert(Annotation).values(
-                    item_id=item_id, annotation_type="classification", class_id=body.class_id
+                    [{"item_id": i, "annotation_type": "classification", "class_id": body.class_id} for i in chunk]
                 )
                 await session.execute(
                     stmt.on_conflict_do_update(
@@ -791,13 +804,13 @@ async def classify_items(body: ClassifyBody, project: ProjectDep, session: Sessi
                         # predicate matches the partial index, so every later item would fail with
                         # "no unique or exclusion constraint matching the ON CONFLICT specification".
                         index_where=sa.text("annotation_type = 'classification'"),
-                        set_={"class_id": body.class_id},
+                        set_={"class_id": stmt.excluded.class_id},
                     )
                 )
-            updated += 1
+            updated += len(chunk)
         except Exception:
-            logger.warning("Classify failed for item %s", item_id, exc_info=True)
-            failed += 1
+            logger.warning("Classify failed for a chunk of %d items", len(chunk), exc_info=True)
+            failed += len(chunk)
     await session.commit()
     return ClassifyResponse(updated=updated, failed=failed)
 
@@ -831,26 +844,24 @@ async def auto_split_items(body: AutoSplitBody, draft: DraftDep, session: Sessio
     # dataset by a nonexistent class would just be one big group, i.e. the flat behavior.
     stratify = body.stratify if body.stratify is not None else is_classification_task(draft.project.task)
 
-    class_of = dict(
-        (
-            await session.execute(
-                sa.select(Annotation.item_id, Annotation.class_id).where(
-                    Annotation.item_id.in_(rows), Annotation.class_id.is_not(None)
-                )
-            )
-        ).all()
-    )
+    # Chunked: `rows` is the whole draft, far past asyncpg's 32767-argument limit on a big dataset.
+    class_of: dict[uuid.UUID, uuid.UUID | None] = {}
+    for chunk in chunked(rows):
+        annotated = await session.execute(
+            sa.select(Annotation.item_id, Annotation.class_id)
+            .where(Annotation.item_id.in_(chunk), Annotation.class_id.is_not(None))
+            # An item with several boxes keeps one class (a later row overwrites an earlier one): its first
+            # box's. Rows only ever collide within a chunk, since an item is in exactly one chunk.
+            .order_by(Annotation.created_at.desc(), Annotation.id.desc())
+        )
+        class_of.update({item_id: class_id for item_id, class_id in annotated.all()})
     plan = svc.plan_split([(i, str(class_of.get(i, "unassigned"))) for i in rows], ratios, stratify)
 
     for split_type in svc.SPLITS:
-        ids = plan.groups[split_type]
-        for start in range(0, len(ids), 5000):
+        for chunk in chunked(plan.groups[split_type]):
             await session.execute(
                 sa.update(DatasetVersionItem)
-                .where(
-                    DatasetVersionItem.version_id == draft.draft.id,
-                    DatasetVersionItem.item_id.in_(ids[start : start + 5000]),
-                )
+                .where(DatasetVersionItem.version_id == draft.draft.id, DatasetVersionItem.item_id.in_(chunk))
                 .values(split_type=split_type)
             )
     await session.commit()
