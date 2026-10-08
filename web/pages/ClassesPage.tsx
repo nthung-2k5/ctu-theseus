@@ -53,6 +53,9 @@ export function ClassesPage() {
             projectId={projectId}
             saved={saved}
             supportsMerge={descriptor.annotation.type === 'classification'}
+            showColor={
+              descriptor.annotation.type === 'bounding_box' || descriptor.annotation.type === 'segmentation_mask'
+            }
             stats={stats.data}
             statsFailed={stats.isError}
             onRetryStats={() => stats.refetch()}

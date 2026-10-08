@@ -27,6 +27,7 @@ export function ClassTable({
   max,
   min,
   splitsInUse,
+  showColor,
   onPatch,
   renderMenu,
   emptyMessage,
@@ -39,6 +40,8 @@ export function ClassTable({
   max: number
   min: number
   splitsInUse: ReadonlySet<SplitName>
+  /** Only tasks that draw their classes on the item (boxes, masks) have a use for a colour. */
+  showColor: boolean
   onPatch: (key: string, change: Partial<DraftClass>) => void
   renderMenu: (row: DraftClass) => ReactNode
   emptyMessage: string
@@ -47,7 +50,7 @@ export function ClassTable({
     <Table withTableBorder verticalSpacing={6} highlightOnHover stickyHeader stickyHeaderOffset={48}>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th w={140}>Colour</Table.Th>
+          {showColor && <Table.Th w={140}>Colour</Table.Th>}
           <Table.Th w={230}>Name</Table.Th>
           <Table.Th visibleFrom="md">Description</Table.Th>
           <Table.Th w={300}>Items in draft</Table.Th>
@@ -64,18 +67,20 @@ export function ClassTable({
           const counts = row.classId ? stats?.get(row.classId) : undefined
           return (
             <Table.Tr key={row.key}>
-              <Table.Td>
-                <ColorInput
-                  size="xs"
-                  value={row.color}
-                  format="hex"
-                  swatches={CLASS_PALETTE}
-                  withEyeDropper={false}
-                  popoverProps={{ withinPortal: true }}
-                  aria-label={`Colour of ${row.name}`}
-                  onChange={(v) => onPatch(row.key, { color: v })}
-                />
-              </Table.Td>
+              {showColor && (
+                <Table.Td>
+                  <ColorInput
+                    size="xs"
+                    value={row.color}
+                    format="hex"
+                    swatches={CLASS_PALETTE}
+                    withEyeDropper={false}
+                    popoverProps={{ withinPortal: true }}
+                    aria-label={`Colour of ${row.name}`}
+                    onChange={(v) => onPatch(row.key, { color: v })}
+                  />
+                </Table.Td>
+              )}
               <Table.Td>
                 <TextInput
                   size="xs"
@@ -131,7 +136,7 @@ export function ClassTable({
         })}
         {rows.length === 0 && (
           <Table.Tr>
-            <Table.Td colSpan={5}>
+            <Table.Td colSpan={showColor ? 5 : 4}>
               <Text ta="center" c="dimmed" py="md">
                 {emptyMessage}
               </Text>

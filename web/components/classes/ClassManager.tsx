@@ -55,6 +55,7 @@ export function ClassManager({
   projectId,
   saved,
   supportsMerge,
+  showColor,
   stats: loadedStats,
   statsFailed,
   onRetryStats,
@@ -67,6 +68,8 @@ export function ClassManager({
    * classification labels spans instead, so there a merge would delete the class and change nothing.
    */
   supportsMerge: boolean
+  /** Whether classes are drawn on the item (boxes, masks), which is all a colour is for; hidden otherwise. */
+  showColor: boolean
   /** Per-class counts for the draft; undefined until loaded. */
   stats: ClassStatsResponse | undefined
   statsFailed: boolean
@@ -346,6 +349,7 @@ export function ClassManager({
           max={max}
           min={min}
           splitsInUse={splitsInUse}
+          showColor={showColor}
           onPatch={patch}
           emptyMessage={filtering ? 'No classes match this filter.' : 'No classes.'}
           renderMenu={(row) => (

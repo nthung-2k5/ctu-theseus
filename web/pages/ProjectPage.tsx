@@ -18,7 +18,7 @@ import {
 } from '@phosphor-icons/react'
 import { STATUS_COLORS } from '@public/components/training/constants'
 import { UpdateProjectModal } from '@public/components/UpdateProjectModal'
-import { ClassDot, confirmDelete, PageHeader, SectionLabel, StatCard, StatusBadge } from '@public/components/ui'
+import { confirmDelete, PageHeader, SectionLabel, StatCard, StatusBadge } from '@public/components/ui'
 import type { DatasetModality } from '@public/lib/api/enums'
 import { deleteProject as deleteProjectRequest } from '@public/lib/api/generated/projects/projects'
 import { formatDate } from '@public/lib/format'
@@ -274,21 +274,6 @@ export function ProjectPage() {
                 </Group>
               )
             })}
-            {classification && classes.length > 0 && (
-              <Group gap={6} mt="xs">
-                {classes.slice(0, 12).map((c) => (
-                  <Group key={c.classId} gap={4} wrap="nowrap">
-                    <ClassDot color={c.uiColorHex} />
-                    <Text size="xs">{c.name}</Text>
-                  </Group>
-                ))}
-                {classes.length > 12 && (
-                  <Text size="xs" c="dimmed">
-                    +{classes.length - 12}
-                  </Text>
-                )}
-              </Group>
-            )}
           </Stack>
         </Paper>
 
