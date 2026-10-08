@@ -209,3 +209,144 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
 
     loaded.close()
     model.close()
+
+
+def test_detection_trains_serves_evaluates_and_exports_with_the_real_library(tmp_path, monkeypatch):
+    """Quality is not the point (a few epochs on a toy set learn little): every stage must run for real and produce
+    the right shapes, with class names, boxes and the ONNX output layout as the rest of the system expects them."""
+    import json
+
+    classes = ["red square", "green: square/odd"]  # real names with spaces and punctuation, as class names are
+    colours = [(230, 40, 40), (40, 200, 60)]
+    rng = np.random.default_rng(0)
+    source = tmp_path / "source"
+    source.mkdir()
+    rows = []
+    for split, count in (("train", 24), ("validation", 8), ("test", 6)):
+        for i in range(count):
+            pixels = np.full((96, 128, 3), 30, dtype=np.uint8)
+            boxes = []
+            for _ in range(int(rng.integers(0, 3))):  # zero boxes is a background image
+                c = int(rng.integers(0, 2))
+                w, h = int(rng.integers(20, 40)), int(rng.integers(20, 40))
+                x, y = int(rng.integers(0, 128 - w)), int(rng.integers(0, 96 - h))
+                pixels[y : y + h, x : x + w] = colours[c]
+                boxes.append({"label": classes[c], "x": x / 128, "y": y / 96, "w": w / 128, "h": h / 96})
+            item_id = f"{split}-{i}"
+            Image.fromarray(pixels).save(source / f"{item_id}.png")
+            rows.append(
+                {
+                    "image_path": f"s3://theseus-datasets/pool/{item_id}.png",
+                    "boxes": json.dumps(boxes),
+                    "split": split,
+                    "_theseus_item_id": item_id,
+                }
+            )
+    # One image nobody labelled: it must be left out of training and evaluation, not treated as empty.
+    Image.fromarray(np.full((96, 128, 3), 30, dtype=np.uint8)).save(source / "unlabelled.png")
+    rows.append(
+        {
+            "image_path": "s3://theseus-datasets/pool/unlabelled.png",
+            "boxes": None,
+            "split": "train",
+            "_theseus_item_id": "unlabelled",
+        }
+    )
+    df = pd.DataFrame(rows)
+
+    def fake_download(bucket, key, local_path):
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        shutil.copyfile(source / os.path.basename(key), local_path)
+        return local_path
+
+    uploaded = tmp_path / "uploaded"
+    monkeypatch.setattr(data.storage, "download_file", fake_download)
+    monkeypatch.setattr(train_mod.storage, "upload_dir", lambda b, p, d, **kw: shutil.copytree(d, uploaded))
+    monkeypatch.setattr(train_mod.pd, "read_parquet", lambda uri: df)
+    monkeypatch.setattr(runtime, "cache_dir", lambda: tmp_path / "cache")
+
+    snapshot = SnapshotContext(
+        columns=[
+            ColumnSpec(name="image_path", kind="storage_uri"),
+            ColumnSpec(name="boxes", kind="boxes"),
+            ColumnSpec(name="split", kind="split"),
+        ],
+        label_class_names=classes,
+    )
+    config = compile_yolo_config(
+        get_task_descriptor("object_detection"),
+        snapshot,
+        YoloHyperparameters(epochs=3, batch_size=8, image_size=128, pretrained=False),
+    )
+    reports = []
+    ctx = TrainContext(
+        run_id="smoke-detect",
+        config=config,
+        dataset_uri="unused",
+        output_uri="unused",
+        workdir=str(tmp_path / "work"),
+        _heartbeat=lambda: None,
+        _check_abort=lambda: None,
+        _report=lambda epoch, split, metrics: reports.append((epoch, split, metrics)),
+    )
+
+    # -- train
+    model = YoloBackend.train(ctx)
+    assert isinstance(model, YoloLoadedModel) and not (tmp_path / "work").exists()
+    assert sorted(p.name for p in uploaded.iterdir()) == ["args.yaml", "best.pt", "names.json", "results.csv"]
+    assert [(e, s) for e, s, _ in reports] == [(e, s) for e in (1, 2, 3) for s in ("train", "validation")]
+    first_validation = reports[1][2]
+    assert {"loss", "box_loss", "cls_loss", "dfl_loss", "precision", "recall", "mAP50", "mAP50-95"} <= set(
+        first_validation
+    )
+    assert first_validation["loss"] == pytest.approx(
+        first_validation["box_loss"] + first_validation["cls_loss"] + first_validation["dfl_loss"]
+    )
+    meta = json.loads((uploaded / "names.json").read_text())
+    assert meta["task"] == "detect" and meta["names"] == classes  # the real names, in index order
+    assert model.output.kind == "detections" and model.output.labels == classes
+
+    # -- load back from what was uploaded, and predict
+    loaded = YoloBackend.load(str(uploaded))
+    probe = source / "test-0.png"
+    frame = loaded.predict(pd.DataFrame({"image_path": [str(probe)]}), confidence=0.001)
+    detections = frame["boxes_predictions"].iloc[0]
+    assert len(detections) > 0  # at a threshold of 0.001 even an untrained detector proposes something
+    for d in detections:
+        assert d["label"] in classes and 0.0 <= d["confidence"] <= 1.0
+        box = d["box"]
+        assert (
+            0 <= box["x"] <= 1
+            and 0 <= box["y"] <= 1
+            and box["x"] + box["w"] <= 1 + 1e-6
+            and box["y"] + box["h"] <= 1 + 1e-6
+        )
+    assert [d["confidence"] for d in detections] == sorted((d["confidence"] for d in detections), reverse=True)
+    assert list(frame["boxes_image_size"].iloc[0]) == [128, 96]
+    out = loaded.to_output(frame)
+    assert out["kind"] == "detections" and (out["imageWidth"], out["imageHeight"]) == (128, 96)
+
+    # -- evaluate: scored by the real validator, on the labelled test images only
+    result = YoloBackend.evaluate(loaded, df, "split", "_theseus_item_id")
+    assert result is not None
+    report = result.report
+    assert report["kind"] == "detection" and report["split"] == "test" and report["imageCount"] == 6
+    assert set(report["overall"]) == {"precision", "recall", "map50", "map5095"}
+    assert set(report["perClass"]) == set(classes)
+    assert report["instanceCount"] == sum(c["instances"] for c in report["perClass"].values())
+    assert len(result.predictions) == 6 and "unlabelled" not in set(result.predictions["_theseus_item_id"])
+
+    # -- convert: the raw candidate layout the manifest promises, with classes in the manifest in model order
+    import onnxruntime as ort
+
+    path = YoloBackend.convert(loaded, "onnx", str(tmp_path / "export"))
+    session = ort.InferenceSession(path)
+    output = session.run(None, {session.get_inputs()[0].name: np.zeros((1, 3, 128, 128), dtype=np.float32)})[0]
+    anchors = (128 // 8) ** 2 + (128 // 16) ** 2 + (128 // 32) ** 2  # the three detection strides
+    assert output.shape == (1, 4 + len(classes), anchors)
+    manifest = YoloBackend.preprocessing_manifest("smoke-detect", config, loaded.meta)
+    assert manifest["outputs"][0]["classes"] == classes
+    assert manifest["inputs"][0]["imageResize"]["mode"] == "letterbox"
+
+    loaded.close()
+    model.close()

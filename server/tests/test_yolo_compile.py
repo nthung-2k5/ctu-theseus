@@ -114,9 +114,11 @@ class TestHyperparameters:
 
 
 class TestBackend:
-    def test_supports_only_classification_for_now(self):
+    def test_supports_classification_and_detection_only(self):
         assert YoloBackend.supports(TASK)
+        assert YoloBackend.supports(get_task_descriptor("object_detection"))
         assert not YoloBackend.supports(get_task_descriptor("tabular_classification"))
+        assert not YoloBackend.supports(get_task_descriptor("image_segmentation"))
 
     def test_models_are_the_pretrained_catalog(self):
         models = YoloBackend.models(TASK)

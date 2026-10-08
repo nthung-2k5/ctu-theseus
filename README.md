@@ -1,10 +1,10 @@
 # CTU Theseus
 
-An AutoML platform for training, evaluating, and exporting Ludwig models without writing config
-by hand. A user creates a **project** bound to one of a fixed set of **tasks** (e.g. image
+An AutoML platform for training, evaluating, and exporting models (Ludwig, and Ultralytics YOLO for
+image classification and object detection) without writing config by hand. A user creates a **project** bound to one of a fixed set of **tasks** (e.g. image
 classification, text classification, tabular regression); each task is pinned to one of four
 **modalities** (vision / text / audio / tabular). From there the flow is: upload data into the
-project's dataset pool → label it → cut an immutable **snapshot** → train a **run** with Ludwig →
+project's dataset pool → label it → cut an immutable **snapshot** → train a **run** with a trainer backend →
 watch live metrics → run **inference** → **export** the result as a raw model, a devkit,
 or a deployable app.
 
@@ -95,13 +95,26 @@ lifespan, so a slow migration cannot fail the health check.
 
 `server/theseus/services/task_registry.py` is the single source of truth every other piece
 derives from: it declares, per task, which modality it belongs to, what shape a dataset item takes
-(`itemSpec.payload`: `file` / `inline_text` / `record`), what annotation type it needs, and how
-to compile it into a Ludwig config. The frontend's task picker, the per-modality
-upload/labeling UI, snapshot column derivation, and Ludwig config compilation are all driven off
-this one descriptor per task, so adding a new trainable task means adding one registry entry, not
-touching five files. The frontend reads it from the generated `schema/task_registry.json`
-(`web/lib/tasks.ts`), with the Ludwig feature builders and the inference input/output kinds
-already evaluated.
+(`itemSpec.payload`: `file` / `inline_text` / `record`), what annotation type it needs, the snapshot
+columns, and the inference input/output kinds. It says nothing about how a task is *trained*: that is a
+trainer backend's job (`server/theseus/backends/`, one package per framework). The frontend's task
+picker, the per-modality upload/labeling UI and snapshot column derivation are all driven off this one
+descriptor per task, so adding a new task's data side means adding one registry entry, not touching five
+files. The frontend reads it from the generated `schema/task_registry.json` (`web/lib/tasks.ts`), with
+the inference input/output kinds already evaluated.
+
+#### Object detection data
+
+`object_detection` stores **one `annotations` row per box** (`annotation_type = 'bounding_box'`, with a
+`class_id`). `label_structured` is `{x, y, w, h}`: the top-left corner and the size, each a fraction
+(0..1) of the whole image as displayed. Fractions rather than pixels, so a box survives a thumbnail or a
+re-upload and nothing at training time needs the image's size. An image with nothing in it carries a
+single marker row (`bounding_box`, no class, `{"background": true}`): a detector must learn what *not* to
+fire on, and that is different from an image nobody has labelled yet, which a trainer leaves out. The
+rules live in `server/theseus/services/boxes.py`; the snapshot's `boxes` column is a JSON list of
+`{label, x, y, w, h}` per image (`null` while unlabelled). A class belongs to one box, so the bulk "assign
+class" action does not apply; boxes are drawn on the image in the item drawer, or imported with their
+labels from a YOLO-format archive (Upload → Import YOLO dataset).
 
 ### S3 key layout
 
@@ -117,8 +130,9 @@ theseus-datasets/
   thumbnails/{size}/{original key}.jpg       cached JPEG thumbnails of image items, made on first request
 
 theseus-training/
-  {runId}/config.yaml                        compiled Ludwig config
-  {runId}/results/                           Ludwig's own output tree (incl. training_set_metadata.json)
+  {runId}/config.yaml                        the backend's compiled training config
+  {runId}/results/                           the backend's own output (Ludwig: its output tree incl.
+                                             training_set_metadata.json; YOLO: best.pt, names.json, results.csv)
 
 theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
@@ -181,12 +195,15 @@ format**: one Python class in `server/theseus/export/formats/`. The web app has 
 
 | Group | Formats (ids) | Contents |
 |---|---|---|
-| Model | `onnx`, `torch_export` | artifact + `preprocessing.json` + `labels.txt` + README |
+| Model | `onnx`, `torch_export` | artifact + `preprocessing.json` + `labels.txt` + README (a format is offered only if the run's backend produces its artifact: YOLO produces `onnx`) |
 | Devkit | `python_devkit`, `typescript_devkit`, `csharp_devkit`, `java_devkit` | ONNX model + a generated inference client (source only) + example + a `verify` script where supported |
 | App | `pwa_app`, `flutter_app` | a runnable client app (Progressive Web App or Flutter) doing inference on-device/in-browser |
 
 Devkits and apps are ONNX-only: `torch_export` needs PyTorch at runtime, which would make a portable
-client a lie. Apps are never a server: both run inference entirely on the end user's own device.
+client a lie. They also implement classification and regression only: a detector's output is a pile of
+candidate boxes that needs non-maximum suppression and an undone letterbox, so for object detection only
+the plain `onnx` model is offered (the `preprocessing.json` documents the input and output layout for a
+hand-written client). Apps are never a server: both run inference entirely on the end user's own device.
 Devkits ship **source only**, deliberately with no project/build
 file (no `.csproj`, no Gradle, no `package.json`); the bundle's README documents the exact
 dependencies to add to your own project instead, since a devkit's job is to hand you working
@@ -195,16 +212,20 @@ reference code to integrate, not a standalone scaffold. The apps are the excepti
 points, not incidental build tooling, so those do ship.
 
 **Adding a format:** create a module in `theseus/export/formats/` with a subclass of `ExportFormat`
-that sets `id`, `label`, `group` and `artifact` (a key of `export/artifacts.py`'s `ARTIFACTS`, which
-is the actual Ludwig conversion) and implements `assemble(ctx)`. Restart the backend. The
+that sets `id`, `label`, `group` and `artifact` (a key of `ARTIFACT_FILENAMES` in `backends/base.py`; the
+conversion itself is `TrainerBackend.convert`) and implements `assemble(ctx)`. Restart the backend. The
 format shows up in `GET /api/export-formats` and in the web combobox; there is no enum, migration or
 frontend change. Override `supports(task)` to hide a format for some tasks and set `notice` for a
 caveat the UI shows next to it.
 
-Every devkit/app client re-implements Ludwig's pre/postprocessing from a `preprocessing.json`
-extracted server-side from `training_set_metadata.json`. Critically, the class list comes from
-that file's `idx2str` array, **never** from the `label_classes` Postgres table, since Postgres has
-no knowledge of the index order Ludwig assigned during training. Every generated bundle ships a
+Every devkit/app client re-implements the model's pre/postprocessing from a `preprocessing.json`
+built server-side by the backend (`TrainerBackend.preprocessing_manifest`) from a file the run wrote:
+Ludwig's `training_set_metadata.json`, YOLO's `names.json`. Critically, the class list comes from
+that file (Ludwig's `idx2str`, YOLO's `names`), **never** from the `label_classes` Postgres table, since
+Postgres has no knowledge of the index order a run assigned. How an image is resized is part of the same
+contract: without an `imageResize` the clients squash it to a square (what Ludwig does), and YOLO
+classification asks for `shorter_edge_center_crop`, as Ultralytics does; a client refuses a mode it does not
+know rather than guess. Every generated bundle ships a
 golden sample (`expected.json`) plus a verify path (a script for devkit langs, a built-in
 self-check screen/button for the PWA/Flutter apps) so a consumer can confirm the reimplementation
 actually matches the platform's own inference output before trusting it.

@@ -552,16 +552,45 @@
       "id": "object_detection",
       "label": "Object Detection",
       "modality": "vision",
-      "status": "planned",
+      "status": "experimental",
       "itemSpec": {
-        "payload": "file"
+        "payload": "file",
+        "accept": [
+          "image/jpeg",
+          "image/png"
+        ]
       },
       "annotation": {
         "type": "bounding_box",
         "requiresLabelClasses": true
       },
-      "columns": [],
-      "inputFields": []
+      "columns": [
+        {
+          "name": "image_path",
+          "kind": "storage_uri"
+        },
+        {
+          "name": "boxes",
+          "kind": "boxes"
+        },
+        {
+          "name": "split",
+          "kind": "split"
+        }
+      ],
+      "inputFields": [],
+      "output": {
+        "column": "boxes",
+        "kind": "detections"
+      },
+      "inferenceInputSpec": {
+        "kind": "file",
+        "accept": [
+          "image/jpeg",
+          "image/png"
+        ]
+      },
+      "inferenceOutputKind": "detections"
     },
     "image_segmentation": {
       "id": "image_segmentation",

@@ -43,12 +43,13 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   pydantic model, and implement `supports`/`models`/`compile`/`train`/`load`/`convert`). Ludwig is
   the shipped one (`backends/ludwig/`); it owns every Ludwig-specific concept (encoders, feature
   types, `ecd`/`llm` model types) so nothing outside that package should reference them. The
-  Ultralytics YOLO backend (`backends/yolo/`, `image_classification` so far, AGPL-3.0) is the
-  second. A framework that only reads local files, as YOLO does, can't use `run.dataset_uri` /
+  Ultralytics YOLO backend (`backends/yolo/`: `image_classification` and `object_detection`,
+  AGPL-3.0) is the second. A framework that only reads local files, as YOLO does, can't use `run.dataset_uri` /
   `run.output_uri` the way Ludwig does through s3fs: it reads the parquet, downloads each image into
   `run.workdir`, trains there, and uploads the results with `storage.upload_dir` (`yolo/data.py`,
-  `yolo/train.py`). Its class folders are named by zero-padded class *index*, never by class name,
-  so Ultralytics' `model.names` can be mapped back exactly. A backend whose framework doesn't squash
+  `yolo/train.py`). For classification its class folders are named by zero-padded class *index*,
+  never by class name, so Ultralytics' `model.names` can be mapped back exactly (detection writes the
+  real names into `data.yaml`, which YAML carries safely). A backend whose framework doesn't squash
   images to a square (YOLO resizes the shorter edge, then centre-crops) says so with
   `inputs[].imageResize.mode = "shorter_edge_center_crop"` in its `preprocessing_manifest`; every
   generated client implements that mode and, without the key, squashes (Ludwig's behaviour). A client
@@ -63,6 +64,17 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   order a run assigned each class — see the export bullet below); and `train()` should report a
   `validation`-split `loss` metric wherever possible, since `events/writer.py` uses the lowest
   validation loss so far as a task-agnostic definition of a run's best epoch.
+- **Bounding boxes are one annotation each.** Object detection stores one `bounding_box` annotation
+  per box with a `class_id`, and `label_structured = {x, y, w, h}`: top-left corner and size, as
+  fractions (0..1) of the displayed image. An image with nothing in it carries one class-less
+  `{"background": true}` marker, which is what tells "labelled, empty" from "never labelled": the
+  snapshot's `boxes` cell is `"[]"` for the first and `null` for the second, and a trainer must leave
+  the second out. All of it is validated in `services/boxes.py` (wired in through `AnnotationIn`), so
+  nothing else should re-derive the rules. Several places assume one class per item and must go
+  through `task_registry.class_annotation_type(task)` instead of hard-coding `classification`: the
+  item filter, class stats, merges and the health report. A class belongs to one box, so the bulk
+  "classify" action refuses a detection project, and the upload route takes per-file `boxes`, never
+  `classId`, for one.
 - **Class list correctness for exports.** Any code touching model export must source the label
   index order from the trained model itself — for Ludwig, `training_set_metadata.json`'s
   `idx2str` (written into `theseus-training/{runId}/results/**/model/`), for YOLO the `names.json`

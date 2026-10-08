@@ -5,6 +5,14 @@ from typing import Any, ClassVar
 from theseus.export.common import template
 from theseus.export.formats.base import BundleContext, ExportFormat
 from theseus.export.readme import app_readme, devkit_readme
+from theseus.services.task_registry import TaskDescriptor
+
+
+def supports_generated_clients(task: TaskDescriptor) -> bool:
+    """The generated clients implement preprocessing and postprocessing for classification and regression. A
+    detector's output is a pile of candidate boxes that needs non-maximum suppression and an undone letterbox, which
+    none of them do, so offering a devkit or app for it would hand over a client that cannot run the model."""
+    return task.output is None or task.output.kind != "detections"
 
 
 class DevkitFormat(ExportFormat):
@@ -26,6 +34,10 @@ class DevkitFormat(ExportFormat):
     readme_info: ClassVar[dict[str, Any]]
     client_files: ClassVar[tuple[tuple[str, str], ...]]
     verify_files: ClassVar[tuple[tuple[str, str], ...]] = ()
+
+    @classmethod
+    def supports(cls, task: TaskDescriptor) -> bool:
+        return supports_generated_clients(task)
 
     @classmethod
     def assemble(cls, ctx: BundleContext) -> None:
@@ -55,6 +67,10 @@ class AppFormat(ExportFormat):
     needs_golden = True
 
     readme_info: ClassVar[dict[str, Any]]
+
+    @classmethod
+    def supports(cls, task: TaskDescriptor) -> bool:
+        return supports_generated_clients(task)
 
     @classmethod
     def readme(cls, ctx: BundleContext) -> str:

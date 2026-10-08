@@ -18,6 +18,7 @@ from theseus.db.enums import (
 from theseus.preprocessing.config import PreprocessingConfig, PreprocessingInfo
 from theseus.schemas.common import ApiModel
 from theseus.schemas.projects import VersionOut
+from theseus.services.boxes import validate_box_annotation
 
 
 class VersionDataset(ApiModel):
@@ -180,6 +181,13 @@ class AnnotationIn(ApiModel):
     label_text_sequence: str | None = None
     label_structured: Any | None = None
     confidence_score: float | None = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _a_box_is_well_formed(self) -> "AnnotationIn":
+        # One annotation is one box (or the "no objects" marker); see services/boxes.py for the convention.
+        if self.annotation_type == "bounding_box":
+            validate_box_annotation(self.class_id, self.label_structured)
+        return self
 
 
 class ItemIn(ApiModel):

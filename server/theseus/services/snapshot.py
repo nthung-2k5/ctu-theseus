@@ -32,6 +32,7 @@ from theseus.db.models import (
 )
 from theseus.services import storage
 from theseus.services.augmentation import materialize_augmentations
+from theseus.services.boxes import boxes_json
 from theseus.services.derived_items import delete_derived_items
 from theseus.services.preprocessing import materialize_preprocessing
 from theseus.services.task_registry import ColumnSpec, SnapshotContext, TaskDescriptor, get_task_descriptor
@@ -89,6 +90,11 @@ def resolve_column_value(col: ColumnSpec, member: SnapshotMember, class_name_by_
         case "text_sequence_label":
             seq = next((a for a in member.annotations if a.annotation_type == "text_sequence"), None)
             return seq.label_text_sequence if seq else None
+        case "boxes":
+            return boxes_json(
+                [(a.class_id, a.label_structured) for a in member.annotations if a.annotation_type == "bounding_box"],
+                class_name_by_id,
+            )
     raise ValueError(f"Unknown column kind: {col.kind}")
 
 

@@ -19,6 +19,8 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
         raise ValueError(f"Run {run_id} has no {METADATA_FILENAME} to build a preprocessing manifest from")
 
     size = meta["imgsz"]
+    if meta["task"] == "detect":
+        return _detection_manifest(run_id, meta, size)
     return {
         "schemaVersion": 1,
         "runId": run_id,
@@ -44,6 +46,52 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
                 "type": "category",
                 "column": meta["outputName"],
                 "classes": list(meta["names"]),
+            }
+        ],
+    }
+
+
+def _detection_manifest(run_id: str, meta: dict[str, Any], size: int) -> dict[str, Any]:
+    """The exported detector takes a letterboxed image and returns every candidate box: turning those into
+    detections (confidence filter, non-maximum suppression, undoing the letterbox) is the client's job. No generated
+    devkit or app implements that yet, so detection bundles are model-only (see export/formats/_kits.py); this
+    manifest is the contract a hand-written client follows, and `labels.txt` comes from `classes` as usual."""
+    return {
+        "schemaVersion": 1,
+        "runId": run_id,
+        "inputs": [
+            {
+                "name": "images",
+                "type": "image",
+                "column": meta["imageColumn"],
+                # What Ultralytics does to an image before the network (ultralytics.data.augment.LetterBox): scale
+                # so the LONGER edge is `size` (bilinear), then pad the shorter one, centred, to a size x size
+                # square with grey 114. Colour is RGB, scaled to 0..1, no mean/std.
+                "imageResize": {
+                    "mode": "letterbox",
+                    "interpolation": "bilinear",
+                    "size": [size, size],
+                    "padValue": 114,
+                    "padPosition": "center",
+                },
+                "imageNormalization": {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]},
+                "ludwigPreprocessing": {"height": size, "width": size},
+            }
+        ],
+        "outputs": [
+            {
+                "name": meta["outputName"],
+                "type": "detections",
+                "column": meta["outputName"],
+                "classes": list(meta["names"]),
+                "yoloOutput": {
+                    "layout": "[1, 4 + classes, candidates]",
+                    "box": "centre x, centre y, width, height, in pixels of the letterboxed input",
+                    "scores": "one per class, already between 0 and 1",
+                    "nonMaxSuppression": "required",
+                    "confidenceThreshold": 0.25,
+                    "iouThreshold": 0.7,
+                },
             }
         ],
     }

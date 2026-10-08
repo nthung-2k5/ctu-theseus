@@ -34,6 +34,7 @@ def build_item_filters(
     version_id: uuid.UUID,
     dataset_id: uuid.UUID,
     ground_truth: str,
+    class_type: str = "classification",
     origin: Literal["all", "original", "augmented"] = "all",
     split: str | None = None,
     class_id: str | None = None,
@@ -42,12 +43,14 @@ def build_item_filters(
 ) -> ItemFilters:
     """Clauses over `dataset_version_items`. `ground_truth` is the task's annotation type: "labeled" means
     "carries that type", which is classification for most tasks but text_sequence for captioning and ASR.
+    `class_type` is the annotation type whose rows carry the class: `classification` (one per item) or, for object
+    detection, `bounding_box` (one per box, so "in class X" means "has a box of class X").
 
     Raises ValueError for a `class_id` that is neither a class id nor 'unassigned'.
     """
 
     def classification_of(cid: uuid.UUID | None = None) -> sa.Exists:
-        clauses = [Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"]
+        clauses = [Annotation.item_id == vi.item_id, Annotation.annotation_type == class_type]
         if cid is not None:
             clauses.append(Annotation.class_id == cid)
         return sa.exists().where(*clauses)

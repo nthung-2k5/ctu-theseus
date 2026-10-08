@@ -133,7 +133,7 @@ class Artifact:
 ARTIFACT_FILENAMES: dict[str, str] = {"onnx": "model.onnx", "torch_export": "model.pt2"}
 
 
-OutputKind = Literal["classification", "regression", "text", "tokens"]
+OutputKind = Literal["classification", "regression", "text", "tokens", "detections"]
 
 
 @dataclass

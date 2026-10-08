@@ -7,7 +7,7 @@ from theseus.backends.yolo import runtime
 from theseus.backends.yolo.model import YoloLoadedModel
 
 LABELS = ["cat", "dog", "bird"]
-META = {"imgsz": 32, "imageColumn": "image_path", "outputName": "class", "names": LABELS}
+META = {"task": "classify", "imgsz": 32, "imageColumn": "image_path", "outputName": "class", "names": LABELS}
 
 # What the fake model "sees" in each image: path -> class probabilities in LABELS order.
 PROBS = {

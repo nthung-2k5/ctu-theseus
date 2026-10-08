@@ -43,7 +43,7 @@ async def test_creating_a_project_also_creates_its_dataset_and_draft_version(cli
 
 async def test_an_untrainable_task_is_rejected_with_422_and_creates_nothing(client, new_user, db):
     c = await new_user()
-    r = await c.post("/api/projects", json={"name": "x", "description": None, "task": "object_detection"})
+    r = await c.post("/api/projects", json={"name": "x", "description": None, "task": "image_segmentation"})
     assert r.status_code == 422 and "not yet trainable" in r.json()["error"]["message"]
     async with db() as s:
         assert (await s.execute(sa.select(sa.func.count()).select_from(Project))).scalar_one() == 0

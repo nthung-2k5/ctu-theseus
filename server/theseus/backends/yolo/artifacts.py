@@ -32,7 +32,8 @@ def convert(model: Any, artifact_id: str, workdir: str) -> str:
     shutil.copyfile(model.yolo.ckpt_path, weights)
 
     # simplify=False: the simplifier is an optional package Ultralytics would try to pip install.
-    # nms=False and dynamic=False: the plain, fixed-size graph every generated client can run.
+    # nms=False and dynamic=False: the plain, fixed-size graph every generated client can run. For detection that
+    # means the raw candidate boxes (see manifest.py), with non-maximum suppression left to the client.
     exported = YOLO(weights).export(
         format="onnx", imgsz=model.meta["imgsz"], simplify=False, dynamic=False, nms=False, device="cpu"
     )
@@ -43,7 +44,8 @@ def convert(model: Any, artifact_id: str, workdir: str) -> str:
     shutil.move(exported, path)
     if not os.path.isfile(path):
         raise RuntimeError(f"Ultralytics did not write {artifact.filename} for artifact {artifact_id!r}")
-    strip_final_softmax(path)
+    if model.meta["task"] == "classify":
+        strip_final_softmax(path)
     return path
 
 

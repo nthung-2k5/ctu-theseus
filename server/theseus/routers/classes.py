@@ -22,7 +22,7 @@ from theseus.schemas.projects import (
     UpdateClassBody,
 )
 from theseus.services import datasets as svc
-from theseus.services.task_registry import get_task_descriptor
+from theseus.services.task_registry import class_annotation_type
 
 router = APIRouter(prefix="/projects/{project_id}/classes", tags=["classes"])
 
@@ -46,10 +46,9 @@ async def _class_in_project(session, project_id: uuid.UUID, class_id: uuid.UUID,
     return cls
 
 
-def _labels_are_classifications(task: str) -> bool:
-    """Whether an item's class is its one `classification` annotation. Token classification labels spans, so
-    its class usage lives in tag data that neither the per-class counts nor a merge can read."""
-    return get_task_descriptor(task).annotation.type == "classification"  # type: ignore[arg-type]
+# The annotation type whose rows carry a `class_id`, per task (see task_registry.class_annotation_type): an item's
+# one `classification`, or each box of an object-detection item. Token classification labels spans, so its class
+# usage lives in tag data that neither the per-class counts nor a merge can read: None.
 
 
 async def _active_classes(session, project_id: uuid.UUID) -> list[LabelClass]:
@@ -75,7 +74,8 @@ async def class_stats(project: ProjectDep, session: SessionDep) -> ClassStatsRes
     """
     if not svc.task_uses_label_classes(project.task):
         raise HTTPException(400, svc.NO_LABEL_CLASSES)
-    if not _labels_are_classifications(project.task):
+    class_type = class_annotation_type(project.task)
+    if class_type is None:
         # Say so instead of returning zeros that would read as "every class is empty".
         return ClassStatsResponse(
             counted=False, stats=[], total=0, unassigned=0, retired=0, min_items_per_class=svc.MIN_ITEMS_PER_CLASS
@@ -90,18 +90,53 @@ async def class_stats(project: ProjectDep, session: SessionDep) -> ClassStatsRes
     ).scalar_one_or_none()
 
     by_class: dict[uuid.UUID | None, dict[str, int]] = {}
+    items_total: int | None = None
+    items_unlabeled: int | None = None
     if draft_id is not None:
         vi = DatasetVersionItem
-        rows = await session.execute(
-            sa.select(Annotation.class_id, vi.split_type, sa.func.count())
-            .select_from(vi)
-            .outerjoin(
-                Annotation,
-                sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"),
+        if class_type == "classification":
+            rows = await session.execute(
+                sa.select(Annotation.class_id, vi.split_type, sa.func.count())
+                .select_from(vi)
+                .outerjoin(
+                    Annotation,
+                    sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"),
+                )
+                .where(vi.version_id == draft_id)
+                .group_by(Annotation.class_id, vi.split_type)
             )
-            .where(vi.version_id == draft_id)
-            .group_by(Annotation.class_id, vi.split_type)
-        )
+        else:
+            # An item can hold boxes of several classes, so it counts once in EACH class it has a box of (and the
+            # per-class numbers add up to more than the item count). The "no objects" marker has no class.
+            rows = await session.execute(
+                sa.select(Annotation.class_id, vi.split_type, sa.func.count(sa.distinct(vi.item_id)))
+                .select_from(vi)
+                .join(
+                    Annotation,
+                    sa.and_(
+                        Annotation.item_id == vi.item_id,
+                        Annotation.annotation_type == class_type,
+                        Annotation.class_id.is_not(None),
+                    ),
+                )
+                .where(vi.version_id == draft_id)
+                .group_by(Annotation.class_id, vi.split_type)
+            )
+            items_total = (
+                await session.execute(sa.select(sa.func.count()).select_from(vi).where(vi.version_id == draft_id))
+            ).scalar_one()
+            items_labeled = (
+                await session.execute(
+                    sa.select(sa.func.count(sa.distinct(vi.item_id)))
+                    .select_from(vi)
+                    .join(
+                        Annotation,
+                        sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == class_type),
+                    )
+                    .where(vi.version_id == draft_id)
+                )
+            ).scalar_one()
+            items_unlabeled = items_total - items_labeled
         for class_id, split, n in rows.all():
             by_class.setdefault(class_id, {})[split] = n
 
@@ -121,8 +156,8 @@ async def class_stats(project: ProjectDep, session: SessionDep) -> ClassStatsRes
     return ClassStatsResponse(
         counted=True,
         stats=stats,
-        total=sum(sum(s.values()) for s in by_class.values()),
-        unassigned=sum(by_class.get(None, {}).values()),
+        total=items_total if items_total is not None else sum(sum(s.values()) for s in by_class.values()),
+        unassigned=items_unlabeled if items_unlabeled is not None else sum(by_class.get(None, {}).values()),
         retired=sum(sum(s.values()) for cid, s in by_class.items() if cid is not None and cid not in active),
         min_items_per_class=svc.MIN_ITEMS_PER_CLASS,
     )
@@ -168,8 +203,10 @@ async def save_classes(body: SaveClassesBody, project: ProjectDep, session: Sess
     Names must be unique ignoring case. Renames may swap or reuse names freely, including the name of a
     class deleted earlier. Concurrent saves serialize on a row lock: the last one wins.
     """
-    if body.merges and not _labels_are_classifications(project.task):
-        # A merge relabels classification annotations; on this task it would change nothing and still delete the class.
+    class_type = class_annotation_type(project.task)
+    if body.merges and class_type is None:
+        # A merge relabels the annotations that carry a class; on this task there are none, so it would change
+        # nothing and still delete the class.
         raise HTTPException(400, "Merging classes isn't supported for this task")
     rows = list(
         (await session.execute(sa.select(LabelClass).where(LabelClass.dataset_id == project.id).with_for_update()))
@@ -236,11 +273,12 @@ async def save_classes(body: SaveClassesBody, project: ProjectDep, session: Sess
             tombstone.name = f"{tombstone.name[:80]} (deleted {str(tombstone.class_id)[:8]})"
     await session.flush()
 
-    # One classification per item (partial unique index), so moving a class's items can't collide with anything.
+    # One classification per item (partial unique index), and boxes have no uniqueness at all, so moving a class's
+    # annotations can't collide with anything.
     for merge in body.merges:
         await session.execute(
             sa.update(Annotation)
-            .where(Annotation.class_id == merge.from_class_id, Annotation.annotation_type == "classification")
+            .where(Annotation.class_id == merge.from_class_id, Annotation.annotation_type == class_type)
             .values(class_id=merge.into_class_id)
         )
 

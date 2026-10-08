@@ -44,7 +44,33 @@ class TokensOutput(TypedDict):
     tokens: list[TokenTag]
 
 
-InferenceOutput = ClassificationOutput | RegressionOutput | TextOutput | TokensOutput
+class BoundingBoxOut(TypedDict):
+    """Normalised to the image (0..1), top-left corner and size: the convention bounding-box annotations use
+    (see services/boxes.py), so a box drawn by a user and a box predicted by a model are interchangeable."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class Detection(TypedDict):
+    label: str
+    confidence: float
+    box: BoundingBoxOut
+
+
+class DetectionsOutput(TypedDict):
+    kind: Literal["detections"]
+    feature: str
+    # The image's size in pixels, for a client that wants pixel coordinates (x * imageWidth, ...).
+    imageWidth: int
+    imageHeight: int
+    # Most confident first.
+    detections: list[Detection]
+
+
+InferenceOutput = ClassificationOutput | RegressionOutput | TextOutput | TokensOutput | DetectionsOutput
 
 
 def build_batch_result_frame(input_df: pd.DataFrame, predictions: pd.DataFrame) -> pd.DataFrame:

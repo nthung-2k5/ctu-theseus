@@ -17,6 +17,7 @@ from typing import Annotated, Any, Literal
 import sqlalchemy as sa
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,13 +100,14 @@ from theseus.schemas.datasets import (
 from theseus.schemas.projects import DatasetSplit, VersionOut
 from theseus.services import datasets as svc
 from theseus.services import storage, thumbnails
+from theseus.services.boxes import is_background, validate_box_annotation
 from theseus.services.cleanup import cleanup_version_storage
 from theseus.services.dataset_views import split_counts_for_dataset
 from theseus.services.derived_items import delete_derived_items
 from theseus.services.image_size import read_image_dimensions
 from theseus.services.item_filter import TooManyMatches, build_item_filters, matching_item_ids
 from theseus.services.snapshot import build_snapshot
-from theseus.services.task_registry import get_task_descriptor, is_classification_task
+from theseus.services.task_registry import class_annotation_type, get_task_descriptor, is_classification_task
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +308,8 @@ async def list_items(
     # "Labeled" means "carries this task own ground-truth annotation type": classification for most
     # tasks, but text_sequence for captioning and ASR.
     ground_truth = get_task_descriptor(project.task).annotation.type
+    # The annotation type whose rows carry a class: one `classification` per item, or one `bounding_box` per box.
+    class_type = class_annotation_type(project.task) or "classification"
     vi = DatasetVersionItem
 
     order = {
@@ -318,6 +322,7 @@ async def list_items(
             version_id=version.id,
             dataset_id=project.id,
             ground_truth=ground_truth,
+            class_type=class_type,
             origin=origin,
             split=split,
             class_id=class_id,
@@ -356,7 +361,7 @@ async def list_items(
             .select_from(vi)
             .join(
                 Annotation,
-                sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"),
+                sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == class_type),
             )
             .where(*base)
             .group_by(Annotation.class_id)
@@ -368,7 +373,7 @@ async def list_items(
             .select_from(vi)
             .join(
                 Annotation,
-                sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == "classification"),
+                sa.and_(Annotation.item_id == vi.item_id, Annotation.annotation_type == class_type),
             )
             .where(*base)
         )
@@ -500,6 +505,57 @@ async def create_items(body: CreateItemsBody, draft: DraftDep, session: SessionD
     return CreateItemsResponse(created=created, failed=failed)
 
 
+class _UploadBox(BaseModel):
+    """One box of a file in an upload: a class, and the box in image fractions (validated like any annotation)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    class_id: uuid.UUID = Field(alias="classId")
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+async def _parse_upload_boxes(
+    raw: str | None, file_count: int, allowed: bool, project_id: uuid.UUID, session: AsyncSession
+) -> list[list[tuple[uuid.UUID | None, dict[str, Any]]] | None]:
+    """`boxes` as one entry per file: None (leave unlabelled) or the (class, label) rows to create, where a file with
+    nothing in it gets the "no objects" marker. A malformed `boxes` rejects the whole upload, before anything is stored.
+    """
+    if raw is None:
+        return [None] * file_count
+    if not allowed:
+        raise HTTPException(400, "Boxes only apply to an object-detection project")
+    try:
+        parsed = TypeAdapter(list[list[_UploadBox] | None]).validate_json(raw)
+    except ValidationError as e:
+        raise HTTPException(422, f"Invalid boxes: {e.errors()[0]['msg']}") from None
+    if len(parsed) != file_count:
+        raise HTTPException(422, f"boxes needs one entry per file: got {len(parsed)} for {file_count} files")
+
+    class_ids = {b.class_id for entry in parsed for b in entry or []}
+    for class_id in class_ids:
+        if not await svc.class_in_dataset(session, class_id, project_id):
+            raise HTTPException(400, f"Unknown label class: {class_id}")
+
+    result: list[list[tuple[uuid.UUID | None, dict[str, Any]]] | None] = []
+    for entry in parsed:
+        if entry is None:
+            result.append(None)
+            continue
+        rows: list[tuple[uuid.UUID | None, dict[str, Any]]] = []
+        for b in entry:
+            label = {"x": b.x, "y": b.y, "w": b.w, "h": b.h}
+            try:
+                validate_box_annotation(b.class_id, label)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
+            rows.append((b.class_id, label))
+        result.append(rows or [(None, {"background": True})])
+    return result
+
+
 @router.post("/projects/{project_id}/upload", response_model=UploadResponse)
 async def upload_items(
     draft: DraftDep,
@@ -507,15 +563,26 @@ async def upload_items(
     files: Annotated[list[UploadFile], File()],
     split: Annotated[str, Form()],
     class_id: Annotated[uuid.UUID | None, Form(alias="classId")] = None,
+    boxes: Annotated[str | None, Form()] = None,
 ) -> UploadResponse:
-    """Upload files (vision/audio) into the pool and draft with one split (and optionally one class)."""
+    """Upload files (vision/audio) into the pool and draft with one split (and optionally one class).
+
+    For an object-detection project, `boxes` labels the files instead of a class: a JSON list with one entry per file,
+    in order, each either null (leave it unlabelled), `[]` (labelled, nothing in it) or a list of
+    `{classId, x, y, w, h}` boxes (see services/boxes.py). As with `classId`, only a file that is new to the pool is
+    labelled; one already there keeps whatever labels it has.
+    """
     if split not in svc.SPLITS:
         raise HTTPException(422, f"split must be one of: {', '.join(svc.SPLITS)}")
     project_id = draft.project.id
+    labels_with_boxes = get_task_descriptor(draft.project.task).annotation.type == "bounding_box"
     if class_id is not None and not svc.task_uses_label_classes(draft.project.task):
         raise HTTPException(400, svc.NO_LABEL_CLASSES)
+    if class_id is not None and labels_with_boxes:
+        raise HTTPException(400, "A class belongs to one box, not to a whole image: send `boxes` instead of `classId`")
     if class_id is not None and not await svc.class_in_dataset(session, class_id, project_id):
         raise HTTPException(400, "Unknown label class")
+    file_boxes = await _parse_upload_boxes(boxes, len(files), labels_with_boxes, project_id, session)
     dataset = await session.get(Dataset, project_id)
     if dataset is None:
         raise HTTPException(404, "Dataset not found")
@@ -541,7 +608,7 @@ async def upload_items(
     pooled = await asyncio.gather(*(to_pool(f, d) for f, d in payloads), return_exceptions=True)
 
     results: list[UploadResult] = []
-    for (f, data), upload in zip(payloads, pooled, strict=True):
+    for index, ((f, data), upload) in enumerate(zip(payloads, pooled, strict=True)):
         if data is None:
             results.append(UploadResult(status="rejected", reason="File is larger than the 50 MB limit"))
             continue
@@ -581,6 +648,13 @@ async def upload_items(
                     # possibly labeled differently, and a same-batch upload must not overwrite that.
                     if class_id is not None:
                         session.add(Annotation(item_id=item.id, annotation_type="classification", class_id=class_id))
+                    for box_class_id, label in file_boxes[index] or []:
+                        session.add(
+                            Annotation(
+                                item_id=item.id, annotation_type="bounding_box", class_id=box_class_id,
+                                label_structured=label,
+                            )
+                        )  # fmt: skip
                     await session.flush()
                 elif item.deleted_at is not None:
                     item.deleted_at = None  # re-uploading a soft-deleted item exact content restores it
@@ -629,6 +703,7 @@ async def _selected_item_ids(
             version_id=draft_id,
             dataset_id=project.id,
             ground_truth=get_task_descriptor(project.task).annotation.type,
+            class_type=class_annotation_type(project.task) or "classification",
             split=body.filter.split,
             class_id=body.filter.class_id,
             search=body.filter.search,
@@ -685,6 +760,9 @@ async def classify_items(body: ClassifyBody, project: ProjectDep, session: Sessi
     """Bulk-assign a label class: creates or updates each item classification annotation."""
     if not svc.task_uses_label_classes(project.task):
         raise HTTPException(400, svc.NO_LABEL_CLASSES)
+    if get_task_descriptor(project.task).annotation.type == "bounding_box":
+        # A class here is the label of one box, drawn on one image; there is no whole-image class to assign.
+        raise HTTPException(400, "Boxes are labelled one at a time: draw a box on the item instead")
     if not await svc.class_in_dataset(session, body.class_id, project.id):
         raise HTTPException(400, "Unknown label class")
     item_ids = await _selected_item_ids(body, project, session)
@@ -817,13 +895,14 @@ async def get_dataset_health(draft: DraftDep, session: SessionDep) -> DatasetHea
     ).scalar_one()
 
     distribution: list[HealthClassCount] = []
-    if is_classification_task(project.task):
+    class_type = class_annotation_type(project.task)
+    if class_type is not None:
         rows = (
             await session.execute(
                 sa.select(LabelClass.class_id, LabelClass.name, sa.func.count(sa.distinct(Annotation.item_id)))
                 .join(Annotation, Annotation.class_id == LabelClass.class_id)
                 .join(vi, Annotation.item_id == vi.item_id)
-                .where(in_draft, Annotation.annotation_type == "classification")
+                .where(in_draft, Annotation.annotation_type == class_type)
                 .group_by(LabelClass.class_id, LabelClass.name)
             )
         ).all()
@@ -952,10 +1031,39 @@ def _decimal(v: float | None) -> Decimal | None:
     return None if v is None else Decimal(str(v))
 
 
+async def _check_new_box(session: AsyncSession, item_id: uuid.UUID, class_id: uuid.UUID | None, label: Any) -> None:
+    """Keep an item's boxes and its "no objects" marker consistent for a new `bounding_box` annotation (its shape was
+    already validated with the request body, see `AnnotationIn`).
+
+    Drawing a box on an item marked as having no objects clears the marker (the marker's meaning is gone, and the
+    caller would otherwise have to delete it first). Marking an item that already has boxes is refused: that would
+    silently contradict them, so the boxes have to be deleted on purpose.
+    """
+    existing = (
+        (
+            await session.execute(
+                sa.select(Annotation).where(Annotation.item_id == item_id, Annotation.annotation_type == "bounding_box")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if is_background(label):
+        if any(not is_background(a.label_structured) for a in existing):
+            raise HTTPException(409, "This item has boxes; delete them before marking it as having no objects")
+        if existing:
+            raise HTTPException(409, "This item is already marked as having no objects")
+        return
+    for marker in (a for a in existing if is_background(a.label_structured)):
+        await session.delete(marker)
+
+
 @router.post("/items/{item_id}/annotations", response_model=AnnotationResponse)
 async def create_annotation(body: CreateAnnotationBody, item: ItemDep, session: SessionDep) -> AnnotationResponse:
     if body.class_id and not await svc.class_in_dataset(session, body.class_id, item.dataset_id):
         raise HTTPException(400, "Unknown label class")
+    if body.annotation_type == "bounding_box":
+        await _check_new_box(session, item.id, body.class_id, body.label_structured)
     annotation = Annotation(
         item_id=item.id, annotator_id=body.annotator_id, annotation_type=body.annotation_type,
         class_id=body.class_id, label_text_sequence=body.label_text_sequence,
@@ -998,6 +1106,15 @@ async def update_annotation(
     ).scalar_one()
     if body.class_id and not await svc.class_in_dataset(session, body.class_id, dataset_id):
         raise HTTPException(400, "Unknown label class")
+    if annotation.annotation_type == "bounding_box":
+        # Validate what the row WILL hold: only the fields that were sent change, the rest stay as stored.
+        try:
+            validate_box_annotation(
+                body.class_id or annotation.class_id,
+                body.label_structured if body.label_structured is not None else annotation.label_structured,
+            )
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
     for field in body.model_fields_set:
         value = getattr(body, field)
         if value is None:

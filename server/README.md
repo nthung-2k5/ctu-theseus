@@ -129,9 +129,19 @@ What to implement, roughly in the order a run touches them:
    calling `run.report(epoch, split, metrics)` as you go and `run.check_abort()` wherever it's
    safe to stop. Report a `validation`-split `loss` if you have one — it drives the run's
    `best_epoch`. Return the trained model already loaded (see `load` below).
+
+   A framework that only reads **local files** (Ultralytics YOLO, `backends/yolo/`) cannot use those
+   s3fs paths the way Ludwig does. It reads the parquet, downloads each image into `run.workdir`
+   (`yolo/data.py`), trains there, and uploads the results with `storage.upload_dir` under
+   `storage.training_results_prefix(run.run_id)`. Give it its own settings directory and switch off
+   anything that phones home or installs packages (`yolo/runtime.py`), and remove the workdir in a
+   `finally`: nothing else cleans it up.
 5. `load(model_dir)`: load a trained model from a downloaded directory into a `LoadedModel`
    (`predict`, `to_output`, `golden_prediction`, `close`) — the interface `model_cache.py`,
-   `services/inference.py` and `jobs/export.py` actually talk to.
+   `services/inference.py` and `jobs/export.py` actually talk to. `output.kind` is one of
+   `classification`, `regression`, `text`, `tokens` or `detections` (`services/predict.py` has the response
+   shape of each). The class names a model reports must come from the trained model itself, never from
+   the `label_classes` table.
 6. `evaluate(model, df, split_column, item_id_column)` (optional) and `convert(model, artifact_id,
    workdir)` / `artifacts` (optional): the evaluation report and export conversions, if you want
    either. Both default to "not supported" so a minimal backend can skip them.
@@ -143,7 +153,9 @@ that only serves the API and the one that trains on a GPU are the same process. 
 `__init__.py` and any module it imports at top level must therefore be free of `import torch` /
 `import ludwig` / etc.; do those imports inside the classmethod bodies that need them (`train`,
 `load`, `evaluate`, `convert`), the way `backends/ludwig/__init__.py` does. `available()` should
-try the import and return a user-facing reason on failure, for an optional-dependency backend.
+report a user-facing reason when the framework is missing: Ludwig tries the import, while the YOLO
+backend uses `importlib.util.find_spec`, because importing Ultralytics writes a settings file as a side
+effect (`tests/test_yolo_compile.py` checks that listing the backend imports nothing).
 
 ## Testing
 

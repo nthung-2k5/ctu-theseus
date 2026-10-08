@@ -10,7 +10,7 @@ from theseus.schemas.common import ApiModel
 
 class PredictResponse(ApiModel):
     """One prediction. `output` is one of the framework-neutral shapes in services/predict.py, told
-    apart by `kind`: classification | regression | text | tokens."""
+    apart by `kind`: classification | regression | text | tokens | detections."""
 
     output: Any
 

@@ -53,7 +53,8 @@ async def test_all_training_backends_lists_ludwig_available_with_its_supported_t
     ludwig = next(b for b in backends if b["id"] == "ludwig")
     assert ludwig["available"] is True and ludwig["unavailableReason"] is None
     assert "image_classification" in ludwig["supportedTasks"]
-    assert "object_detection" not in ludwig["supportedTasks"]  # planned: no backend supports it
+    assert "object_detection" not in ludwig["supportedTasks"]  # Ludwig has no box detector; YOLO does
+    assert "image_segmentation" not in ludwig["supportedTasks"]  # planned: no backend supports it
     assert ludwig["models"] == [] and ludwig["params"] == []  # no task in scope, nothing to derive them from
 
 

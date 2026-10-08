@@ -20,10 +20,10 @@ def test_every_project_task_has_a_descriptor_and_no_extras():
     assert set(TASK_REGISTRY) == set(get_args(ProjectTask))
 
 
-def test_thirteen_selectable_tasks_and_six_planned():
-    assert len(list_selectable_tasks()) == 13
+def test_fourteen_selectable_tasks_and_five_planned():
+    assert len(list_selectable_tasks()) == 14
     planned = [t for t in TASK_REGISTRY.values() if t.status == "planned"]
-    assert len(planned) == 6
+    assert len(planned) == 5
     assert all(t.output is None and t.columns == [] for t in planned)
 
 
@@ -76,7 +76,7 @@ class TestInferenceOutputKind:
 
     def test_unsupported_task_raises(self):
         with pytest.raises(ValueError):
-            get_inference_output_kind("object_detection")
+            get_inference_output_kind("image_segmentation")  # planned: no output shape yet
 
 
 def test_descriptors_are_immutable_data_no_backend_can_corrupt():
@@ -102,5 +102,34 @@ def test_registry_json_is_camelcase_json_with_pre_evaluated_inference_values():
     assert qa["itemSpec"]["payload"] == "inline_text"
     assert qa["annotation"]["requiresLabelClasses"] is False
     assert qa["output"] == {"column": "answer", "kind": "text"}
-    assert "inferenceInputSpec" not in data["tasks"]["object_detection"]
-    assert "output" not in data["tasks"]["object_detection"]
+    assert "inferenceInputSpec" not in data["tasks"]["image_segmentation"]  # planned: nothing to pre-evaluate
+    assert "output" not in data["tasks"]["image_segmentation"]
+    detection = data["tasks"]["object_detection"]
+    assert detection["inferenceOutputKind"] == "detections"
+    assert detection["inferenceInputSpec"]["kind"] == "file"
+    assert [c["kind"] for c in detection["columns"]] == ["storage_uri", "boxes", "split"]
+
+
+class TestObjectDetection:
+    def test_is_a_real_task_whose_output_is_boxes(self):
+        d = get_task_descriptor("object_detection")
+        assert d.status == "experimental"
+        assert (d.annotation.type, d.annotation.requires_label_classes) == ("bounding_box", True)
+        assert [(c.name, c.kind) for c in d.columns] == [
+            ("image_path", "storage_uri"),
+            ("boxes", "boxes"),
+            ("split", "split"),
+        ]
+        assert d.output is not None and (d.output.column, d.output.kind) == ("boxes", "detections")
+        assert get_inference_output_kind("object_detection") == "detections"
+        assert get_inference_input_spec("object_detection")["kind"] == "file"
+
+    def test_class_annotation_type_says_which_rows_carry_the_class(self):
+        from theseus.services.task_registry import class_annotation_type
+
+        assert class_annotation_type("image_classification") == "classification"
+        assert class_annotation_type("object_detection") == "bounding_box"
+        assert class_annotation_type("token_classification") is None  # classes live in tag data
+        assert class_annotation_type("tabular_regression") is None  # no classes at all
+        assert class_annotation_type("image_captioning") is None
+        assert class_annotation_type(None) is None

@@ -26,9 +26,9 @@ from theseus.db.enums import AnnotationType, DatasetModality, ProjectTask
 from theseus.schemas.common import ApiModel
 
 ColumnKind = Literal[
-    "storage_uri", "inline_text", "label", "text_sequence_label", "split", "split_index", "scalar", "item_id"
+    "storage_uri", "inline_text", "label", "text_sequence_label", "boxes", "split", "split_index", "scalar", "item_id"
 ]
-TaskOutputKind = Literal["classification", "regression", "text", "tokens"]
+TaskOutputKind = Literal["classification", "regression", "text", "tokens", "detections"]
 InferenceOutputKind = TaskOutputKind
 
 
@@ -96,6 +96,7 @@ class SnapshotContext:
 IMAGE_PATH = C.IMAGE_PATH_COLUMN_NAME
 CLASS = C.CLASS_COLUMN_NAME
 SPLIT = C.SPLIT_COLUMN_NAME
+BOXES = "boxes"
 
 _AUDIO_MIME = ["audio/wav", "audio/mpeg", "audio/flac", "audio/ogg"]
 _IMAGE_MIME = ["image/jpeg", "image/png"]
@@ -213,8 +214,15 @@ _TASKS: list[TaskDescriptor] = [
         "automatic_speech_recognition", "Automatic Speech Recognition", "audio", "audio_path", "transcript",
         _AUDIO_MIME,
     ),
+    # -- Tier 4: experimental (boxes) --
+    # `boxes` holds a JSON list of {label, x, y, w, h} per image (normalised, top-left origin; see services/boxes.py).
+    _task(
+        "object_detection", "Object Detection", "vision", "experimental",
+        ItemSpec(payload="file", accept=_IMAGE_MIME), AnnotationSpec(type="bounding_box", requires_label_classes=True),
+        [_col(IMAGE_PATH, "storage_uri"), _col(BOXES, "boxes"), _col(SPLIT, "split")],
+        output=TaskOutput(column=BOXES, kind="detections"),
+    ),
     # -- Planned: no annotation/snapshot story yet --
-    _planned("object_detection", "Object Detection", "vision", "bounding_box", True),
     _planned("image_segmentation", "Image Segmentation", "vision", "segmentation_mask", True),
     _planned("audio_segmentation", "Audio Segmentation", "audio", "segmentation_mask", True),
     _planned("tabular_clustering", "Tabular Clustering", "tabular", "classification", False),
@@ -238,6 +246,18 @@ def task_to_modality(task: str) -> DatasetModality:
 
 def is_classification_task(task: str | None) -> bool:
     return bool(task) and get_task_descriptor(task).annotation.requires_label_classes  # type: ignore[arg-type]
+
+
+def class_annotation_type(task: str | None) -> AnnotationType | None:
+    """The annotation type whose rows carry an item's `class_id`: `classification` (one per item) or
+    `bounding_box` (one per box). None when classes live elsewhere (token tags keep them in tag data) or the
+    task has none (regression, free text)."""
+    if not task:
+        return None
+    annotation = get_task_descriptor(task).annotation
+    if annotation.requires_label_classes and annotation.type in ("classification", "bounding_box"):
+        return annotation.type
+    return None
 
 
 def list_selectable_tasks() -> list[TaskDescriptor]:

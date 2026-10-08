@@ -258,3 +258,51 @@ async def test_build_snapshot_for_unknown_version_does_not_raise(db, fake_s3):
     await snap.build_snapshot(uuid.uuid4())
     async with db() as s:
         assert (await s.execute(sa.select(sa.func.count()).select_from(DatasetVersion))).scalar_one() == 0
+
+
+async def test_build_snapshot_for_object_detection_writes_boxes_by_class_name(db, fake_s3):
+    async with db() as s:
+        project, version = await _seed(s, "object_detection", "vision")
+        cat = LabelClass(dataset_id=project.id, name="red cat")
+        dog = LabelClass(dataset_id=project.id, name="dog")
+        s.add_all([cat, dog])
+        await s.flush()
+        box = {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4}
+        # (name, split, annotations): two boxes of two classes, a marked-empty image, and an unlabelled one.
+        plan = [
+            ("boxed", "train", [(cat.class_id, box), (dog.class_id, {**box, "x": 0.5})]),
+            ("empty", "validation", [(None, {"background": True})]),
+            ("unlabelled", "test", []),
+        ]
+        for name, split, annotations in plan:
+            item = DatasetItem(
+                dataset_id=project.id, content_hash=uuid.uuid4().hex + uuid.uuid4().hex, storage_url=f"pool/{name}.png"
+            )
+            s.add(item)
+            await s.flush()
+            s.add(DatasetVersionItem(version_id=version.id, item_id=item.id, split_type=split))
+            s.add_all(
+                Annotation(item_id=item.id, annotation_type="bounding_box", class_id=cid, label_structured=label)
+                for cid, label in annotations
+            )
+        await s.commit()
+        version_id = version.id
+
+    await snap.build_snapshot(version_id)
+
+    table = pq.read_table(io.BytesIO(fake_s3[f"snapshots/{version_id}/dataset.parquet"]))
+    assert table.column_names == ["image_path", "boxes", "split", "_ludwig_split_idx", "_theseus_item_id"]
+    rows = {r["image_path"].rsplit("/", 1)[-1]: r for r in table.to_pylist()}
+
+    boxed = json.loads(rows["boxed.png"]["boxes"])
+    assert {b["label"] for b in boxed} == {"red cat", "dog"}  # class NAMES, like the classification column
+    by_label = {b["label"]: b for b in boxed}
+    assert {k: by_label["red cat"][k] for k in "xywh"} == {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4}
+    assert by_label["dog"]["x"] == 0.5
+    assert rows["empty.png"]["boxes"] == "[]"  # labelled, and nothing in it
+    assert rows["unlabelled.png"]["boxes"] is None  # NOT "[]": it must never be trained on as an empty image
+
+    ctx = await snap.read_snapshot_manifest(version_id)
+    assert sorted(ctx.label_class_names) == ["dog", "red cat"]
+    assert ctx.class_counts is None  # no per-image class to count
+    assert "boxes" in [c.name for c in ctx.columns]

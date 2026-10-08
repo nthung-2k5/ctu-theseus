@@ -64,8 +64,11 @@ def compile_yolo_config(
     if custom is not None:
         raise ConfigError("The YOLO backend does not support bring-your-own models")
     spec = _spec_for(task)
-    if len(ctx.label_class_names) < 2:
+    # Classification needs something to tell apart; a detector with a single class ("find the cats") is fine.
+    if spec.kind == "classify" and len(ctx.label_class_names) < 2:
         raise ConfigError("YOLO classification needs a snapshot with at least two classes")
+    if spec.kind == "detect" and not ctx.label_class_names:
+        raise ConfigError("YOLO detection needs a snapshot with at least one class")
 
     model_id = hp.model_id or spec.models[0].id
     if model_id not in {m.id for m in spec.models}:
@@ -104,7 +107,8 @@ def compile_yolo_config(
         "weights": f"{model_id}.pt" if pretrained else f"{model_id}.yaml",
         # Snapshot parquet columns `data.py` reads, and the name the prediction frame's columns are keyed by.
         "imageColumn": _column(ctx, "storage_uri"),
-        "labelColumn": _column(ctx, "label"),
+        # The ground-truth column: the class name per image for classification, the JSON list of boxes for detection.
+        "labelColumn": _column(ctx, "boxes" if spec.kind == "detect" else "label"),
         # Informational: the class order a trained model actually uses is its own (`model.names`), never this.
         "classNames": list(ctx.label_class_names),
         "train": train,

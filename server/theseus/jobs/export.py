@@ -75,6 +75,10 @@ def _build_golden_sample(
     """
     try:
         model = backend.load(model_dir)
+        if model.output.kind == "detections":
+            # `expected.json` embeds a flat `{label: value}` dict that every devkit parses; a list of boxes does
+            # not fit it, and no devkit or app supports detection, so there is nothing to verify a client against.
+            return None
         df = pd.read_parquet(storage.s3fs_path(C.BUCKET_DATASETS, dataset_key))
         rows = (
             df[df[C.SPLIT_COLUMN_NAME] == "test"]

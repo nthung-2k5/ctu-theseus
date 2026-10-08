@@ -64,7 +64,49 @@ class _Beat:
             self._run.heartbeat()
 
 
-def _add_callbacks(model: Any, run: TrainContext) -> None:
+_DETECT_LOSSES = ("box", "cls", "dfl")
+# Ultralytics' detection metric key -> the name stored for it.
+_DETECT_VALIDATION_METRICS = {
+    "metrics/precision(B)": "precision",
+    "metrics/recall(B)": "recall",
+    "metrics/mAP50(B)": "mAP50",
+    "metrics/mAP50-95(B)": "mAP50-95",
+}
+_CLASSIFY_VALIDATION_METRICS = {"metrics/accuracy_top1": "accuracy", "metrics/accuracy_top5": "top5Accuracy"}
+
+
+def validation_metrics(kind: str, metrics: dict[str, Any]) -> dict[str, float] | None:
+    """The metrics to store for the validation split, or None when this callback is not an epoch's end.
+
+    `loss` is always present, since the best epoch is the one with the lowest validation `loss` (events/writer.py).
+    Detection has three loss terms rather than one, so `loss` is their sum, each also kept under its own name.
+    """
+    if kind == "detect":
+        parts = {name: metrics.get(f"val/{name}_loss") for name in _DETECT_LOSSES}
+        if any(v is None for v in parts.values()):
+            return None
+        out = {"loss": sum(parts.values()), **{f"{name}_loss": v for name, v in parts.items()}}
+        wanted = _DETECT_VALIDATION_METRICS
+    else:
+        if "val/loss" not in metrics:
+            return None
+        out = {"loss": metrics["val/loss"]}
+        wanted = _CLASSIFY_VALIDATION_METRICS
+    out.update({name: metrics[source] for source, name in wanted.items() if source in metrics})
+    return {k: float(v) for k, v in out.items()}
+
+
+def train_metrics(kind: str, trainer: Any) -> dict[str, float] | None:
+    if trainer.tloss is None:
+        return None
+    items = trainer.label_loss_items(trainer.tloss)
+    if kind == "detect":
+        parts = {name: float(items[f"train/{name}_loss"]) for name in _DETECT_LOSSES}
+        return {"loss": sum(parts.values()), **{f"{name}_loss": v for name, v in parts.items()}}
+    return {"loss": float(items["train/loss"])}
+
+
+def _add_callbacks(model: Any, run: TrainContext, kind: str) -> None:
     beat = _Beat(run)
 
     def on_train_start(trainer: Any) -> None:
@@ -80,19 +122,16 @@ def _add_callbacks(model: Any, run: TrainContext) -> None:
 
     def on_fit_epoch_end(trainer: Any) -> None:
         run.check_abort()
-        metrics = trainer.metrics or {}
-        # Ultralytics fires this once more after the final validation on the best weights, with no
-        # `val/loss` and the last epoch's number again. That is not a new epoch.
-        if "val/loss" not in metrics:
+        # Ultralytics fires this once more after the final validation on the best weights, with no validation
+        # loss and the last epoch's number again. That is not a new epoch.
+        validation = validation_metrics(kind, trainer.metrics or {})
+        if validation is None:
             return
         epoch = int(trainer.epoch) + 1
-        validation = {"loss": metrics["val/loss"]}
-        for source, name in (("metrics/accuracy_top1", "accuracy"), ("metrics/accuracy_top5", "top5Accuracy")):
-            if source in metrics:
-                validation[name] = metrics[source]
-        if trainer.tloss is not None:
-            run.report(epoch, "train", {"loss": float(trainer.label_loss_items(trainer.tloss)["train/loss"])})
-        run.report(epoch, "validation", {k: float(v) for k, v in validation.items()})
+        training = train_metrics(kind, trainer)
+        if training is not None:
+            run.report(epoch, "train", training)
+        run.report(epoch, "validation", validation)
 
     model.add_callback("on_train_start", on_train_start)
     model.add_callback("on_train_epoch_start", on_train_epoch_start)
@@ -100,13 +139,19 @@ def _add_callbacks(model: Any, run: TrainContext) -> None:
     model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
 
 
-def _class_names(model: Any, class_names: list[str]) -> list[str]:
-    """The real class name per model index. `model.names` holds the zero-padded class FOLDER names `data.py`
-    wrote, in the index order the model learned; each is an index into the snapshot's class list."""
-    folder_names = [model.names[i] for i in sorted(model.names)]
-    if len(folder_names) != len(class_names):
-        raise RuntimeError(f"The trained model has {len(folder_names)} classes but the snapshot has {len(class_names)}")
-    return [class_names[int(folder)] for folder in folder_names]
+def _class_names(model: Any, class_names: list[str], kind: str) -> list[str]:
+    """The real class name per model index, as the trained model itself reports them.
+
+    Classification: `model.names` holds the zero-padded class FOLDER names `data.py` wrote, in the index order
+    the model learned; each is an index into the snapshot's class list. Detection: `data.yaml` carried the real
+    names, so `model.names` already is the list.
+    """
+    names = [model.names[i] for i in sorted(model.names)]
+    if len(names) != len(class_names):
+        raise RuntimeError(f"The trained model has {len(names)} classes but the snapshot has {len(class_names)}")
+    if kind == "detect":
+        return names
+    return [class_names[int(folder)] for folder in names]
 
 
 def train(run: TrainContext) -> YoloLoadedModel:
@@ -123,25 +168,32 @@ def train(run: TrainContext) -> YoloLoadedModel:
 
         df = pd.read_parquet(run.dataset_uri)
         run.heartbeat()
-        dataset = data.materialize_classification(
-            df,
-            str(workdir / "data"),
+        kind = cfg["task"]
+        common = dict(
             image_column=cfg["imageColumn"],
-            label_column=cfg["labelColumn"],
             split_column=C.SPLIT_COLUMN_NAME,
             item_id_column=C.ITEM_ID_COLUMN_NAME,
             class_names=cfg["classNames"],
             progress=progress,
         )
+        if kind == "detect":
+            dataset = data.materialize_detection(df, str(workdir / "data"), boxes_column=cfg["labelColumn"], **common)
+            # Detection trains from a data.yaml that points at the image and label trees.
+            data_arg = dataset.data_yaml
+        else:
+            dataset = data.materialize_classification(
+                df, str(workdir / "data"), label_column=cfg["labelColumn"], **common
+            )
+            data_arg = dataset.root
         run.check_abort()
 
         model = _yolo_class()(runtime.weights_ref(cfg["weights"]))
-        _add_callbacks(model, run)
+        _add_callbacks(model, run, kind)
         runs_dir = workdir / "runs"
         with tracer.start_as_current_span("yolo.train"):
             model.train(
                 **cfg["train"],
-                data=dataset.root,
+                data=data_arg,
                 project=str(runs_dir),
                 name="run",
                 exist_ok=True,
@@ -162,7 +214,7 @@ def train(run: TrainContext) -> YoloLoadedModel:
             "imgsz": cfg["train"]["imgsz"],
             "imageColumn": cfg["imageColumn"],
             "outputName": cfg["labelColumn"],
-            "names": _class_names(model, cfg["classNames"]),
+            "names": _class_names(model, cfg["classNames"], kind),
         }
         stage = workdir / "upload"
         stage.mkdir()
