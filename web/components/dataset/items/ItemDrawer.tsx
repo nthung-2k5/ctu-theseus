@@ -33,6 +33,7 @@ export function ItemDrawer({
   modality,
   spec,
   classNameById,
+  classColorById,
   captionEditing,
   editing,
 }: {
@@ -46,6 +47,7 @@ export function ItemDrawer({
   modality: Modality
   spec: GroundTruthSpec
   classNameById: Map<string, string>
+  classColorById?: Map<string, string>
   captionEditing?: CaptionEditing
   editing?: ItemEditing
 }) {
@@ -81,6 +83,7 @@ export function ItemDrawer({
             modality={modality}
             spec={spec}
             classNameById={classNameById}
+            classColorById={classColorById}
             captionEditing={captionEditing}
             editing={editing}
           />

@@ -13,12 +13,15 @@
  * This page doesn't browse the pool itself — see DatasetPage.
  */
 
-import { Button, Group, Paper, Select, Stack, Tabs, Textarea } from '@mantine/core'
+import { Button, Group, Modal, Paper, Select, Stack, Tabs, Textarea } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
+import { CloudArrowUpIcon } from '@phosphor-icons/react'
 import { FileTreeView } from '@public/components/dataset/FileTreeView'
 import { FileUploadBar } from '@public/components/dataset/FileUploadBar'
 import { TabularCsvImporter } from '@public/components/dataset/TabularCsvImporter'
 import { TextBatchImporter } from '@public/components/dataset/TextBatchImporter'
 import { UploadQueuePanel } from '@public/components/dataset/UploadQueuePanel'
+import { YoloImporter } from '@public/components/dataset/YoloImporter'
 import { PageHeader, SectionLabel } from '@public/components/ui'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
 import { projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
@@ -143,7 +146,10 @@ export function UploadPage() {
   } = useSuspenseQuery(projectDetailQueryOptions(projectId))
 
   const descriptor = getTaskDescriptor(activeProject.task)
-  const taskUsesClasses = descriptor.annotation.requiresLabelClasses
+  // Boxes carry a class each, so there is no folder-per-class upload for them: files go up unlabelled, or with their
+  // boxes through the YOLO import.
+  const labelsWithBoxes = descriptor.annotation.type === 'bounding_box'
+  const taskUsesClasses = descriptor.annotation.requiresLabelClasses && !labelsWithBoxes
   const { data: classesData } = useLabelClasses(taskUsesClasses ? projectId : undefined)
   // Tasks that don't label with classes (regression, captioning, ASR, generation) get no class controls at
   // all, whatever classes the project happens to hold, so no class can be attached to their uploads.
@@ -157,6 +163,7 @@ export function UploadPage() {
   const queue = useUploadQueue()
   const staging = useFileStaging({ accept: descriptor.itemSpec.accept, taskUsesClasses, classes: classRefs })
   const [uploadingFiles, setUploadingFiles] = useState(false)
+  const [yoloOpened, { open: openYolo, close: closeYolo }] = useDisclosure(false)
 
   return (
     <div
@@ -166,11 +173,24 @@ export function UploadPage() {
       <PageHeader
         title="Upload"
         description={
-          isFileTask
-            ? 'Drop files, folders or archives into class and split folders, review them, then upload. Manage splits, classes and snapshots from the Dataset page.'
-            : 'Stage items, review their split and class in the preview, then upload. Manage splits, classes and snapshots from the Dataset page.'
+          labelsWithBoxes
+            ? 'Drop images into split folders and upload them, then draw the boxes on the Dataset page. Or import a dataset that is already labelled in YOLO format.'
+            : isFileTask
+              ? 'Drop files, folders or archives into class and split folders, review them, then upload. Manage splits, classes and snapshots from the Dataset page.'
+              : 'Stage items, review their split and class in the preview, then upload. Manage splits, classes and snapshots from the Dataset page.'
+        }
+        actions={
+          labelsWithBoxes && (
+            <Button size="compact-md" variant="default" leftSection={<CloudArrowUpIcon size={14} />} onClick={openYolo}>
+              Import YOLO dataset
+            </Button>
+          )
         }
       />
+
+      <Modal opened={yoloOpened} onClose={closeYolo} title="Import a YOLO dataset" size="lg" centered>
+        <YoloImporter projectId={projectId} />
+      </Modal>
 
       {isFileTask ? (
         <div className="flex flex-col gap-3" style={{ flex: 1, minHeight: 0 }}>

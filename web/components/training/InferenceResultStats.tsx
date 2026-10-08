@@ -1,6 +1,19 @@
-import { ActionIcon, Badge, CopyButton, Group, Paper, SimpleGrid, Slider, Stack, Text, Tooltip } from '@mantine/core'
+import {
+  ActionIcon,
+  Badge,
+  CopyButton,
+  Group,
+  Paper,
+  SimpleGrid,
+  Slider,
+  Stack,
+  Table,
+  Text,
+  Tooltip,
+} from '@mantine/core'
 import { CheckIcon, CopyIcon } from '@phosphor-icons/react'
 import { SectionLabel } from '@public/components/ui'
+import { classColor, type DetectionsOutput } from '@public/lib/boxes'
 import { MONO_STACK } from '@public/theme'
 import { ConfidenceBars } from './ConfidenceBars'
 
@@ -10,6 +23,7 @@ export type InferenceOutput =
   | { kind: 'regression'; feature: string; value: number }
   | { kind: 'text'; feature: string; text: string }
   | { kind: 'tokens'; feature: string; tokens: { token: string; tag: string }[] }
+  | DetectionsOutput
 
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`
 
@@ -185,6 +199,119 @@ function Tokens({ output }: { output: Extract<InferenceOutput, { kind: 'tokens' 
   )
 }
 
+/** The detections at or above `threshold`, most confident first. The preview draws exactly these. */
+export const shownDetections = (output: DetectionsOutput, threshold: number) =>
+  output.detections.filter((d) => d.confidence >= threshold).sort((a, b) => b.confidence - a.confidence)
+
+function Detections({
+  output,
+  threshold,
+  onThresholdChange,
+}: {
+  output: DetectionsOutput
+  threshold: number
+  onThresholdChange: (v: number) => void
+}) {
+  const shown = shownDetections(output, threshold)
+  const byLabel = new Map<string, number>()
+  for (const d of shown) byLabel.set(d.label, (byLabel.get(d.label) ?? 0) + 1)
+  const pixels = (v: number, of: number) => Math.round(v * of)
+
+  return (
+    <>
+      <Paper p="md">
+        <SectionLabel>Detections · {output.feature}</SectionLabel>
+        <Text fw={600} size="xl" mt={2}>
+          {shown.length} object{shown.length === 1 ? '' : 's'}
+        </Text>
+        <SimpleGrid cols={3} mt="sm" spacing="sm">
+          <Kpi
+            label="Best confidence"
+            value={shown[0] ? pct(shown[0].confidence) : '—'}
+            color={shown[0] ? confidenceColor(shown[0].confidence) : undefined}
+          />
+          <Kpi label="Classes" value={String(byLabel.size)} />
+          <Kpi label="Image" value={`${output.imageWidth} × ${output.imageHeight}`} />
+        </SimpleGrid>
+        {byLabel.size > 0 && (
+          <Group gap={6} mt="sm">
+            {[...byLabel].map(([label, n]) => (
+              <Badge key={label} variant="light" style={{ color: classColor(label) }}>
+                {label} · {n}
+              </Badge>
+            ))}
+          </Group>
+        )}
+      </Paper>
+
+      <Paper p="md">
+        <Stack gap="xs">
+          <Group justify="space-between" wrap="nowrap">
+            <SectionLabel>Objects</SectionLabel>
+            <Text size="xs" c="dimmed" className="tnum">
+              {shown.length} of {output.detections.length} ≥ {Math.round(threshold * 100)}%
+            </Text>
+          </Group>
+          {shown.length > 0 ? (
+            <Table verticalSpacing={4} withRowBorders={false}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Class</Table.Th>
+                  <Table.Th ta="right">Confidence</Table.Th>
+                  <Table.Th ta="right">Box (px)</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {shown.map((d, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: detections have no identity beyond their position
+                  <Table.Tr key={i}>
+                    <Table.Td>
+                      <Group gap={6} wrap="nowrap">
+                        <span
+                          aria-hidden
+                          style={{ width: 10, height: 10, borderRadius: 2, background: classColor(d.label) }}
+                        />
+                        <Text size="sm" truncate>
+                          {d.label}
+                        </Text>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td ta="right" className="tnum">
+                      {pct(d.confidence)}
+                    </Table.Td>
+                    <Table.Td ta="right" className="tnum" c="dimmed">
+                      {pixels(d.box.x, output.imageWidth)}, {pixels(d.box.y, output.imageHeight)} ·{' '}
+                      {pixels(d.box.w, output.imageWidth)} × {pixels(d.box.h, output.imageHeight)}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          ) : (
+            <Text size="sm" c="dimmed" ta="center" py="sm">
+              No object reaches the confidence threshold.
+            </Text>
+          )}
+          <div>
+            <Text size="xs" c="dimmed" mb={4}>
+              Confidence threshold
+            </Text>
+            <Slider
+              size="sm"
+              min={0}
+              max={1}
+              step={0.01}
+              value={threshold}
+              onChange={onThresholdChange}
+              label={(v) => `${Math.round(v * 100)}%`}
+            />
+          </div>
+        </Stack>
+      </Paper>
+    </>
+  )
+}
+
 /** Parses an inference result into the statistics panels of the playground's result column. */
 export function InferenceResultStats({
   output,
@@ -203,6 +330,9 @@ export function InferenceResultStats({
       {output.kind === 'regression' && <Regression output={output} />}
       {output.kind === 'text' && <GeneratedText output={output} />}
       {output.kind === 'tokens' && <Tokens output={output} />}
+      {output.kind === 'detections' && (
+        <Detections output={output} threshold={threshold} onThresholdChange={onThresholdChange} />
+      )}
     </Stack>
   )
 }

@@ -65,6 +65,16 @@ export type PerClassStats = {
   support: number
 }
 
+/** One class of an object-detection report. AP is average precision at IoU 0.5 and averaged over IoU 0.5 to 0.95. */
+export type DetectionClassStats = {
+  precision: number
+  recall: number
+  ap50: number
+  ap5095: number
+  /** Labelled objects of this class in the evaluated images. */
+  instances: number
+}
+
 export type TopError = {
   itemId: string
   actual: string
@@ -82,9 +92,15 @@ export type EvaluationReport = {
   idx2str?: string[]
   truncated?: boolean
   confusionMatrix?: number[][]
-  perClass?: Record<string, PerClassStats>
+  /** Per-class numbers: precision/recall/F1 for a classifier, AP for a detector (see `kind`). */
+  perClass?: Record<string, PerClassStats> | Record<string, DetectionClassStats>
   overall: Record<string, number | null>
   topErrors?: TopError[]
+  /** Set to 'detection' for an object-detection report; absent for every other task. */
+  kind?: 'detection'
+  /** Detection only. */
+  imageCount?: number
+  instanceCount?: number
 }
 
 export type RunEvaluation = {

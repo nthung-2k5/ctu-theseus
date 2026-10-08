@@ -61,6 +61,9 @@ export function DatasetPage() {
   const items = data?.items ?? []
   const total = data?.total ?? 0
   const classNameById = new Map(classes.map((c) => [c.classId, c.name]))
+  const classColorById = new Map(classes.flatMap((c) => (c.uiColorHex ? [[c.classId, c.uiColorHex] as const] : [])))
+  // Boxes carry a class EACH, drawn on the image, so there is no whole-item class to assign in bulk or from a menu.
+  const labelsWithBoxes = descriptor.annotation.type === 'bounding_box'
   const classCounts: Record<string, number> = { unassigned: data?.unassignedCount ?? 0 }
   for (const c of data?.classCounts ?? []) classCounts[c.classId] = c.count
 
@@ -80,7 +83,8 @@ export function DatasetPage() {
 
   // Free-text ground truth (captioning/ASR/generation) is edited per-item from the detail
   // drawer instead of in bulk — see items/CaptionEditor.tsx.
-  const { saveCaption, saveTarget, reassignSplit, assignClass, removeItems } = useItemMutations(projectId)
+  const { saveCaption, saveTarget, reassignSplit, assignClass, removeItems, addBox, updateBox, removeBox, markEmpty } =
+    useItemMutations(projectId)
   const outputColumn = descriptor.output?.column ?? 'text'
   const captionLabel =
     descriptor.annotation.type !== 'text_sequence'
@@ -103,13 +107,30 @@ export function DatasetPage() {
   // Everything the drawer and the per-item menu may change. Each is the one-item case of a bulk mutation,
   // so they notify and invalidate exactly as the bulk toolbar does.
   const editing: ItemEditing = {
-    classes: descriptor.annotation.requiresLabelClasses ? classes : [],
+    classes: descriptor.annotation.requiresLabelClasses && !labelsWithBoxes ? classes : [],
     onSetSplit: (itemId, split) => reassignSplit.mutate({ selection: oneItem(itemId), split }),
     onSetClass: (itemId, classId) => assignClass.mutate({ selection: oneItem(itemId), classId }),
     onSaveTarget: async (itemId, existingAnnotationId, value) => {
       await saveTarget.mutateAsync({ itemId, existingAnnotationId, value })
     },
     onDelete: (itemId) => removeItems.mutate({ selection: oneItem(itemId) }),
+    boxes: labelsWithBoxes
+      ? {
+          classes,
+          onAdd: async (itemId, classId, box) => {
+            await addBox.mutateAsync({ itemId, classId, box })
+          },
+          onUpdate: async (annotationId, patch) => {
+            await updateBox.mutateAsync({ annotationId, ...patch })
+          },
+          onRemove: async (annotationId) => {
+            await removeBox.mutateAsync({ annotationId })
+          },
+          onMarkEmpty: async (itemId) => {
+            await markEmpty.mutateAsync({ itemId })
+          },
+        }
+      : undefined,
   }
 
   const draftSplitCounts = dataset?.draft ? splitCounts(dataset.draft) : null
@@ -199,6 +220,7 @@ export function DatasetPage() {
                 isError={isError}
                 onRetry={() => refetch()}
                 classNameById={classNameById}
+                classColorById={classColorById}
                 emptyMessage="No items in the draft yet — add some from the Upload page."
                 selection={bulk.selection}
                 captionEditing={captionEditing}
@@ -214,7 +236,7 @@ export function DatasetPage() {
                       count={bulk.count(total)}
                       exclusionCount={bulk.exclusionCount}
                       onClear={bulk.clear}
-                      requiresLabelClasses={descriptor.annotation.requiresLabelClasses}
+                      requiresLabelClasses={descriptor.annotation.requiresLabelClasses && !labelsWithBoxes}
                       pageCount={items.length}
                       total={total}
                       onSelectPage={() => bulk.selectPage(items.map((i) => i.id))}

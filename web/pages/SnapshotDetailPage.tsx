@@ -57,6 +57,7 @@ export function SnapshotDetailPage() {
   const { data: classesData } = useLabelClasses(descriptor.annotation.requiresLabelClasses ? projectId : undefined)
   const classes = classesData?.classes ?? []
   const classNameById = new Map(classes.map((c) => [c.classId, c.name]))
+  const classColorById = new Map(classes.flatMap((c) => (c.uiColorHex ? [[c.classId, c.uiColorHex] as const] : [])))
 
   const { data, isLoading, isError, refetch } = useProjectItems(version ? projectId : undefined, {
     versionId,
@@ -324,6 +325,7 @@ export function SnapshotDetailPage() {
           isError={isError}
           onRetry={() => refetch()}
           classNameById={classNameById}
+          classColorById={classColorById}
           emptyMessage="No items in this split"
         />
         {items.length > 0 && (

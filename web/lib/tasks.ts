@@ -19,7 +19,16 @@ export type { ProjectTask }
 
 export interface ColumnSpec {
   name: string
-  kind: 'storage_uri' | 'inline_text' | 'label' | 'text_sequence_label' | 'split' | 'split_index' | 'scalar' | 'item_id'
+  kind:
+    | 'storage_uri'
+    | 'inline_text'
+    | 'label'
+    | 'text_sequence_label'
+    | 'boxes'
+    | 'split'
+    | 'split_index'
+    | 'scalar'
+    | 'item_id'
 }
 
 export type InferenceInputSpec =
@@ -27,7 +36,7 @@ export type InferenceInputSpec =
   | { kind: 'text'; fields: string[] }
   | { kind: 'record' }
 
-export type InferenceOutputKind = 'classification' | 'regression' | 'text' | 'tokens'
+export type InferenceOutputKind = 'classification' | 'regression' | 'text' | 'tokens' | 'detections'
 
 export interface TaskOutput {
   column: string

@@ -55,6 +55,13 @@ export const METRIC_LABELS: Record<string, string> = {
   corn: 'CORN Loss',
   anomaly_auroc: 'Anomaly ROC AUC',
   f1_max: 'F1 (max)',
+  // The YOLO backend's own metric names (see server/theseus/backends/yolo/train.py).
+  top5Accuracy: 'Top-5 accuracy',
+  box_loss: 'Box loss',
+  cls_loss: 'Class loss',
+  dfl_loss: 'Distribution focal loss',
+  mAP50: 'mAP@50',
+  'mAP50-95': 'mAP@50-95',
 }
 
 /** Falls back to a title-cased rendering of unknown metric keys. */

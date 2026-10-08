@@ -29,7 +29,14 @@ import { ChartBarIcon, MagnifyingGlassIcon, WarningCircleIcon } from '@phosphor-
 import { DataTable, type DataTableColumn, EmptyState } from '@public/components/ui'
 import { heatmapColor } from '@public/lib/palette'
 import { useRunEvaluation } from '@public/lib/queries'
-import type { EvaluationReport, Modality, PerClassStats, RunEvaluation, TrainingRunSummary } from '@public/store/types'
+import type {
+  DetectionClassStats,
+  EvaluationReport,
+  Modality,
+  PerClassStats,
+  RunEvaluation,
+  TrainingRunSummary,
+} from '@public/store/types'
 import { Fragment, useState } from 'react'
 import { ErrorAnalysisGrid } from './ErrorAnalysisGrid'
 
@@ -39,6 +46,11 @@ const MAX_MATRIX_DISPLAY = 20
 const METRIC_LABELS: Record<string, string> = {
   accuracy: 'Accuracy',
   macroF1: 'Macro F1',
+  // Object detection: mean average precision at IoU 0.5, and averaged over IoU 0.5 to 0.95.
+  map50: 'mAP@50',
+  map5095: 'mAP@50-95',
+  precision: 'Precision',
+  recall: 'Recall',
   mae: 'MAE',
   rmse: 'RMSE',
   r2: 'R²',
@@ -127,6 +139,28 @@ function PerClassTable({ perClass }: { perClass: Record<string, PerClassStats> }
   return <DataTable columns={columns} data={rows} getRowKey={(r) => r.label} />
 }
 
+/** The per-class table of an object-detection report: average precision rather than F1, objects rather than rows. */
+function DetectionClassTable({ perClass }: { perClass: Record<string, DetectionClassStats> }) {
+  const rows = Object.entries(perClass).map(([label, stats]) => ({ label, ...stats }))
+  const columns: DataTableColumn<(typeof rows)[number]>[] = [
+    {
+      key: 'label',
+      header: 'Class',
+      render: (r) => (
+        <Text size="sm" fw={600}>
+          {r.label}
+        </Text>
+      ),
+    },
+    { key: 'precision', header: 'Precision', fit: true, render: (r) => r.precision.toFixed(3) },
+    { key: 'recall', header: 'Recall', fit: true, render: (r) => r.recall.toFixed(3) },
+    { key: 'ap50', header: 'AP@50', fit: true, render: (r) => r.ap50.toFixed(3) },
+    { key: 'ap5095', header: 'AP@50-95', fit: true, render: (r) => r.ap5095.toFixed(3) },
+    { key: 'instances', header: 'Objects', fit: true, render: (r) => r.instances },
+  ]
+  return <DataTable columns={columns} data={rows} getRowKey={(r) => r.label} />
+}
+
 export function EvaluationPanel({
   run,
   projectId,
@@ -209,6 +243,7 @@ export function EvaluationPanel({
   }
 
   const overallEntries = Object.entries(report.overall).filter(([, value]) => value !== null) as [string, number][]
+  const isDetection = report.kind === 'detection'
   const showMatrix = !!report.confusionMatrix && (report.idx2str?.length ?? 0) <= MAX_MATRIX_DISPLAY
 
   return (
@@ -218,7 +253,10 @@ export function EvaluationPanel({
           <div>
             <Title order={5}>Evaluation</Title>
             <Text size="xs" c="dimmed">
-              Evaluated on the {report.split} split · {report.rowCount} row{report.rowCount === 1 ? '' : 's'}
+              Evaluated on the {report.split} split ·{' '}
+              {isDetection
+                ? `${report.imageCount ?? report.rowCount} image${(report.imageCount ?? report.rowCount) === 1 ? '' : 's'}, ${report.instanceCount ?? 0} labelled object${report.instanceCount === 1 ? '' : 's'}`
+                : `${report.rowCount} row${report.rowCount === 1 ? '' : 's'}`}
             </Text>
           </div>
           {report.truncated && (
@@ -260,7 +298,11 @@ export function EvaluationPanel({
             <Text size="sm" fw={600} mb="xs">
               Per-class metrics
             </Text>
-            <PerClassTable perClass={report.perClass} />
+            {isDetection ? (
+              <DetectionClassTable perClass={report.perClass as Record<string, DetectionClassStats>} />
+            ) : (
+              <PerClassTable perClass={report.perClass as Record<string, PerClassStats>} />
+            )}
           </div>
         )}
 

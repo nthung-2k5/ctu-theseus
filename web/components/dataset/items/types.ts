@@ -1,3 +1,4 @@
+import type { Box } from '@public/lib/boxes'
 import type { Annotation, LabelClass } from '@public/store/types'
 import type { SPLIT_TYPES } from '../VersionBrowsing'
 
@@ -69,6 +70,21 @@ export interface ItemEditing {
   /** A regression target: creates the annotation, or updates `existingAnnotationId` in place. */
   onSaveTarget: (itemId: string, existingAnnotationId: string | null, value: number) => Promise<void>
   onDelete: (itemId: string) => void
+  /** Only for an object-detection project: boxes are drawn on the image, one annotation each. */
+  boxes?: BoxEditing
+}
+
+/**
+ * Drawing boxes. A class belongs to ONE box, so none of this goes through `onSetClass` or the bulk "assign class":
+ * each call creates, changes or deletes a single `bounding_box` annotation.
+ */
+export interface BoxEditing {
+  classes: LabelClass[]
+  onAdd: (itemId: string, classId: string, box: Box) => Promise<void>
+  onUpdate: (annotationId: string, patch: { classId?: string; box?: Box }) => Promise<void>
+  onRemove: (annotationId: string) => Promise<void>
+  /** Marks the image as labelled with nothing in it, which a detector trains on as a background image. */
+  onMarkEmpty: (itemId: string) => Promise<void>
 }
 
 export const findTextSequenceAnnotation = (annotations: Annotation[] | undefined) =>

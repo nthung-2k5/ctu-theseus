@@ -14,6 +14,7 @@ const ann = (partial: Partial<Annotation>) => ({ id: 'a1', ...partial }) as unkn
 const REGRESSION: GroundTruthSpec = { type: 'classification', requiresLabelClasses: false }
 const CAPTION: GroundTruthSpec = { type: 'text_sequence', requiresLabelClasses: false }
 const TAGS: GroundTruthSpec = { type: 'token_tags', requiresLabelClasses: true }
+const BOXES: GroundTruthSpec = { type: 'bounding_box', requiresLabelClasses: true }
 const classes = new Map([['c1', 'cat']])
 
 test('kind comes from the registry spec, so regression is a classification with no classes', () => {
@@ -21,7 +22,8 @@ test('kind comes from the registry spec, so regression is a classification with 
   expect(groundTruthKind(REGRESSION)).toBe('number')
   expect(groundTruthKind(CAPTION)).toBe('text')
   expect(groundTruthKind(TAGS)).toBe('tags')
-  expect(groundTruthKind({ type: 'bounding_box', requiresLabelClasses: true })).toBe('other')
+  expect(groundTruthKind(BOXES)).toBe('boxes')
+  expect(groundTruthKind({ type: 'segmentation_mask', requiresLabelClasses: true })).toBe('other')
 })
 
 test('findGroundTruth ignores annotations of another type', () => {
@@ -57,4 +59,17 @@ test('label rendering per kind', () => {
   expect(
     groundTruthLabel([ann({ annotationType: 'classification', classId: 'gone' })], CLASS_GROUND_TRUTH, classes),
   ).toBeNull()
+})
+
+test('a box task labels an item with how many boxes it has, or that it is empty, or nothing while unlabelled', () => {
+  const box = (id: string) =>
+    ann({ id, annotationType: 'bounding_box', classId: 'c', labelStructured: { x: 0, y: 0, w: 0.5, h: 0.5 } })
+  const names = new Map([['c', 'cat']])
+  expect(groundTruthLabel([box('1'), box('2')], BOXES, names)).toBe('2 boxes')
+  expect(groundTruthLabel([box('1')], BOXES, names)).toBe('1 box')
+  expect(
+    groundTruthLabel([ann({ annotationType: 'bounding_box', labelStructured: { background: true } })], BOXES, names),
+  ).toBe('No objects')
+  expect(groundTruthLabel([], BOXES, names)).toBeNull()
+  expect(groundTruthLabel(undefined, BOXES, names)).toBeNull()
 })

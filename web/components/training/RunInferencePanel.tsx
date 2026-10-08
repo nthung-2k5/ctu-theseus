@@ -33,15 +33,17 @@ import {
   LightningIcon,
   XCircleIcon,
 } from '@phosphor-icons/react'
+import { BoxCanvas } from '@public/components/dataset/items/BoxCanvas'
 import { EmptyState } from '@public/components/ui'
 import { apiErrorMessage, axios } from '@public/lib/api/client'
 import { runInference, warmInferenceModel } from '@public/lib/api/generated/inference/inference'
+import { classColor } from '@public/lib/boxes'
 import { projectDetailQueryOptions } from '@public/lib/queries'
 import { getInferenceInputSpec, getTaskDescriptor } from '@public/lib/tasks'
 import type { TrainingRunSummary } from '@public/store/types'
 import { useMutation, useSuspenseQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { type InferenceOutput, InferenceResultStats } from './InferenceResultStats'
+import { type InferenceOutput, InferenceResultStats, shownDetections } from './InferenceResultStats'
 
 /** What the last request produced. A batch result is a scored CSV held in the browser, never on the server. */
 type Result = { kind: 'single'; output: InferenceOutput } | { kind: 'batch'; rowCount: number; url: string }
@@ -326,6 +328,18 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                   {isAudio ? (
                     // biome-ignore lint/a11y/useMediaCaption: user-uploaded test clip, no transcript source
                     <audio controls src={inputFileUrl} style={{ width: '100%' }} />
+                  ) : output?.kind === 'detections' ? (
+                    // The boxes the model found, drawn on the image it was given, at the chosen threshold.
+                    <BoxCanvas
+                      src={inputFileUrl}
+                      alt="Test"
+                      boxes={shownDetections(output, threshold).map((d, i) => ({
+                        id: String(i),
+                        box: d.box,
+                        color: classColor(d.label),
+                        label: `${d.label} ${Math.round(d.confidence * 100)}%`,
+                      }))}
+                    />
                   ) : (
                     <img
                       src={inputFileUrl}

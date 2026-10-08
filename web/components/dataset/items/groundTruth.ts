@@ -1,5 +1,7 @@
 import type { AnnotationType } from '@public/lib/api/enums'
 import type { Annotation } from '@public/store/types'
+// Relative, not `@public/...`: this module is unit-tested under `bun test`, which does not resolve the alias.
+import { boxesSummary } from '../../../lib/boxes'
 
 /** The task registry's `annotation` field (see `TaskDescriptor` in lib/tasks.ts). */
 export interface GroundTruthSpec {
@@ -8,7 +10,7 @@ export interface GroundTruthSpec {
 }
 
 /** What the UI shows and edits for one task's ground truth. Derived from the registry, never from a task id. */
-export type GroundTruthKind = 'class' | 'number' | 'text' | 'tags' | 'other'
+export type GroundTruthKind = 'class' | 'number' | 'text' | 'tags' | 'boxes' | 'other'
 
 /** Matches what the classification tasks did before the registry-driven drawer, so callers that pass no spec keep working. */
 export const CLASS_GROUND_TRUTH: GroundTruthSpec = { type: 'classification', requiresLabelClasses: true }
@@ -22,6 +24,9 @@ export const groundTruthKind = (spec: GroundTruthSpec): GroundTruthKind => {
       return 'text'
     case 'token_tags':
       return 'tags'
+    // One annotation per box, so an item's ground truth is a list, not a single annotation.
+    case 'bounding_box':
+      return 'boxes'
     default:
       return 'other'
   }
@@ -41,6 +46,7 @@ export const groundTruthLabel = (
   spec: GroundTruthSpec,
   classNameById: Map<string, string>,
 ): string | null => {
+  if (groundTruthKind(spec) === 'boxes') return boxesSummary(annotations)
   const annotation = findGroundTruth(annotations, spec)
   if (!annotation) return null
   switch (groundTruthKind(spec)) {

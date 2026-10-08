@@ -17,7 +17,8 @@ const SPLIT_SERIES: Record<SplitType, { color: string; strokeDasharray?: string 
 
 const fmt = (v: number | null | undefined, digits = 4) => (v == null ? '—' : v.toFixed(digits))
 
-const PRIORITY = ['loss', 'accuracy']
+// Loss first, then the score that says how good the model is: accuracy for a classifier, mAP for a detector.
+const PRIORITY = ['loss', 'accuracy', 'mAP50', 'mAP50-95']
 
 /** `class.accuracy` -> `accuracy`: Ludwig namespaces per-output-feature metrics as `{feature}.{metric}`. */
 const baseName = (name: string) => name.slice(name.lastIndexOf('.') + 1)
@@ -44,7 +45,9 @@ export function RunLivePage() {
 
   const failure = live.failedMessage ?? detail?.run.failedMessage ?? run.failedMessage
   const shown = chartedMetrics(metrics.metricNames)
-  const accuracyMetric = findMetric(metrics.metricNames, 'accuracy')
+  // The headline score: accuracy, or mAP for a detector. Test-split numbers when the backend reports them, else validation.
+  const scoreMetric = findMetric(metrics.metricNames, 'accuracy') ?? findMetric(metrics.metricNames, 'mAP50')
+  const scoreSplit = scoreMetric && metrics.latest('test', scoreMetric) != null ? 'test' : 'validation'
 
   return (
     <div className="flex flex-col gap-3">
@@ -77,8 +80,8 @@ export function RunLivePage() {
         <KpiTile label="Val loss" value={fmt(metrics.latest('validation', 'loss'))} color={SERIES_COLORS.validation} />
         <KpiTile label="Best val loss" value={fmt(metrics.best('validation', 'loss'))} />
         <KpiTile
-          label="Test Accuracy"
-          value={fmt(accuracyMetric ? metrics.latest('test', accuracyMetric) : null)}
+          label={`${scoreSplit === 'test' ? 'Test' : 'Val'} ${scoreMetric ? formatMetricLabel(scoreMetric) : 'score'}`}
+          value={fmt(scoreMetric ? metrics.latest(scoreSplit, scoreMetric) : null)}
           color={SERIES_COLORS.f1}
         />
         <KpiTile label="Epochs done" value={String(currentEpoch)} />

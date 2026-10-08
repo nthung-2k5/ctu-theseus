@@ -3,10 +3,12 @@ import type { SPLIT_TYPES } from '@public/components/dataset/VersionBrowsing'
 import {
   classifyItems,
   createAnnotation,
+  deleteAnnotation,
   deleteItems,
   setItemsSplit,
   updateAnnotation,
 } from '@public/lib/api/generated/datasets/datasets'
+import type { Box } from '@public/lib/boxes'
 import type { SelectionRequest } from '@public/lib/itemSelection'
 import { invalidateProjectScope } from '@public/lib/queries'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -107,5 +109,38 @@ export function useItemMutations(projectId: string) {
     onError: onError('Failed to save'),
   })
 
-  return { reassignSplit, assignClass, removeItems, saveCaption, saveTarget }
+  // Boxes: one annotation each, drawn on the image, so every change is a single-annotation call (no bulk class).
+  const addBox = useMutation({
+    mutationFn: ({ itemId, classId, box }: { itemId: string; classId: string; box: Box }) =>
+      createAnnotation(itemId, { annotationType: 'bounding_box', classId, labelStructured: box }),
+    onSuccess: invalidate,
+    onError: onError('Failed to add the box'),
+  })
+
+  const updateBox = useMutation({
+    mutationFn: ({ annotationId, classId, box }: { annotationId: string; classId?: string; box?: Box }) =>
+      updateAnnotation(annotationId, {
+        ...(classId !== undefined && { classId }),
+        ...(box !== undefined && { labelStructured: box }),
+      }),
+    onSuccess: invalidate,
+    onError: onError('Failed to change the box'),
+  })
+
+  const removeBox = useMutation({
+    mutationFn: ({ annotationId }: { annotationId: string }) => deleteAnnotation(annotationId),
+    onSuccess: invalidate,
+    onError: onError('Failed to delete the box'),
+  })
+
+  // An image labelled with nothing in it: one class-less marker annotation, which a detector trains on as a
+  // background image (as opposed to an image nobody has labelled, which it ignores).
+  const markEmpty = useMutation({
+    mutationFn: ({ itemId }: { itemId: string }) =>
+      createAnnotation(itemId, { annotationType: 'bounding_box', labelStructured: { background: true } }),
+    onSuccess: invalidate,
+    onError: onError('Failed to mark the image'),
+  })
+
+  return { reassignSplit, assignClass, removeItems, saveCaption, saveTarget, addBox, updateBox, removeBox, markEmpty }
 }

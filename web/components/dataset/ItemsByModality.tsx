@@ -37,6 +37,7 @@ export function ItemsByModality<T extends DatasetListItem>({
   isError,
   onRetry,
   classNameById,
+  classColorById,
   emptyMessage = 'No items yet',
   renderActions,
   selection,
@@ -50,6 +51,8 @@ export function ItemsByModality<T extends DatasetListItem>({
   isError?: boolean
   onRetry?: () => void
   classNameById: Map<string, string>
+  /** Each class's own colour, for views that draw boxes in it (object detection). */
+  classColorById?: Map<string, string>
   emptyMessage?: string
   /** Overrides the default per-item menu. */
   renderActions?: (item: T) => ReactNode
@@ -115,6 +118,7 @@ export function ItemsByModality<T extends DatasetListItem>({
         modality={modality}
         spec={annotation}
         classNameById={classNameById}
+        classColorById={classColorById}
         captionEditing={captionEditing}
         editing={editing}
       />

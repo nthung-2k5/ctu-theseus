@@ -5,8 +5,9 @@ import { SPLIT_COLORS } from '@public/lib/constants'
 import type { Modality } from '@public/store/types'
 import type { ReactNode } from 'react'
 import { SPLIT_TYPES } from '../VersionBrowsing'
+import { BoxLabelling } from './BoxLabelling'
 import { GroundTruthEditor } from './GroundTruthEditor'
-import type { GroundTruthSpec } from './groundTruth'
+import { type GroundTruthSpec, groundTruthKind } from './groundTruth'
 import { appliedOps } from './ops'
 import { type CaptionEditing, type DatasetListItem, type ItemEditing, tabularRow } from './types'
 
@@ -80,6 +81,7 @@ export const ItemDetail = ({
   modality,
   spec,
   classNameById,
+  classColorById,
   captionEditing,
   editing,
 }: {
@@ -87,27 +89,43 @@ export const ItemDetail = ({
   modality: Modality
   spec: GroundTruthSpec
   classNameById: Map<string, string>
+  classColorById?: Map<string, string>
   captionEditing?: CaptionEditing
   editing?: ItemEditing
 }) => {
   const preprocessed = appliedOps(item.preprocessing)
   const augmented = appliedOps(item.augmentation)
+  // Boxes are drawn ON the image and edited there, so the picture and its labels are one piece, not two sections.
+  const drawsBoxes = modality === 'vision' && groundTruthKind(spec) === 'boxes'
 
   return (
     <Box>
-      <Box mb="md">
-        <Preview item={item} modality={modality} />
-      </Box>
+      {drawsBoxes ? (
+        <Box mb="md">
+          <BoxLabelling
+            item={item}
+            classNameById={classNameById}
+            classColorById={classColorById}
+            editing={editing?.boxes}
+          />
+        </Box>
+      ) : (
+        <>
+          <Box mb="md">
+            <Preview item={item} modality={modality} />
+          </Box>
 
-      <Box mb="md">
-        <GroundTruthEditor
-          item={item}
-          spec={spec}
-          classNameById={classNameById}
-          captionEditing={captionEditing}
-          editing={editing}
-        />
-      </Box>
+          <Box mb="md">
+            <GroundTruthEditor
+              item={item}
+              spec={spec}
+              classNameById={classNameById}
+              captionEditing={captionEditing}
+              editing={editing}
+            />
+          </Box>
+        </>
+      )}
 
       <Box>
         <Row label="External ID">
