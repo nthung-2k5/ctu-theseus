@@ -71,39 +71,52 @@ export const ItemsTable = <T extends DatasetListItem>({
     })
   }
 
-  columns.push({
-    key: 'externalId',
-    header: 'External ID',
-    render: (item) => (
-      <Group gap={6} wrap="nowrap">
-        {/* The keyboard way into a row (the row itself also opens on click). */}
-        <UnstyledButton
-          className="mantine-focus-auto"
-          aria-label={`Open ${item.externalId ?? 'item'}`}
-          onClick={(e) => {
-            e.stopPropagation() // the row's own click already opens it
-            onOpen(item)
-          }}
-        >
-          <Text size="xs">{item.externalId ?? '—'}</Text>
-        </UnstyledButton>
-        <PreprocessedBadge item={item} />
-        <AugmentedBadge item={item} />
-      </Group>
-    ),
-  })
+  // The keyboard way into a row (the row itself also opens on click).
+  const openButton = (item: T, label: ReactNode) => (
+    <UnstyledButton
+      className="mantine-focus-auto"
+      aria-label={`Open ${item.externalId ?? 'item'}`}
+      onClick={(e) => {
+        e.stopPropagation() // the row's own click already opens it
+        onOpen(item)
+      }}
+    >
+      {label}
+    </UnstyledButton>
+  )
 
   if (modality === 'text') {
+    // A text item is its content: the name it was imported under (a file name, or nothing for typed text) says
+    // nothing about it, so the text column carries the row's open button and badges instead.
     columns.push({
       key: 'text',
       header: 'Text',
       render: (item) => (
-        <Text size="xs" lineClamp={2} maw={420}>
-          {item.textFeatures?.rawText ?? '—'}
-        </Text>
+        <Group gap={6} wrap="nowrap">
+          {openButton(
+            item,
+            <Text size="xs" lineClamp={2} maw={420} ta="left">
+              {item.textFeatures?.rawText ?? '—'}
+            </Text>,
+          )}
+          <PreprocessedBadge item={item} />
+          <AugmentedBadge item={item} />
+        </Group>
       ),
     })
   } else {
+    columns.push({
+      key: 'externalId',
+      header: 'External ID',
+      render: (item) => (
+        <Group gap={6} wrap="nowrap">
+          {openButton(item, <Text size="xs">{item.externalId ?? '—'}</Text>)}
+          <PreprocessedBadge item={item} />
+          <AugmentedBadge item={item} />
+        </Group>
+      ),
+    })
+
     const featureKeys = [...new Set(items.flatMap((i) => Object.keys(tabularRow(i.tabularFeatures?.featuresJson))))]
     for (const key of featureKeys) {
       columns.push({

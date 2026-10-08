@@ -7,16 +7,21 @@
  *  - `.csv` / `.tsv` / `.jsonl` — one item per row; the user picks which column holds the text and,
  *    for tasks with label classes, which (optional) column names the class.
  *
- * Without a label column every item takes the class chosen in the panel above, like typed text does. A
- * label value with no matching class stages unassigned rather than blocking the import.
+ * Without a label column (or on a row whose label cell is empty) an item takes the class chosen in the panel
+ * above, like typed text does. A label value with no matching class stages unassigned rather than blocking the
+ * import — or, if the user ticks "create missing classes", becomes a new class first, which is how a project
+ * with no classes yet can be filled from a labelled file in one go.
  */
 
-import { Alert, Button, Group, Select, Stack, Table, Text } from '@mantine/core'
+import { Alert, Button, Checkbox, Group, Select, Stack, Table, Text } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { notifications } from '@mantine/notifications'
 import { CloudArrowUpIcon, WarningCircleIcon } from '@phosphor-icons/react'
+import { createClass } from '@public/lib/api/generated/classes/classes'
+import { invalidateProjectScope } from '@public/lib/queries'
 import type { StagedDraft } from '@public/lib/uploadQueue'
 import type { LabelClass, SplitType } from '@public/store/types'
+import { useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useMemo, useState } from 'react'
 
@@ -26,6 +31,10 @@ const ACCEPT = [...PLAIN_EXTENSIONS, ...TABLE_EXTENSIONS].map((ext) => `.${ext}`
 /** A text file bigger than this is almost certainly not one training example. */
 const MAX_TEXT_FILE_BYTES = 1024 * 1024
 const PREVIEW_ROWS = 5
+/** Mirrors the server's class-name limit. */
+const MAX_CLASS_NAME_LENGTH = 100
+/** More distinct values than this in the class column almost certainly means the wrong column was picked. */
+const MAX_CLASSES_TO_CREATE = 100
 
 interface ParsedTable {
   fileName: string
@@ -80,11 +89,16 @@ async function parseTable(file: File): Promise<ParsedTable> {
 }
 
 export function TextBatchImporter({
+  projectId,
+  taskUsesClasses,
   split,
   classId,
   classes,
   onStage,
 }: {
+  projectId: string
+  /** Whether the task labels items with classes at all — decides if the class column can be picked. */
+  taskUsesClasses: boolean
   /** Defaults from the panel above; every staged item can still be retargeted in the preview. */
   split: SplitType
   classId: string | null
@@ -95,6 +109,10 @@ export function TextBatchImporter({
   const [tables, setTables] = useState<ParsedTable[]>([])
   const [textColumn, setTextColumn] = useState<string | null>(null)
   const [labelColumn, setLabelColumn] = useState<string | null>(null)
+  // `null` = not chosen yet: defaults on when the project has no classes, since nothing could match otherwise.
+  const [createMissingChoice, setCreateMissingChoice] = useState<boolean | null>(null)
+  const [staging, setStaging] = useState(false)
+  const queryClient = useQueryClient()
   const table = tables[0]
 
   const classIdByName = useMemo(() => new Map(classes.map((c) => [c.name.trim().toLowerCase(), c.classId])), [classes])
@@ -108,6 +126,13 @@ export function TextBatchImporter({
     }
     return [...seen]
   }, [table, labelColumn, classIdByName])
+
+  const tooManyToCreate = unmatchedValues.length > MAX_CLASSES_TO_CREATE
+  const createMissing =
+    (createMissingChoice ?? classes.length === 0) &&
+    unmatchedValues.length > 0 &&
+    !tooManyToCreate &&
+    unmatchedValues.every((v) => v.length <= MAX_CLASS_NAME_LENGTH)
 
   const handleDrop = async (files: File[]) => {
     const drafts: StagedDraft[] = []
@@ -158,24 +183,56 @@ export function TextBatchImporter({
     setTables((prev) => prev.slice(1))
     setTextColumn(null)
     setLabelColumn(null)
+    setCreateMissingChoice(null)
   }
 
-  const handleStage = () => {
+  /** Creates the classes the label column names but the project lacks; returns the full name → id lookup. */
+  const resolveClasses = async () => {
+    const lookup = new Map(classIdByName)
+    if (!createMissing) return lookup
+    const failed: string[] = []
+    for (const name of unmatchedValues) {
+      try {
+        const { class: created } = await createClass(projectId, { name })
+        lookup.set(created.name.trim().toLowerCase(), created.classId)
+      } catch {
+        failed.push(name)
+      }
+    }
+    await invalidateProjectScope(queryClient, projectId)
+    if (failed.length > 0) {
+      notifications.show({
+        title: `${failed.length} class(es) not created`,
+        message: `${failed.slice(0, 5).join(', ')} — those rows stage without a class.`,
+        color: 'yellow',
+      })
+    }
+    return lookup
+  }
+
+  const handleStage = async () => {
     if (!table || !textColumn) return
-    const drafts: StagedDraft[] = []
-    for (const row of table.rows) {
-      const text = row[textColumn]?.trim()
-      if (!text) continue
-      const label = labelColumn ? row[labelColumn]?.trim() : ''
-      const rowClassId = labelColumn ? (classIdByName.get((label ?? '').toLowerCase()) ?? null) : classId
-      drafts.push(toDraft(text, table.fileName, split, rowClassId))
+    setStaging(true)
+    try {
+      const lookup = await resolveClasses()
+      const drafts: StagedDraft[] = []
+      for (const row of table.rows) {
+        const text = row[textColumn]?.trim()
+        if (!text) continue
+        const label = labelColumn ? row[labelColumn]?.trim() : ''
+        // An empty label cell falls back to the default class rather than leaving the row unassigned.
+        const rowClassId = label ? (lookup.get(label.toLowerCase()) ?? null) : classId
+        drafts.push(toDraft(text, table.fileName, split, rowClassId))
+      }
+      if (drafts.length === 0) {
+        notifications.show({ title: 'Nothing to add', message: `Column "${textColumn}" is empty`, color: 'yellow' })
+        return
+      }
+      onStage(drafts)
+      nextTable()
+    } finally {
+      setStaging(false)
     }
-    if (drafts.length === 0) {
-      notifications.show({ title: 'Nothing to add', message: `Column "${textColumn}" is empty`, color: 'yellow' })
-      return
-    }
-    onStage(drafts)
-    nextTable()
   }
 
   return (
@@ -194,10 +251,10 @@ export function TextBatchImporter({
               value={textColumn}
               onChange={setTextColumn}
             />
-            {classes.length > 0 && (
+            {taskUsesClasses && (
               <Select
                 label="Class column"
-                description="Optional — values must match a class name"
+                description="Optional — values are matched to class names"
                 placeholder="Use the class above"
                 data={table.headers.filter((h) => h !== textColumn)}
                 value={labelColumn}
@@ -210,8 +267,20 @@ export function TextBatchImporter({
           {unmatchedValues.length > 0 && (
             <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unmatched class names">
               {unmatchedValues.slice(0, 10).join(', ')}
-              {unmatchedValues.length > 10 ? `, +${unmatchedValues.length - 10} more` : ''} — those rows stage without a
-              class. Assign one in the preview, or create the classes on the Classes page first.
+              {unmatchedValues.length > 10 ? `, +${unmatchedValues.length - 10} more` : ''}
+              {tooManyToCreate
+                ? ` — ${unmatchedValues.length} distinct values is too many to be classes; check the column.`
+                : ' — no class of that name exists yet.'}
+              {!tooManyToCreate && (
+                <Checkbox
+                  mt="xs"
+                  size="xs"
+                  label={`Create ${unmatchedValues.length} missing class(es) when adding`}
+                  description="Otherwise these rows stage without a class; assign one in the preview."
+                  checked={createMissing}
+                  onChange={(e) => setCreateMissingChoice(e.currentTarget.checked)}
+                />
+              )}
             </Alert>
           )}
 
@@ -243,10 +312,10 @@ export function TextBatchImporter({
           </Text>
 
           <Group justify="flex-end">
-            <Button variant="subtle" onClick={nextTable}>
+            <Button variant="subtle" onClick={nextTable} disabled={staging}>
               {tables.length > 1 ? 'Skip this file' : 'Cancel'}
             </Button>
-            <Button disabled={!textColumn} onClick={handleStage}>
+            <Button disabled={!textColumn} loading={staging} onClick={handleStage}>
               Add {table.rows.length} row(s)
             </Button>
           </Group>

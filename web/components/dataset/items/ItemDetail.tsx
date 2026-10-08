@@ -128,9 +128,11 @@ export const ItemDetail = ({
       )}
 
       <Box>
-        <Row label="External ID">
-          <Text size="sm">{item.externalId ?? '—'}</Text>
-        </Row>
+        {modality !== 'text' && (
+          <Row label="External ID">
+            <Text size="sm">{item.externalId ?? '—'}</Text>
+          </Row>
+        )}
         <Row label="Split">
           {editing ? (
             <Select

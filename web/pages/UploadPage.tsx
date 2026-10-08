@@ -78,7 +78,17 @@ function StagingDefaults({
 }
 
 /* ── Inline text staging panel (text tasks) ── */
-function TextStagePanel({ classes, onStage }: { classes: LabelClass[]; onStage: (drafts: StagedDraft[]) => void }) {
+function TextStagePanel({
+  projectId,
+  taskUsesClasses,
+  classes,
+  onStage,
+}: {
+  projectId: string
+  taskUsesClasses: boolean
+  classes: LabelClass[]
+  onStage: (drafts: StagedDraft[]) => void
+}) {
   const [split, setSplit] = useState<SplitType>('train')
   const [classId, setClassId] = useState<string | null>(null)
   const [text, setText] = useState('')
@@ -131,7 +141,14 @@ function TextStagePanel({ classes, onStage }: { classes: LabelClass[]; onStage: 
           </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="files">
-          <TextBatchImporter split={split} classId={classId} classes={classes} onStage={onStage} />
+          <TextBatchImporter
+            projectId={projectId}
+            taskUsesClasses={taskUsesClasses}
+            split={split}
+            classId={classId}
+            classes={classes}
+            onStage={onStage}
+          />
         </Tabs.Panel>
       </Tabs>
     </Stack>
@@ -211,11 +228,17 @@ export function UploadPage() {
           </Paper>
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-[30rem_1fr] overflow-hidden flex-1">
-          <Paper p="md">
+        // The row track must be capped (minmax(0,1fr)), or thousands of staged rows stretch it past the viewport.
+        <div className="grid gap-3 md:grid-cols-[30rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden flex-1 min-h-0">
+          <Paper p="md" style={{ overflowY: 'auto', minHeight: 0 }}>
             <SectionLabel mb="sm">Add items</SectionLabel>
             {descriptor.itemSpec.payload === 'inline_text' && (
-              <TextStagePanel classes={classes} onStage={queue.stage} />
+              <TextStagePanel
+                projectId={projectId}
+                taskUsesClasses={taskUsesClasses}
+                classes={classes}
+                onStage={queue.stage}
+              />
             )}
             {descriptor.itemSpec.payload === 'record' && (
               <TabularCsvImporter requiresLabelClasses={taskUsesClasses} classes={classes} onStage={queue.stage} />
