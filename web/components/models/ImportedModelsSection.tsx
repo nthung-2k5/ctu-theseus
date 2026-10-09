@@ -6,7 +6,7 @@
  * Failed, with the reason) without a reload.
  */
 
-import { Badge, Button, Group, Modal, Progress, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
+import { Badge, Button, Group, Modal, Progress, Select, Stack, Switch, Text, TextInput } from '@mantine/core'
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
@@ -21,6 +21,7 @@ import {
 import { DataTable, type DataTableColumn, EmptyState, QueryBoundary } from '@public/components/ui'
 import { apiErrorMessage } from '@public/lib/api/client'
 import type { CustomModelOut } from '@public/lib/api/generated/models'
+import { getListCustomModelKindsQueryOptions } from '@public/lib/api/generated/models/models'
 import {
   formatBytes,
   IMPORTED_MODELS_KEY,
@@ -29,7 +30,6 @@ import {
   MODEL_STATUS_LABELS,
   type ModelFilters,
   type ModelsApi,
-  taskLabel,
 } from '@public/lib/importedModels'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -110,6 +110,8 @@ export function ImportedModelsSection({ api }: { api: ModelsApi }) {
     placeholderData: (previous) => previous,
   })
   const models = data ?? []
+  const { data: kindData } = useQuery(getListCustomModelKindsQueryOptions())
+  const kindLabels = new Map((kindData?.kinds ?? []).map((k) => [`${k.backend}:${k.id}`, k.label]))
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: IMPORTED_MODELS_KEY })
   const onError = (error: unknown) =>
@@ -161,7 +163,7 @@ export function ImportedModelsSection({ api }: { api: ModelsApi }) {
             {m.name}
           </Text>
           <Text size="xs" c="dimmed">
-            {m.kind} · {m.sourceKind === 'hub' ? (m.sourceRef ?? 'Hub') : 'uploaded'}
+            {m.sourceKind === 'hub' ? (m.sourceRef ?? 'Hub') : 'uploaded'}
             {m.revision ? ` @ ${m.revision.slice(0, 7)}` : ''}
             {m.description ? ` · ${m.description}` : ''}
           </Text>
@@ -188,24 +190,9 @@ export function ImportedModelsSection({ api }: { api: ModelsApi }) {
         ]
       : []),
     {
-      key: 'tasks',
-      header: 'Tasks',
-      render: (m) => (
-        <Group gap={4}>
-          {m.tasks.slice(0, 2).map((t) => (
-            <Badge key={t} size="xs" variant="outline" color="gray">
-              {taskLabel(t)}
-            </Badge>
-          ))}
-          {m.tasks.length > 2 && (
-            <Tooltip label={m.tasks.slice(2).map(taskLabel).join(', ')}>
-              <Badge size="xs" variant="outline" color="gray">
-                +{m.tasks.length - 2}
-              </Badge>
-            </Tooltip>
-          )}
-        </Group>
-      ),
+      key: 'kind',
+      header: 'Model kind',
+      render: (m) => <Text size="sm">{kindLabels.get(`${m.backend}:${m.kind}`) ?? m.kind}</Text>,
     },
     {
       key: 'status',
