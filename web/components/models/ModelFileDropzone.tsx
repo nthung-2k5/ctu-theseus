@@ -4,16 +4,21 @@ import { notifications } from '@mantine/notifications'
 import { CloudArrowUpIcon, XIcon } from '@phosphor-icons/react'
 import { formatBytes } from '@public/lib/importedModels'
 
-const ACCEPTED = /\.(zip|safetensors)$/i
-
-const validate = (file: File) =>
-  ACCEPTED.test(file.name)
-    ? null
-    : { code: 'bad-extension', message: 'Use a .zip of the model folder or a .safetensors file' }
+const validate = (file: File) => {
+  if (/\.zip$/i.test(file.name)) return null
+  if (/\.(pth|safetensors)$/i.test(file.name)) {
+    return {
+      code: 'bare-weights',
+      message: 'Zip the weights together with the model’s config.json and upload the .zip',
+    }
+  }
+  return { code: 'bad-extension', message: 'Use a .zip of the model folder' }
+}
 
 /**
- * Pick the weights: a .zip of a Hugging Face model folder, or a single .safetensors file. Only the extension
- * is checked here; the server checks the rest (size, contents, no pickles) when it validates the upload.
+ * Pick the weights: a .zip of a model folder (config.json plus .safetensors or .pth weights). Bare weights have
+ * no config.json to say what architecture they are, so they are refused here. Only the extension is checked
+ * here; the server checks the rest (size, contents) and reads a .pth without running any code.
  */
 export function ModelFileDropzone({
   file,
@@ -27,7 +32,7 @@ export function ModelFileDropzone({
   const onReject = (rejections: FileRejection[]) =>
     notifications.show({
       title: 'Not a model file',
-      message: rejections[0]?.errors[0]?.message ?? 'Use a .zip or .safetensors file',
+      message: rejections[0]?.errors[0]?.message ?? 'Use a .zip of the model folder',
       color: 'red',
     })
 
@@ -69,8 +74,8 @@ export function ModelFileDropzone({
           Drop a model here or click to browse
         </Text>
         <Text size="xs" c="dimmed" ta="center">
-          A .zip of the model folder (config.json, tokenizer and .safetensors weights) or a single .safetensors file.
-          Large files upload directly to storage.
+          A .zip of the model folder (config.json, tokenizer and .safetensors or .pth weights). Large files upload
+          directly to storage.
         </Text>
       </Stack>
     </Dropzone>
