@@ -2,7 +2,8 @@
 plus the custom models they are allowed to see.
 
 A custom model is visible to a user when ALL of these hold:
-  * it belongs to this backend and lists this task;
+  * it belongs to this backend and its kind serves this task (a model is offered for EVERY task its kind
+    supports; it is not tied to a task of its own);
   * it is `ready` (uploaded/pinned and validated), `enabled`, and not archived;
   * the backend still offers its kind for the task, and that kind is currently usable;
   * it is global (no owner: an admin's) or owned by that user.
@@ -22,7 +23,7 @@ from theseus.backends.base import CustomModelKind, CustomModelRef, ModelChoice, 
 from theseus.backends.registry import enabled_builtin_models
 from theseus.db.models import CustomModel
 from theseus.services import custom_models
-from theseus.services.task_registry import TaskDescriptor
+from theseus.services.task_registry import TASK_REGISTRY, TaskDescriptor
 
 CUSTOM_PREFIX = "custom:"
 
@@ -35,6 +36,21 @@ def is_custom_id(model_id: str | None) -> bool:
     return bool(model_id) and model_id.startswith(CUSTOM_PREFIX)  # type: ignore[union-attr]
 
 
+def kind_and_tasks(backend: type[TrainerBackend], kind_id: str) -> tuple[CustomModelKind | None, list[str]]:
+    """The kind `kind_id` of `backend` (None if it offers no such kind) and every task it serves. A custom
+    model is offered for all of those tasks: a model's kind is what decides where it can be used."""
+    found: CustomModelKind | None = None
+    tasks: list[str] = []
+    for task in TASK_REGISTRY.values():
+        if not backend.supports(task):
+            continue
+        match = next((k for k in backend.custom_model_kinds(task) if k.id == kind_id), None)
+        if match is not None:
+            found = found or match
+            tasks.append(str(task.id))
+    return found, tasks
+
+
 def _usable_kinds(backend: type[TrainerBackend], task: TaskDescriptor) -> dict[str, CustomModelKind]:
     return {k.id: k for k in backend.custom_model_kinds(task) if k.unavailable_reason is None}
 
@@ -42,7 +58,6 @@ def _usable_kinds(backend: type[TrainerBackend], task: TaskDescriptor) -> dict[s
 def _visible(backend: type[TrainerBackend], task: TaskDescriptor, user_id: uuid.UUID) -> sa.ColumnElement[bool]:
     return sa.and_(
         CustomModel.backend == backend.id,
-        CustomModel.tasks.any(task.id),
         CustomModel.status == "ready",
         CustomModel.enabled.is_(True),
         CustomModel.archived_at.is_(None),

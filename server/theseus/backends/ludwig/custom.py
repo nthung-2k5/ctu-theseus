@@ -16,6 +16,24 @@ from theseus.services.task_registry import TaskDescriptor
 _CAUSAL_LM = re.compile(r"(ForCausalLM|LMHeadModel)$")
 
 
+# Architectures that say what a checkpoint is for, by the kind that trains them.
+_ENCODER = re.compile(r"(ForSequenceClassification|ForMaskedLM|ForMultipleChoice)$")
+_VISION = re.compile(r"(ForImageClassification(WithTeacher)?|(ViT|DeiT|Swin|Swinv2|Beit|ConvNext|ConvNextV2)Model)$")
+
+
+def suggest_kind(config: dict) -> str | None:
+    """The kind a config.json's `architectures` points to, or None when it does not say. A model that also
+    carries a text tower (CLIP-style) is never suggested as a vision model."""
+    architectures = [a for a in config.get("architectures") or [] if isinstance(a, str)]
+    if any(_CAUSAL_LM.search(a) for a in architectures):
+        return HF_CAUSAL_LM
+    if "vision_config" not in config and any(_VISION.search(a) for a in architectures):
+        return HF_VISION
+    if any(_ENCODER.search(a) for a in architectures):
+        return HF_TRANSFORMER
+    return None
+
+
 def validate_custom_model(task: TaskDescriptor, ref: CustomModelRef) -> None:
     if ref.kind not in {k.id for k in custom_kinds_for(task.id)}:
         raise ConfigError(f'A "{ref.kind}" model cannot be used for {task.label}')

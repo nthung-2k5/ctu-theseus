@@ -15,6 +15,8 @@ from theseus.schemas.custom_models import (
     CustomModelListResponse,
     CustomModelResponse,
     DeleteCustomModelResponse,
+    InspectModelBody,
+    InspectModelResponse,
     UpdateCustomModelBody,
     UploadUrlBody,
     UploadUrlResponse,
@@ -28,6 +30,13 @@ router = APIRouter(prefix="/models", tags=["models"])
 async def list_custom_model_kinds(_: UserId) -> CustomModelKindListResponse:
     """What can be added, per backend and task: the options of the "add a model" form."""
     return CustomModelKindListResponse(kinds=ops.list_kinds())
+
+
+@router.post("/inspect", response_model=InspectModelResponse)
+async def inspect_model(body: InspectModelBody, _: UserId) -> InspectModelResponse:
+    """Check a model before importing it, creating nothing: a Hugging Face repository by id (pin, size,
+    weights, config.json) or a config.json read out of an uploaded zip. Also used by the admin form."""
+    return await ops.inspect_model(body)
 
 
 @router.get("", response_model=CustomModelListResponse)

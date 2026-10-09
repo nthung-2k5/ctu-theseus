@@ -30,7 +30,6 @@ HUB_BODY = {
     "kind": "hf_transformer",
     "sourceKind": "hub",
     "sourceRef": "bert-base-uncased",
-    "tasks": [TEXT],
 }
 UPLOAD_BODY = {**HUB_BODY, "name": "Uploaded", "sourceKind": "upload", "sourceRef": None}
 
@@ -77,7 +76,6 @@ async def add_model(db, **kw) -> uuid.UUID:
         "source_kind": "hub",
         "source_ref": "bert-base-uncased",
         "revision": "abc123",
-        "tasks": [TEXT],
         "status": "ready",
         "spec": {"materialize": True},
         "max_attempts": 3,
@@ -135,7 +133,6 @@ def upload_row(**kw) -> CustomModel:
         "kind": "hf_transformer",
         "name": "x",
         "source_kind": "upload",
-        "tasks": [TEXT],
         "spec": {"materialize": True},
         "storage_key": "custom/x/bundle.zip",
         **kw,
@@ -177,13 +174,11 @@ async def test_an_upload_model_waits_for_its_file(new_user):
     ("patch", "message"),
     [
         ({"backend": "nope"}, "Unknown trainer backend"),
-        ({"kind": "hf_causal_lm"}, "no 'hf_causal_lm' custom model"),  # not offered for text classification
-        ({"tasks": ["not_a_task"]}, "Unknown task"),
-        ({"tasks": [TEXT, "image_classification"]}, "no 'hf_transformer' custom model"),  # every task must fit
+        ({"kind": "nope"}, "no 'nope' custom model"),
         ({"sourceRef": "not a repo!"}, "repository id"),
         ({"sourceRef": None}, "repository id"),
         ({"sourceKind": "upload", "sourceRef": "bert-base-uncased"}, "no source reference"),
-        ({"kind": "timm_image", "tasks": ["image_classification"], "sourceKind": "upload", "sourceRef": None}, None),
+        ({"kind": "timm_image", "sourceKind": "upload", "sourceRef": None}, None),
     ],
 )
 async def test_creation_is_validated(new_user, patch, message):
@@ -194,9 +189,12 @@ async def test_creation_is_validated(new_user, patch, message):
         assert message in r.json()["error"]["message"]
 
 
-async def test_no_tasks_is_a_422(new_user):
+async def test_a_model_is_offered_for_every_task_its_kind_serves(new_user):
     user = await new_user()
-    assert (await user.post("/api/models", json={**HUB_BODY, "tasks": []})).status_code == 422
+    causal = {**HUB_BODY, "kind": "hf_causal_lm", "sourceRef": "org/llama"}
+    m = (await user.post("/api/models", json=causal)).json()["model"]
+    assert set(m["tasks"]) == {"text_generation", "summarization", "sequence_to_sequence", "question_answering"}
+    assert (await user.post("/api/models", json=HUB_BODY)).json()["model"]["tasks"] == [TEXT]
 
 
 async def test_a_regular_user_cannot_create_a_global_model(new_user):
@@ -266,16 +264,12 @@ async def test_a_model_is_invisible_to_everyone_but_its_owner(new_user, fake_sto
         assert (await call).status_code == 404  # not 403: an id must not reveal that someone's model exists
 
 
-async def test_a_model_can_be_renamed_retasked_and_switched_off(new_user):
+async def test_a_model_can_be_renamed_and_switched_off(new_user):
     user = await new_user()
     m = (await user.post("/api/models", json=HUB_BODY)).json()["model"]
     r = await user.patch(f"/api/models/{m['id']}", json={"name": " Renamed ", "description": "d", "enabled": False})
     got = r.json()["model"]
     assert got["name"] == "Renamed" and got["description"] == "d" and got["enabled"] is False
-    # What the model IS is fixed, and a task its kind does not support cannot be added.
-    bad = await user.patch(f"/api/models/{m['id']}", json={"tasks": [TEXT, "image_classification"]})
-    assert bad.status_code == 400
-    assert (await user.patch(f"/api/models/{m['id']}", json={"tasks": []})).status_code == 422
 
 
 async def test_deleting_an_unused_model_removes_it_and_its_files(new_user, fake_storage, temp_dir):
@@ -411,9 +405,8 @@ async def test_the_picker_lists_builtins_then_the_custom_models_the_owner_may_us
         {"status": "pending_upload"},
         {"enabled": False},
         {"archived_at": sa.func.now()},
-        {"tasks": ["image_classification"]},
         {"backend": "other"},
-        {"kind": "hf_causal_lm"},  # a kind the task no longer offers
+        {"kind": "hf_causal_lm"},  # a kind that does not serve this project's task
     ],
 )
 async def test_a_custom_model_that_is_not_usable_is_not_offered(new_user, db, hidden):
@@ -477,7 +470,7 @@ async def test_a_run_on_a_builtin_model_records_no_custom_model(new_user, db, tr
     assert isinstance(run, TrainingRun) and run.custom_model_id is None
 
 
-@pytest.mark.parametrize("change", [{"enabled": False}, {"status": "failed"}, {"tasks": ["image_classification"]}])
+@pytest.mark.parametrize("change", [{"enabled": False}, {"status": "failed"}, {"backend": "other"}])
 async def test_training_refuses_a_custom_model_that_is_no_longer_usable(new_user, db, training_env, change):
     user = await new_user()
     model_id = await add_model(db, owner_user_id=uuid.UUID(user.user_id), **change)
@@ -512,7 +505,7 @@ async def test_a_causal_lm_is_the_base_model_of_an_llm_task(new_user, db, monkey
 
     monkeypatch.setattr(training_service, "read_snapshot_manifest", manifest)
     user = await new_user()
-    model_id = await add_model(db, kind="hf_causal_lm", tasks=["text_generation"], source_ref="org/llama")
+    model_id = await add_model(db, kind="hf_causal_lm", source_ref="org/llama")
     p = await project(user, "text_generation")
     async with db() as s:
         v = DatasetVersion(dataset_id=uuid.UUID(p["id"]), version_tag="v1", status="ready")
@@ -614,12 +607,8 @@ def test_the_backends_own_check_runs_for_the_models_kind(temp_dir, bundle_downlo
         validate_model.validate_sync(row)
 
 
-def test_a_model_offered_for_no_task_or_an_unoffered_kind_is_refused(temp_dir):
-    row = upload_row()
-    row.tasks = []
-    with pytest.raises(Exception, match="does not offer"):
-        validate_model.validate_sync(row)
-    row = upload_row(kind="hf_causal_lm")  # not offered for text classification
+def test_a_kind_the_backend_does_not_offer_is_refused(temp_dir):
+    row = upload_row(kind="nope")
     with pytest.raises(Exception, match="does not offer"):
         validate_model.validate_sync(row)
 
@@ -632,7 +621,6 @@ def hub_row(**kw) -> CustomModel:
         "name": "x",
         "source_kind": "hub",
         "source_ref": "org/bert",
-        "tasks": [TEXT],
         "spec": {"materialize": True},
         **kw,
     }
@@ -640,7 +628,9 @@ def hub_row(**kw) -> CustomModel:
 
 
 def fake_hub(monkeypatch, *, sha="c0ffee", size=100):
-    monkeypatch.setattr(validate_model, "_hub_pin", lambda row: (sha, size))
+    monkeypatch.setattr(
+        cm, "hub_pin", lambda repo_id: cm.HubPin(revision=sha, size_bytes=size, has_safetensors=True, has_config=True)
+    )
 
     def fetch(row, dest: Path):
         assert row.revision == sha  # pinned before anything is downloaded
@@ -833,3 +823,78 @@ async def test_a_string_that_is_not_a_run_id_has_no_custom_model_and_touches_not
     monkeypatch.setattr(cm, "ensure_local", boom)
     monkeypatch.setattr(run_models, "get_sessionmaker", boom)
     await run_models.ensure_run_custom_model("run-a")
+
+
+# -- Checking a Hub repository before importing it -----------------------------------------------
+
+
+def fake_inspection(monkeypatch, config, *, safetensors=True, size=100):
+    pin = cm.HubPin(revision="c0ffee", size_bytes=size, has_safetensors=safetensors, has_config=config is not None)
+    monkeypatch.setattr(cm, "hub_pin", lambda repo_id: pin)
+    monkeypatch.setattr(cm, "fetch_hub_config", lambda repo_id, revision: config)
+
+
+async def inspect(user, ref="org/bert"):
+    r = await user.post("/api/models/inspect", json={"sourceRef": ref})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_inspecting_a_hub_model_reads_the_task_from_its_config(new_user, monkeypatch):
+    fake_inspection(monkeypatch, {"model_type": "bert", "architectures": ["BertForSequenceClassification"]})
+    out = await inspect(await new_user())
+    assert out["errors"] == [] and out["warnings"] == [] and out["revision"] == "c0ffee"
+    assert out["suggestedBackend"] == "ludwig" and out["suggestedKind"] == "hf_transformer"
+
+
+async def test_a_config_that_does_not_name_the_task_is_only_a_warning(new_user, monkeypatch):
+    fake_inspection(monkeypatch, {"model_type": "bert", "architectures": ["BertModel"]})
+    out = await inspect(await new_user())
+    assert out["errors"] == [] and out["suggestedKind"] is None
+    assert len(out["warnings"]) == 1 and "BertModel" in out["warnings"][0]
+
+
+async def test_a_repo_without_a_config_json_is_only_a_warning(new_user, monkeypatch):
+    fake_inspection(monkeypatch, None)
+    out = await inspect(await new_user())
+    assert out["errors"] == [] and out["suggestedKind"] is None and "No config.json" in out["warnings"][0]
+
+
+async def test_inspecting_reports_what_would_make_the_import_fail(new_user, monkeypatch):
+    fake_inspection(monkeypatch, {"architectures": ["LlamaForCausalLM"], "auto_map": {}}, safetensors=False)
+    out = await inspect(await new_user())
+    assert any("no .safetensors" in e for e in out["errors"]) and any("auto_map" in e for e in out["errors"])
+
+    def missing(repo_id):
+        raise cm.CustomModelFileError(f"'{repo_id}' was not found on the Hugging Face Hub")
+
+    monkeypatch.setattr(cm, "hub_pin", missing)
+    assert "was not found" in (await inspect(await new_user(), "org/nope"))["errors"][0]
+
+
+async def test_inspecting_refuses_an_id_that_is_not_a_repository(new_user):
+    user = await new_user()
+    assert (await user.post("/api/models/inspect", json={"sourceRef": "../etc/passwd"})).status_code == 400
+
+
+async def test_a_causal_lm_config_needs_no_warning(new_user, monkeypatch):
+    fake_inspection(monkeypatch, {"model_type": "llama", "architectures": ["LlamaForCausalLM"]})
+    out = await inspect(await new_user())
+    assert out["errors"] == [] and out["warnings"] == [] and out["suggestedKind"] == "hf_causal_lm"
+
+
+async def test_a_config_read_from_an_upload_is_described_without_the_hub(new_user):
+    user = await new_user()
+    body = {"config": {"model_type": "bert", "architectures": ["BertForSequenceClassification"]}}
+    out = (await user.post("/api/models/inspect", json=body)).json()
+    assert out["sourceRef"] is None and out["revision"] is None and out["errors"] == []
+    assert out["suggestedKind"] == "hf_transformer" and out["architectures"] == ["BertForSequenceClassification"]
+    out = (await user.post("/api/models/inspect", json={"config": {"auto_map": {}}})).json()
+    assert any("auto_map" in e for e in out["errors"]) and out["suggestedKind"] is None
+
+
+async def test_inspecting_needs_exactly_one_of_a_repo_or_a_config(new_user):
+    user = await new_user()
+    assert (await user.post("/api/models/inspect", json={})).status_code == 422
+    both = {"sourceRef": "org/bert", "config": {}}
+    assert (await user.post("/api/models/inspect", json=both)).status_code == 422

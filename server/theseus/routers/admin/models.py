@@ -1,7 +1,7 @@
 """/api/admin/models: the global custom-model catalog, and every user's private models.
 
 Same operations as /api/models (see services/custom_model_ops.py), without the owner restriction. A model
-created here has no owner, so every user can train on it wherever its `tasks` say it is offered.
+created here has no owner, so every user can train on it for the task it is offered for.
 """
 
 import uuid

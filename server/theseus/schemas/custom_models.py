@@ -2,9 +2,9 @@
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from theseus.schemas.common import ApiModel
 
@@ -24,6 +24,8 @@ class CustomModelKindOut(ApiModel):
     source_kinds: list[SourceKind]
     status: Literal["stable", "experimental"]
     unavailable_reason: str | None
+    # False for a kind whose framework fetches its own weights by name (a timm model): nothing to inspect.
+    needs_files: bool
     tasks: list[str]
 
 
@@ -41,6 +43,7 @@ class CustomModelOut(ApiModel):
     source_ref: str | None
     revision: str | None
     size_bytes: int | None
+    # Every task this model is offered for: all the tasks its kind serves.
     tasks: list[str]
     # pending_upload | uploaded | validating | ready | failed
     status: str
@@ -73,13 +76,42 @@ class CreateCustomModelBody(ApiModel):
     source_kind: SourceKind
     # The Hub repository id or timm model name. Required for a hub model, forbidden for an upload.
     source_ref: str | None = Field(default=None, max_length=200)
-    tasks: list[str] = Field(min_length=1)
+
+
+class InspectModelBody(ApiModel):
+    """What to look at: a Hub repository by id, or a `config.json` the browser read out of an uploaded zip.
+    Exactly one of the two."""
+
+    source_ref: str | None = Field(default=None, min_length=1, max_length=200)
+    config: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "InspectModelBody":
+        if (self.source_ref is None) == (self.config is None):
+            raise ValueError("Send either sourceRef or config")
+        return self
+
+
+class InspectModelResponse(ApiModel):
+    """What checking a model before importing it found out (creates nothing). `source_ref`, `revision` and
+    `size_bytes` are only known for a Hub repository; a config read from an upload has none of them."""
+
+    source_ref: str | None
+    revision: str | None
+    size_bytes: int | None
+    model_type: str | None
+    architectures: list[str]
+    # The kind config.json points to; null when it does not say.
+    suggested_backend: str | None
+    suggested_kind: str | None
+    # Errors mean the model cannot be imported; warnings do not.
+    errors: list[str]
+    warnings: list[str]
 
 
 class UpdateCustomModelBody(ApiModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
-    tasks: list[str] | None = Field(default=None, min_length=1)
     enabled: bool | None = None
 
 

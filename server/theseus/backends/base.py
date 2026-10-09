@@ -262,6 +262,12 @@ class TrainerBackend(ABC):
         return []
 
     @classmethod
+    def suggest_custom_kind(cls, config: dict[str, Any]) -> str | None:
+        """Which of this backend's `custom_model_kinds` a Hugging Face `config.json` says the model is
+        (judged from its `architectures`), or None when the config does not say. Default: None."""
+        return None
+
+    @classmethod
     def validate_custom_model(cls, task: TaskDescriptor, ref: CustomModelRef) -> None:
         """Check that the files at `ref.local_path` really are a usable model of `ref.kind` for `task`
         (runs in the validation job, after the generic file checks). Raise `ConfigError` with a

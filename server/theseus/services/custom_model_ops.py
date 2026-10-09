@@ -29,10 +29,13 @@ from theseus.schemas.custom_models import (
     CreateCustomModelBody,
     CustomModelKindOut,
     CustomModelOut,
+    InspectModelBody,
+    InspectModelResponse,
     UpdateCustomModelBody,
     UploadUrlBody,
 )
 from theseus.services import custom_models, storage
+from theseus.services.model_catalog import kind_and_tasks
 from theseus.services.task_registry import TASK_REGISTRY
 from theseus.settings import get_settings
 
@@ -49,6 +52,7 @@ _VALIDATION_ATTEMPTS = 3
 
 
 def _out(row: CustomModel, run_count: int, owner_email: str | None = None) -> CustomModelOut:
+    backend = find_backend(row.backend)
     return CustomModelOut(
         id=row.id,
         name=row.name,
@@ -59,7 +63,7 @@ def _out(row: CustomModel, run_count: int, owner_email: str | None = None) -> Cu
         source_ref=row.source_ref,
         revision=row.revision,
         size_bytes=row.size_bytes,
-        tasks=list(row.tasks or []),
+        tasks=kind_and_tasks(backend, row.kind)[1] if backend else [],
         status=row.status,
         last_error=row.last_error,
         enabled=row.enabled,
@@ -151,6 +155,7 @@ def list_kinds() -> list[CustomModelKindOut]:
                         source_kinds=k.source_kinds,
                         status=k.status,
                         unavailable_reason=k.unavailable_reason,
+                        needs_files=k.materialize,
                         tasks=[],
                     ),
                 )
@@ -158,26 +163,102 @@ def list_kinds() -> list[CustomModelKindOut]:
     return list(kinds.values())
 
 
+def _suggest(config: dict[str, Any]) -> tuple[str, str] | None:
+    """(backend, kind) the config's architectures point to, among kinds usable right now."""
+    for backend in list_backends():
+        if backend.available() is not None:
+            continue
+        kind_id = backend.suggest_custom_kind(config)
+        if kind_id is None:
+            continue
+        kind, _ = kind_and_tasks(backend, kind_id)
+        if kind is not None and kind.unavailable_reason is None:
+            return backend.id, kind_id
+    return None
+
+
+def _new_inspection(source_ref: str | None) -> InspectModelResponse:
+    return InspectModelResponse(
+        source_ref=source_ref,
+        revision=None,
+        size_bytes=None,
+        model_type=None,
+        architectures=[],
+        suggested_backend=None,
+        suggested_kind=None,
+        errors=[],
+        warnings=[],
+    )
+
+
+def _describe_config(out: InspectModelResponse, config: dict[str, Any]) -> None:
+    """Fill in what a config.json says about the model: its family, and the kind it points to."""
+    architectures = [a for a in config.get("architectures") or [] if isinstance(a, str)]
+    out.model_type = config.get("model_type") if isinstance(config.get("model_type"), str) else None
+    out.architectures = architectures
+    if "auto_map" in config:
+        out.errors.append("Models that need custom code (auto_map / trust_remote_code) are not supported")
+    if suggestion := _suggest(config):
+        out.suggested_backend, out.suggested_kind = suggestion
+    else:
+        listed = ", ".join(architectures) or "none listed"
+        out.warnings.append(
+            f"config.json does not say what task this model is for (architectures: {listed}). "
+            "Choose the kind of model yourself."
+        )
+
+
+def _inspect_hub_sync(repo_id: str) -> InspectModelResponse:
+    out = _new_inspection(repo_id)
+    try:
+        pin = custom_models.hub_pin(repo_id)
+        out.revision, out.size_bytes = pin.revision, pin.size_bytes
+        limit = get_settings().max_custom_model_bytes
+        if pin.size_bytes > limit:
+            out.errors.append(f"The model is {pin.size_bytes // 2**20} MiB, over the {limit // 2**20} MiB limit")
+        if not pin.has_safetensors:
+            out.errors.append("The repository has no .safetensors weights (pickle-based weights are not accepted)")
+        config = custom_models.fetch_hub_config(repo_id, pin.revision) if pin.has_config else None
+    except custom_models.CustomModelFileError as e:
+        out.errors.append(str(e))
+        return out
+
+    if config is None:
+        out.warnings.append(
+            "No config.json was found, so the task cannot be read from it. "
+            "Choose the kind of model yourself."
+        )
+        return out
+    _describe_config(out, config)
+    return out
+
+
+async def inspect_model(body: InspectModelBody) -> InspectModelResponse:
+    """Check a model before importing it, creating nothing: look a Hub repository up and read its config.json,
+    or describe a config.json the browser read out of an uploaded zip."""
+    if body.config is not None:
+        out = _new_inspection(None)
+        _describe_config(out, body.config)
+        return out
+    source_ref = (body.source_ref or "").strip()
+    if not _SOURCE_REF.match(source_ref):
+        raise HTTPException(400, "Enter the model's Hugging Face repository id (e.g. bert-base-uncased or org/name)")
+    return await asyncio.to_thread(_inspect_hub_sync, source_ref)
+
+
 # -- Validation helpers ------------------------------------------------------------------------
 
 
-def _kind_for_tasks(backend_id: str, kind_id: str, tasks: list[str]) -> tuple[Any, CustomModelKind]:
-    """The backend and the kind, checked to exist, be usable, and be offered for EVERY task listed."""
+def _kind_for(backend_id: str, kind_id: str) -> tuple[Any, CustomModelKind]:
+    """The backend and the kind, checked to exist, be usable, and serve at least one task."""
     backend = find_backend(backend_id)
     if backend is None:
         raise HTTPException(400, f"Unknown trainer backend '{backend_id}'")
     if (reason := backend.available()) is not None:
         raise HTTPException(400, f"Trainer backend '{backend_id}' is not available: {reason}")
-    found: CustomModelKind | None = None
-    for task_id in tasks:
-        task = TASK_REGISTRY.get(task_id)
-        if task is None:
-            raise HTTPException(400, f"Unknown task '{task_id}'")
-        match = next((k for k in backend.custom_model_kinds(task) if k.id == kind_id), None)
-        if match is None:
-            raise HTTPException(400, f"'{backend_id}' has no '{kind_id}' custom model for {task.label}")
-        found = match
-    assert found is not None  # tasks is non-empty (schema min_length)
+    found, _ = kind_and_tasks(backend, kind_id)
+    if found is None:
+        raise HTTPException(400, f"'{backend_id}' has no '{kind_id}' custom model")
     if found.unavailable_reason:
         raise HTTPException(400, found.unavailable_reason)
     return backend, found
@@ -189,8 +270,7 @@ def _kind_for_tasks(backend_id: str, kind_id: str, tasks: list[str]) -> tuple[An
 async def create(
     session: AsyncSession, body: CreateCustomModelBody, actor_id: uuid.UUID, *, global_: bool
 ) -> CustomModel:
-    tasks = list(dict.fromkeys(body.tasks))
-    _, kind = _kind_for_tasks(body.backend, body.kind, tasks)
+    _, kind = _kind_for(body.backend, body.kind)
     if body.source_kind not in kind.source_kinds:
         raise HTTPException(400, f"A '{kind.id}' model cannot come from source '{body.source_kind}'")
 
@@ -213,7 +293,6 @@ async def create(
         source_kind=body.source_kind,
         source_ref=source_ref,
         spec={"materialize": kind.materialize},
-        tasks=tasks,
         # A Hub model needs nothing more from the user, so it goes straight to validation.
         status="uploaded" if body.source_kind == "hub" else "pending_upload",
         max_attempts=_VALIDATION_ATTEMPTS,
@@ -229,10 +308,6 @@ async def create(
 async def update(session: AsyncSession, row: CustomModel, body: UpdateCustomModelBody) -> CustomModel:
     if row.archived_at is not None:
         raise HTTPException(409, "This model was archived and can no longer be edited")
-    if body.tasks is not None:
-        tasks = list(dict.fromkeys(body.tasks))
-        _kind_for_tasks(row.backend, row.kind, tasks)
-        row.tasks = tasks
     if body.name is not None:
         row.name = body.name.strip()
     if body.description is not None:

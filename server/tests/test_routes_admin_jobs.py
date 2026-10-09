@@ -120,9 +120,20 @@ async def test_system_overview_counts_and_reports_queue_depths(admin, new_user, 
     async with db() as s:
         s.add_all(
             [
-                CustomModel(backend="ludwig", kind="hf_transformer", name="a", source_kind="hub", status="uploaded"),
                 CustomModel(
-                    backend="ludwig", kind="hf_transformer", name="b", source_kind="hub", status="ready", size_bytes=500
+                    backend="ludwig",
+                    kind="hf_transformer",
+                    name="a",
+                    source_kind="hub",
+                    status="uploaded",
+                ),
+                CustomModel(
+                    backend="ludwig",
+                    kind="hf_transformer",
+                    name="b",
+                    source_kind="hub",
+                    status="ready",
+                    size_bytes=500,
                 ),
                 CustomModel(
                     backend="ludwig",

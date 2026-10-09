@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from theseus.db.base import Base
@@ -50,8 +50,6 @@ class CustomModel(JobColumns, Base):
     size_bytes: Mapped[int | None] = mapped_column(sa.BigInteger)
     # Backend-specific extras, free-form.
     spec: Mapped[Any] = mapped_column(JSONB, server_default=sa.text("'{}'::jsonb"))
-    # The tasks this model is offered for.
-    tasks: Mapped[list[str]] = mapped_column(ARRAY(sa.Text), server_default=sa.text("'{}'::text[]"))
     # pending_upload | uploaded | validating | ready | failed
     status: Mapped[str] = mapped_column(sa.String(16), server_default="pending_upload", index=True)
     enabled: Mapped[bool] = mapped_column(sa.Boolean, server_default=sa.true())

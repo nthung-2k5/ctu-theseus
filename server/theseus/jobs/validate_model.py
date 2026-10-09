@@ -8,7 +8,7 @@ claimed off the `custom_models` table like any other job (see jobs/queue.py). Th
   2. Generic safety checks on the files (`custom_models.check_tree`): no pickles or code, no symlinks,
      within the size limit.
   3. The backend's own check (`TrainerBackend.validate_custom_model`) for every task the model is offered
-     for: is this really a causal LM, does it have a config.json, and so on.
+     for (all the tasks its kind serves): is this really a causal LM, does it have a config.json, and so on.
 
 A problem WITH THE MODEL (bad files, missing repo, wrong architecture) fails it immediately with a
 message the user can act on: retrying a deterministic failure only wastes time. Anything else (a network
@@ -33,6 +33,7 @@ from theseus.jobs import queue
 from theseus.jobs.executors import run_in_executor, validate_executor
 from theseus.services import custom_models
 from theseus.services.custom_models import CustomModelFileError
+from theseus.services.model_catalog import kind_and_tasks
 from theseus.services.task_registry import get_task_descriptor
 from theseus.settings import get_settings
 
@@ -46,43 +47,11 @@ class Validated:
     size_bytes: int | None = None
 
 
-def _hub_pin(row: CustomModel) -> tuple[str, int]:
-    """(commit sha, bytes to download) for a Hub model, refusing one that cannot be used."""
-    from huggingface_hub import HfApi
-    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError
-
-    if not row.source_ref:
-        raise CustomModelFileError("A Hub model needs its repository id")
-    try:
-        info = HfApi().model_info(row.source_ref, files_metadata=True)
-    except RepositoryNotFoundError:
-        raise CustomModelFileError(f"'{row.source_ref}' was not found on the Hugging Face Hub") from None
-    except GatedRepoError:
-        raise CustomModelFileError(f"'{row.source_ref}' is gated: only public, ungated models are supported") from None
-    except RevisionNotFoundError:
-        raise CustomModelFileError(f"'{row.source_ref}' has no default revision") from None
-    if info.private:
-        raise CustomModelFileError(f"'{row.source_ref}' is private: only public models are supported")
-    if not info.sha:
-        raise CustomModelFileError(f"Could not determine the current revision of '{row.source_ref}'")
-
-    forbidden = custom_models.FORBIDDEN_EXTENSIONS
-    wanted = [
-        s
-        for s in info.siblings or []
-        if not any(s.rfilename.lower().endswith(ext) for ext in forbidden)
-        and s.rfilename.lower().endswith((".safetensors", ".json", ".txt", ".model", ".tiktoken", ".vocab", ".md"))
-    ]
-    return info.sha, sum(s.size or 0 for s in wanted)
-
-
-def _kind_for(row: CustomModel) -> CustomModelKind:
-    backend = get_backend(row.backend)
-    for task_id in row.tasks:
-        for kind in backend.custom_model_kinds(get_task_descriptor(task_id)):
-            if kind.id == row.kind:
-                return kind
-    raise ConfigError(f"'{row.backend}' does not offer a '{row.kind}' model for {', '.join(row.tasks) or 'any task'}")
+def _kind_for(row: CustomModel) -> tuple[CustomModelKind, list[str]]:
+    kind, tasks = kind_and_tasks(get_backend(row.backend), row.kind)
+    if kind is None:
+        raise ConfigError(f"'{row.backend}' does not offer a '{row.kind}' model")
+    return kind, tasks
 
 
 def validate_sync(row: CustomModel) -> Validated:
@@ -90,20 +59,20 @@ def validate_sync(row: CustomModel) -> Validated:
     `row` only to carry the pin forward, and returns what to persist."""
     limit = get_settings().max_custom_model_bytes
     backend = get_backend(row.backend)
-    kind = _kind_for(row)
+    kind, tasks = _kind_for(row)
     if kind.unavailable_reason:
         raise ConfigError(kind.unavailable_reason)
-    if not row.tasks:
-        raise ConfigError("The model is not enabled for any task")
 
     result = Validated()
     if not kind.materialize:
         pass  # the framework fetches its own weights by name; nothing to pin or check on disk
     elif row.source_kind == "hub":
-        revision, size = _hub_pin(row)
-        if size > limit:
-            raise CustomModelFileError(f"The model is {size // 2**20} MiB, over the {limit // 2**20} MiB limit")
-        row.revision = result.revision = revision
+        pin = custom_models.hub_pin(row.source_ref)
+        if pin.size_bytes > limit:
+            raise CustomModelFileError(
+                f"The model is {pin.size_bytes // 2**20} MiB, over the {limit // 2**20} MiB limit"
+            )
+        row.revision = result.revision = pin.revision
         path = custom_models.ensure_local(row)
         result.size_bytes = custom_models.check_tree(path, max_bytes=limit)
     else:
@@ -112,7 +81,7 @@ def validate_sync(row: CustomModel) -> Validated:
         result.size_bytes = custom_models.check_tree(imported.path, max_bytes=limit)
 
     ref = custom_models.ref_for(row)
-    for task_id in row.tasks:
+    for task_id in tasks:
         backend.validate_custom_model(get_task_descriptor(task_id), ref)
     return result
 

@@ -49,6 +49,7 @@ FORBIDDEN_EXTENSIONS = frozenset(
 
 # What a Hub snapshot may fetch: weights as safetensors plus the small config/tokenizer text files.
 _HUB_ALLOW = ("*.safetensors", "*.json", "*.txt", "*.model", "*.tiktoken", "*.vocab", "*.md")
+_MAX_CONFIG_BYTES = 2 * 2**20
 
 
 class CustomModelFileError(ValueError):
@@ -98,6 +99,69 @@ def ensure_local(row: CustomModel) -> Path:
         _fetch_upload(row, dest)
     (dest / _COMPLETE_MARKER).touch()
     return dest
+
+
+@dataclass(frozen=True)
+class HubPin:
+    revision: str
+    size_bytes: int
+    has_safetensors: bool
+    has_config: bool
+
+
+def hub_pin(repo_id: str | None) -> HubPin:
+    """The commit to pin and the bytes to download for a Hub model, refusing one that cannot be used."""
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError
+
+    if not repo_id:
+        raise CustomModelFileError("A Hub model needs its repository id")
+    try:
+        info = HfApi().model_info(repo_id, files_metadata=True)
+    except RepositoryNotFoundError:
+        raise CustomModelFileError(f"'{repo_id}' was not found on the Hugging Face Hub") from None
+    except GatedRepoError:
+        raise CustomModelFileError(f"'{repo_id}' is gated: only public, ungated models are supported") from None
+    except RevisionNotFoundError:
+        raise CustomModelFileError(f"'{repo_id}' has no default revision") from None
+    if info.private:
+        raise CustomModelFileError(f"'{repo_id}' is private: only public models are supported")
+    if not info.sha:
+        raise CustomModelFileError(f"Could not determine the current revision of '{repo_id}'")
+
+    siblings = info.siblings or []
+    wanted = [
+        s
+        for s in siblings
+        if not any(s.rfilename.lower().endswith(ext) for ext in FORBIDDEN_EXTENSIONS)
+        and s.rfilename.lower().endswith((".safetensors", ".json", ".txt", ".model", ".tiktoken", ".vocab", ".md"))
+    ]
+    return HubPin(
+        revision=info.sha,
+        size_bytes=sum(s.size or 0 for s in wanted),
+        has_safetensors=any(s.rfilename.lower().endswith(".safetensors") for s in wanted),
+        has_config=any(s.rfilename == "config.json" for s in siblings),
+    )
+
+
+def fetch_hub_config(repo_id: str, revision: str) -> dict | None:
+    """The repo's top-level config.json at `revision`, or None when it has none or is not a JSON object."""
+    import json
+
+    from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import EntryNotFoundError
+
+    try:
+        path = Path(hf_hub_download(repo_id, "config.json", revision=revision))
+    except EntryNotFoundError:
+        return None
+    if path.stat().st_size > _MAX_CONFIG_BYTES:
+        raise CustomModelFileError("config.json is unreasonably large")
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise CustomModelFileError("config.json could not be read as JSON") from None
+    return config if isinstance(config, dict) else None
 
 
 def _fetch_hub(row: CustomModel, dest: Path) -> None:

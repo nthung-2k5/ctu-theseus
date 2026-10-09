@@ -74,6 +74,12 @@ class LudwigBackend(TrainerBackend):
         return custom_kinds_for(task.id)
 
     @classmethod
+    def suggest_custom_kind(cls, config: dict[str, Any]) -> str | None:
+        from theseus.backends.ludwig.custom import suggest_kind
+
+        return suggest_kind(config)
+
+    @classmethod
     def validate_custom_model(cls, task: TaskDescriptor, ref: CustomModelRef) -> None:
         from theseus.backends.ludwig.custom import validate_custom_model as _validate
 

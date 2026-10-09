@@ -2818,6 +2818,48 @@
         }
       }
     },
+    "/api/models/inspect": {
+      "post": {
+        "tags": [
+          "models"
+        ],
+        "summary": "Inspect Model",
+        "description": "Check a model before importing it, creating nothing: a Hugging Face repository by id (pin, size,\nweights, config.json) or a config.json read out of an uploaded zip. Also used by the admin form.",
+        "operationId": "inspect_model",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InspectModelBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InspectModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/models": {
       "get": {
         "tags": [
@@ -5665,14 +5707,6 @@
               }
             ],
             "title": "Sourceref"
-          },
-          "tasks": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Tasks"
           }
         },
         "type": "object",
@@ -5680,8 +5714,7 @@
           "name",
           "backend",
           "kind",
-          "sourceKind",
-          "tasks"
+          "sourceKind"
         ],
         "title": "CreateCustomModelBody"
       },
@@ -5990,6 +6023,10 @@
             ],
             "title": "Unavailablereason"
           },
+          "needsFiles": {
+            "type": "boolean",
+            "title": "Needsfiles"
+          },
           "tasks": {
             "items": {
               "type": "string"
@@ -6009,6 +6046,7 @@
           "sourceKinds",
           "status",
           "unavailableReason",
+          "needsFiles",
           "tasks"
         ],
         "title": "CustomModelKindOut",
@@ -7056,6 +7094,143 @@
           "count"
         ],
         "title": "HealthClassCount"
+      },
+      "InspectModelBody": {
+        "properties": {
+          "sourceRef": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceref"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "title": "InspectModelBody",
+        "description": "What to look at: a Hub repository by id, or a `config.json` the browser read out of an uploaded zip.\nExactly one of the two."
+      },
+      "InspectModelResponse": {
+        "properties": {
+          "sourceRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceref"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sizeBytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizebytes"
+          },
+          "modelType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modeltype"
+          },
+          "architectures": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Architectures"
+          },
+          "suggestedBackend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedbackend"
+          },
+          "suggestedKind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestedkind"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sourceRef",
+          "revision",
+          "sizeBytes",
+          "modelType",
+          "architectures",
+          "suggestedBackend",
+          "suggestedKind",
+          "errors",
+          "warnings"
+        ],
+        "title": "InspectModelResponse",
+        "description": "What checking a model before importing it found out (creates nothing). `source_ref`, `revision` and\n`size_bytes` are only known for a Hub repository; a config read from an upload has none of them."
       },
       "ItemFailure": {
         "properties": {
@@ -10148,21 +10323,6 @@
               }
             ],
             "title": "Description"
-          },
-          "tasks": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array",
-                "minItems": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tasks"
           },
           "enabled": {
             "anyOf": [
