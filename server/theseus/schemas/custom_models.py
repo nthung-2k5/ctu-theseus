@@ -84,7 +84,7 @@ class UpdateCustomModelBody(ApiModel):
 
 
 class UploadUrlBody(ApiModel):
-    # Only the extension matters: .zip (a Hugging Face model folder) or .safetensors (a single weights file).
+    # Only the extension matters: it must be a .zip of a model folder (config.json plus the weights).
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
 

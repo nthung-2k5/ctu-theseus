@@ -229,14 +229,6 @@ async def test_the_upload_flow_presigns_finalizes_and_queues_validation(new_user
     assert (await user.post(f"{base}/finalize")).status_code == 409  # only once
 
 
-async def test_a_single_safetensors_file_is_accepted(new_user, fake_storage):
-    user = await new_user()
-    m = (await user.post("/api/models", json=UPLOAD_BODY)).json()["model"]
-    r = await user.post(f"/api/models/{m['id']}/upload-url", json={"filename": "w.safetensors", "sizeBytes": 5})
-    assert r.json()["key"].endswith("/model.safetensors")
-    assert r.json()["headers"] == {"Content-Type": "application/octet-stream"}
-
-
 async def test_upload_urls_refuse_bad_files_sizes_and_states(new_user, fake_storage, monkeypatch):
     user = await new_user()
     upload = (await user.post("/api/models", json=UPLOAD_BODY)).json()["model"]
@@ -245,6 +237,9 @@ async def test_upload_urls_refuse_bad_files_sizes_and_states(new_user, fake_stor
 
     assert (await user.post(url.format(upload["id"]), json={"filename": "w.bin", "sizeBytes": 5})).status_code == 400
     assert (await user.post(url.format(upload["id"]), json={"filename": "w.pt", "sizeBytes": 5})).status_code == 400
+    for bare in ("w.pth", "w.safetensors"):
+        r = await user.post(url.format(upload["id"]), json={"filename": bare, "sizeBytes": 5})
+        assert r.status_code == 400 and "Zip the weights" in r.json()["error"]["message"]
     monkeypatch.setattr(get_settings(), "max_custom_model_bytes", 100)
     assert (await user.post(url.format(upload["id"]), json={"filename": "w.zip", "sizeBytes": 101})).status_code == 413
     assert (await user.post(url.format(upload["id"]), json={"filename": "w.zip", "sizeBytes": 0})).status_code == 422
@@ -568,10 +563,53 @@ def test_a_bundle_with_pickled_weights_fails_with_a_message_the_user_can_act_on(
         validate_model.validate_sync(upload_row())
 
 
-def test_the_backends_own_check_runs_on_every_task(temp_dir, bundle_download):
+def pth_bundle(path: Path, payload) -> Path:
+    import io
+
+    import torch
+
+    buf = io.BytesIO()
+    torch.save(payload, buf)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("my-model/config.json", '{"model_type": "bert", "architectures": ["BertModel"]}')
+        z.writestr("my-model/weights.pth", buf.getvalue())
+    return path
+
+
+def test_a_pth_in_a_bundle_is_converted_to_safetensors(temp_dir, bundle_download):
+    import torch
+    from safetensors.torch import load_file
+
+    weights = {"layer.weight": torch.arange(6, dtype=torch.float32).reshape(2, 3)}
+    bundle_download["file"] = pth_bundle(temp_dir / "b.zip", {"state_dict": weights})
+    row = upload_row()
+    validate_model.validate_sync(row)
+
+    path = cm.local_dir_for(row)
+    assert not list(path.rglob("*.pth"))
+    assert torch.equal(load_file(path / "model.safetensors")["layer.weight"], weights["layer.weight"])
+    assert cm.ensure_local(row) == path
+
+
+class Payload:
+    """An arbitrary object: pickling one is how a .pth would smuggle code in."""
+
+
+def test_a_pth_that_holds_more_than_tensors_is_refused(temp_dir, bundle_download):
+    bundle_download["file"] = pth_bundle(temp_dir / "b.zip", {"w": Payload()})
+    with pytest.raises(cm.CustomModelFileError, match="cannot be loaded safely"):
+        validate_model.validate_sync(upload_row())
+
+
+def test_a_pth_beside_safetensors_weights_is_ambiguous(temp_dir, bundle_download):
+    bundle_download["file"] = hf_bundle(temp_dir / "b.zip", extra={"weights.pth": b"x"})
+    with pytest.raises(cm.CustomModelFileError, match="both .pth and .safetensors"):
+        validate_model.validate_sync(upload_row())
+
+
+def test_the_backends_own_check_runs_for_the_models_kind(temp_dir, bundle_download):
     bundle_download["file"] = hf_bundle(temp_dir / "b.zip")  # a BertModel, not a causal LM
     row = upload_row(kind="hf_causal_lm")
-    row.tasks = ["text_generation"]
     with pytest.raises(Exception, match="Not a causal language model"):
         validate_model.validate_sync(row)
 

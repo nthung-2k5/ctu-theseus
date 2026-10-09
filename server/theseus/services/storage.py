@@ -19,7 +19,7 @@ theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for verify scripts
-  custom/{modelId}/bundle.zip                a bring-your-own model upload (or model.safetensors), see custom_models.py
+  custom/{modelId}/bundle.zip                a bring-your-own model upload, see custom_models.py
 """
 
 import hashlib

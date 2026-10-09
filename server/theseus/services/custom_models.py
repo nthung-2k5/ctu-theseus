@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 _COMPLETE_MARKER = ".materialized"
 
 BUNDLE_ZIP = "bundle.zip"
-BUNDLE_SAFETENSORS = "model.safetensors"
 
 # Loading any of these can execute arbitrary code (pickle) or is code outright.
 FORBIDDEN_EXTENSIONS = frozenset(
@@ -162,6 +161,7 @@ def _download_and_extract(row: CustomModel, dest: Path) -> str:
         sha256 = sha256_file(archive)
         if name.endswith(".zip"):
             extract_bundle(archive, dest, max_bytes=get_settings().max_custom_model_bytes)
+            convert_pth_weights(dest)
         else:
             shutil.move(str(archive), str(dest / name))
         return sha256
@@ -202,6 +202,42 @@ def extract_bundle(archive: Path, dest: Path, *, max_bytes: int) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(info) as src, open(target, "wb") as out:
                 shutil.copyfileobj(src, out)
+
+
+def convert_pth_weights(root: Path) -> None:
+    """Turn a `.pth` in an unpacked bundle into `model.safetensors` beside it, so the rest of the pipeline
+    only ever sees safetensors. A .pth is a pickle, so it is read with `weights_only=True` (tensors and plain
+    containers only, no code) and anything else in it is refused. Only a plain state dict (optionally wrapped
+    in `{"state_dict": ...}`) is accepted; the architecture comes from the bundle's config.json.
+    """
+    found = sorted(root.rglob("*.pth"))
+    if not found:
+        return
+    if len(found) > 1:
+        raise CustomModelFileError("The zip has more than one .pth file; include exactly one set of weights")
+    source = found[0]
+    target = source.with_name("model.safetensors")
+    if any(root.rglob("*.safetensors")):
+        raise CustomModelFileError("The zip has both .pth and .safetensors weights; include only one of them")
+
+    import torch  # lazy: only a .pth upload needs it
+    from safetensors.torch import save_file
+
+    try:
+        state = torch.load(source, map_location="cpu", weights_only=True)
+    except Exception:  # noqa: BLE001  anything the safe unpickler refuses is not a plain state dict
+        raise CustomModelFileError(
+            f"'{source.name}' is not a plain PyTorch state dict (it holds more than tensors), "
+            "so it cannot be loaded safely. Convert the weights to .safetensors"
+        ) from None
+    if isinstance(state, dict) and isinstance(state.get("state_dict"), dict):
+        state = state["state_dict"]
+    if not isinstance(state, dict) or not state or not all(isinstance(v, torch.Tensor) for v in state.values()):
+        raise CustomModelFileError(f"'{source.name}' is not a state dict of tensors")
+    # safetensors refuses tensors that share memory and non-contiguous ones; a copy of each is always valid.
+    tensors = {str(k): v.detach().contiguous().clone() for k, v in state.items()}
+    save_file(tensors, str(target), metadata={"format": "pt"})
+    source.unlink()
 
 
 def check_tree(root: Path, *, max_bytes: int) -> int:

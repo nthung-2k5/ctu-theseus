@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # A Hugging Face repo id ("org/name", or a bare legacy name) or a timm name ("resnet50.a1_in1k").
 _SOURCE_REF = re.compile(r"^[A-Za-z0-9][\w.\-]*(/[\w.\-]+)?$")
-_UPLOAD_EXTENSIONS = {".zip": "bundle.zip", ".safetensors": "model.safetensors"}
+_UPLOAD_FILENAME = "bundle.zip"
 _UPLOAD_URL_TTL_SECONDS = 3600
 _VALIDATION_ATTEMPTS = 3
 
@@ -250,14 +250,16 @@ async def upload_url(session: AsyncSession, row: CustomModel, body: UploadUrlBod
     limit = get_settings().max_custom_model_bytes
     if body.size_bytes > limit:
         raise HTTPException(413, f"The file is larger than the {limit // 2**20} MiB limit")
-    ext = next((e for e in _UPLOAD_EXTENSIONS if body.filename.lower().endswith(e)), None)
-    if ext is None:
-        raise HTTPException(400, "Upload a .zip of the model folder, or a single .safetensors file")
+    name = body.filename.lower()
+    if not name.endswith(".zip"):
+        if name.endswith((".pth", ".safetensors")):
+            raise HTTPException(400, "Zip the weights together with the model's config.json and upload the .zip")
+        raise HTTPException(400, "Upload a .zip of the model folder")
 
-    key = custom_models.custom_model_key(row.id, _UPLOAD_EXTENSIONS[ext])
+    key = custom_models.custom_model_key(row.id, _UPLOAD_FILENAME)
     row.storage_key = key
     await session.commit()
-    content_type = "application/zip" if ext == ".zip" else "application/octet-stream"
+    content_type = "application/zip"
     url = await asyncio.to_thread(storage.get_upload_url, C.BUCKET_MODELS, key, _UPLOAD_URL_TTL_SECONDS, content_type)
     return {"url": url, "key": key, "headers": {"Content-Type": content_type}, "max_bytes": limit}
 

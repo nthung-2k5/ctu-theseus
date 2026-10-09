@@ -138,7 +138,7 @@ theseus-models/
   {runId}/model.{onnx|pt2}                   converted export artifacts (shared by formats)
   {runId}/bundles/{exportId}.zip             assembled devkit/app bundles
   {runId}/expected.json                      golden sample for devkit verify scripts
-  custom/{modelId}/bundle.zip                a bring-your-own model upload (or model.safetensors)
+  custom/{modelId}/bundle.zip                a bring-your-own model upload
 ```
 
 Dataset pool uploads are deduplicated per-project by sha256: the same file uploaded twice
