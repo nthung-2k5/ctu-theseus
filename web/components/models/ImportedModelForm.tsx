@@ -1,7 +1,14 @@
 /**
- * "Import a model": what it is (a kind the backend understands), where its weights come from (a Hugging Face
- * Hub id, or an uploaded file) and which tasks it is offered for. The kinds and their tasks come from the
- * backend (GET /api/models/kinds), so this form never hard-codes what a backend supports.
+ * "Import a model", in three steps, full screen like the new-project modal:
+ *
+ *   1. Source   an uploaded .zip of the model folder, or a Hugging Face Hub id
+ *   2. Check    what the model is: read from its config.json (the Hub's, or the one inside the zip, read in the
+ *               browser before anything is uploaded), shown as a result card. The kind is filled in when
+ *               config.json says; when it does not that is only a warning and the person picks it.
+ *   3. Details  name and description, then import
+ *
+ * There is no task to pick: a model is offered for every task its kind serves, which the backend reports
+ * (GET /api/models/kinds) and this form only displays.
  *
  * For an upload the model is created first and the file follows: if the upload then fails the model
  * still exists, waiting for its file, and the table offers "Upload file" to try again.
@@ -9,43 +16,75 @@
 
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
   Modal,
-  MultiSelect,
+  Paper,
   Progress,
-  SegmentedControl,
   Select,
+  SimpleGrid,
   Stack,
+  Stepper,
   Text,
   Textarea,
   TextInput,
+  ThemeIcon,
+  UnstyledButton,
 } from '@mantine/core'
-import { useForm } from '@mantine/form'
 import { notifications } from '@mantine/notifications'
-import { WarningCircleIcon } from '@phosphor-icons/react'
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckCircleIcon,
+  CloudArrowDownIcon,
+  FileZipIcon,
+  WarningCircleIcon,
+} from '@phosphor-icons/react'
 import { apiErrorMessage } from '@public/lib/api/client'
-import type { CustomModelKindOut } from '@public/lib/api/generated/models'
-import { getListCustomModelKindsQueryOptions } from '@public/lib/api/generated/models/models'
-import { IMPORTED_MODELS_KEY, type ModelsApi, taskLabel } from '@public/lib/importedModels'
+import type { CustomModelKindOut, InspectModelResponse } from '@public/lib/api/generated/models'
+import { getListCustomModelKindsQueryOptions, inspectModel } from '@public/lib/api/generated/models/models'
+import { formatBytes, IMPORTED_MODELS_KEY, type ModelsApi, taskLabel } from '@public/lib/importedModels'
+import { readZipConfig } from '@public/lib/modelZip'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ModelFileDropzone } from './ModelFileDropzone'
 import { useModelUpload } from './useModelUpload'
 
+type Source = 'upload' | 'hub'
+
 const kindKey = (k: CustomModelKindOut) => `${k.backend}:${k.id}`
 
-interface FormValues {
-  name: string
-  description: string
-  kind: string
-  sourceKind: 'hub' | 'upload'
-  sourceRef: string
-  tasks: string[]
+const NO_CONFIG_WARNING =
+  'Could not read a config.json from the start of the zip, so the kind of model cannot be told from it. ' +
+  'Choose the kind yourself; the server checks the files after the upload.'
+
+const EMPTY_INSPECTION: InspectModelResponse = {
+  sourceRef: null,
+  revision: null,
+  sizeBytes: null,
+  modelType: null,
+  architectures: [],
+  suggestedBackend: null,
+  suggestedKind: null,
+  errors: [],
+  warnings: [],
 }
 
-const INITIAL: FormValues = { name: '', description: '', kind: '', sourceKind: 'hub', sourceRef: '', tasks: [] }
+/** A default name for the model: the repository's own name, or the zip's file name. */
+function defaultName(source: Source, hubId: string, file: File | null): string {
+  if (source === 'hub') return hubId.trim().split('/').pop() ?? ''
+  return (file?.name ?? '').replace(/\.zip$/i, '')
+}
+
+function selectedStyle(selected: boolean) {
+  return {
+    borderColor: selected ? 'var(--mantine-color-primary-filled)' : undefined,
+    backgroundColor: selected ? 'var(--mantine-color-primary-light)' : undefined,
+    transition: 'all 150ms ease',
+  }
+}
 
 export function ImportedModelForm({
   api,
@@ -61,54 +100,84 @@ export function ImportedModelForm({
   const queryClient = useQueryClient()
   const { data } = useQuery(getListCustomModelKindsQueryOptions())
   const kinds = data?.kinds ?? []
-  const [file, setFile] = useState<File | null>(null)
   const { upload, progress } = useModelUpload(api)
 
-  const form = useForm<FormValues>({
-    initialValues: INITIAL,
-    validate: {
-      name: (v) => (v.trim() ? null : 'Give the imported model a name'),
-      kind: (v) => (v ? null : 'Choose what kind of model this is'),
-      tasks: (v) => (v.length > 0 ? null : 'Choose at least one task'),
-      sourceRef: (v, values) => (values.sourceKind === 'hub' && !v.trim() ? 'Enter the model id' : null),
-    },
-  })
+  const [step, setStep] = useState(0)
+  const [source, setSource] = useState<Source>('upload')
+  const [file, setFile] = useState<File | null>(null)
+  const [hubId, setHubId] = useState('')
+  const [inspection, setInspection] = useState<InspectModelResponse | null>(null)
+  const [kindValue, setKindValue] = useState('')
+  const [changingKind, setChangingKind] = useState(false)
+  // A Hub id that is really a timm model name: nothing on the Hub to inspect, so the check's errors are moot.
+  const [byName, setByName] = useState(false)
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
 
-  const kind = kinds.find((k) => kindKey(k) === form.values.kind)
   const busy = progress !== null
+  const fromSource = kinds.filter((k) => k.sourceKinds.includes(source))
+  const kind = kinds.find((k) => kindKey(k) === kindValue)
+  const detected = inspection?.suggestedBackend ? `${inspection.suggestedBackend}:${inspection.suggestedKind}` : null
+  const byNameKind = fromSource.find((k) => !k.needsFiles && !k.unavailableReason)
+  const blocked = !!inspection?.errors.length && !byName
+  const canContinue = !!kind && !kind.unavailableReason && !blocked
+
+  const reset = () => {
+    setStep(0)
+    setSource('upload')
+    setFile(null)
+    setHubId('')
+    setInspection(null)
+    setKindValue('')
+    setChangingKind(false)
+    setByName(false)
+    setName('')
+    setDescription('')
+  }
 
   const close = () => {
-    form.reset()
-    setFile(null)
+    reset()
     onClose()
   }
 
-  const chooseKind = (value: string | null) => {
-    const next = kinds.find((k) => kindKey(k) === value)
-    form.setValues({
-      kind: value ?? '',
-      // Keep the current source if this kind allows it; otherwise fall back to the first one it does.
-      sourceKind:
-        next && !next.sourceKinds.includes(form.values.sourceKind) ? next.sourceKinds[0] : form.values.sourceKind,
-      // A sensible default: offered for every task the kind supports. The person can narrow it.
-      tasks: next?.tasks ?? [],
-    })
+  const chooseSource = (next: Source) => {
+    if (next === source) return
+    setSource(next)
+    setInspection(null)
+    setKindValue('')
   }
 
+  const check = useMutation({
+    mutationFn: async (): Promise<InspectModelResponse> => {
+      if (source === 'hub') return inspectModel({ sourceRef: hubId.trim() })
+      const config = file ? await readZipConfig(file) : null
+      if (config) return inspectModel({ config })
+      return { ...EMPTY_INSPECTION, warnings: [NO_CONFIG_WARNING] }
+    },
+    onSuccess: (result) => {
+      setInspection(result)
+      setKindValue(result.suggestedBackend ? `${result.suggestedBackend}:${result.suggestedKind}` : '')
+      setChangingKind(false)
+      setByName(false)
+      setStep(1)
+    },
+    onError: (error) =>
+      notifications.show({ title: 'Could not check the model', message: apiErrorMessage(error), color: 'red' }),
+  })
+
   const create = useMutation({
-    mutationFn: async (values: FormValues) => {
+    mutationFn: async () => {
       if (!kind) throw new Error('Choose what kind of model this is')
       const model = await api.create({
-        name: values.name.trim(),
-        description: values.description.trim(),
+        name: name.trim(),
+        description: description.trim(),
         backend: kind.backend,
         kind: kind.id,
-        sourceKind: values.sourceKind,
-        sourceRef: values.sourceKind === 'hub' ? values.sourceRef.trim() : null,
-        tasks: values.tasks,
+        sourceKind: source,
+        sourceRef: source === 'hub' ? hubId.trim() : null,
       })
       let uploadError: unknown = null
-      if (values.sourceKind === 'upload' && file) {
+      if (source === 'upload' && file) {
         try {
           await upload(model.id, file)
         } catch (error) {
@@ -138,134 +207,340 @@ export function ImportedModelForm({
       notifications.show({ title: 'Could not import the model', message: apiErrorMessage(error), color: 'red' }),
   })
 
-  const submit = form.onSubmit((values) => {
-    if (values.sourceKind === 'upload' && !file) {
-      form.setFieldError('sourceKind', 'Choose the file to upload')
-      return
-    }
-    create.mutate(values)
-  })
+  const sourceReady = source === 'upload' ? !!file : !!hubId.trim()
+  const startCheck = () => {
+    if (sourceReady && !check.isPending) check.mutate()
+  }
 
-  const kindOptions = Object.values(
-    kinds.reduce<Record<string, { group: string; items: { value: string; label: string; disabled: boolean }[] }>>(
-      (acc, k) => {
-        const group = acc[k.backend] ?? { group: k.backendLabel, items: [] }
-        group.items.push({ value: kindKey(k), label: k.label, disabled: !!k.unavailableReason })
-        acc[k.backend] = group
-        return acc
-      },
-      {},
-    ),
-  )
+  const toDetails = () => {
+    if (!name.trim()) setName(defaultName(source, hubId, file))
+    setStep(2)
+  }
 
   return (
     <Modal
       opened={opened}
       onClose={busy ? () => undefined : close}
       title={title}
-      centered
-      size="lg"
+      fullScreen
       closeOnClickOutside={!busy}
+      closeOnEscape={!busy}
+      styles={{ title: { fontSize: 'var(--mantine-font-size-xl)', fontWeight: 700 } }}
     >
-      <form onSubmit={submit}>
-        <Stack gap="sm">
-          <TextInput label="Name" placeholder="e.g. Legal-BERT" data-autofocus {...form.getInputProps('name')} />
-          <Textarea
-            label="Description"
-            placeholder="Optional"
-            autosize
-            minRows={1}
-            maxRows={4}
-            {...form.getInputProps('description')}
-          />
+      <div className="mx-auto w-full max-w-3xl pb-8">
+        <Stepper active={step} size="sm" mb="xl" allowNextStepsSelect={false}>
+          <Stepper.Step label="Source" description="Where the model is" />
+          <Stepper.Step label="Check" description="What it is" />
+          <Stepper.Step label="Details" description="Name it" />
+        </Stepper>
 
-          <Select
-            label="Kind of model"
-            placeholder={kinds.length ? 'Choose…' : 'Loading…'}
-            data={kindOptions}
-            value={form.values.kind || null}
-            onChange={chooseKind}
-            allowDeselect={false}
-            error={form.errors.kind}
-          />
-          {kind && (
-            <Stack gap={4}>
-              <Group gap={6}>
-                <Text size="xs" c="dimmed">
-                  {kind.description}
-                </Text>
-                {kind.status === 'experimental' && (
-                  <Badge size="xs" color="orange" variant="light">
-                    experimental
-                  </Badge>
+        {step === 0 && (
+          <Stack gap="lg">
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" role="radiogroup" aria-label="Source">
+              <SourceCard
+                selected={source === 'upload'}
+                icon={<FileZipIcon size={26} />}
+                title="Upload a .zip"
+                description="The model folder zipped: config.json, tokenizer files and .safetensors or .pth weights."
+                onClick={() => chooseSource('upload')}
+              />
+              <SourceCard
+                selected={source === 'hub'}
+                icon={<CloudArrowDownIcon size={26} />}
+                title="Hugging Face Hub"
+                description="A public repository. Its current version is pinned when it is imported."
+                onClick={() => chooseSource('hub')}
+              />
+            </SimpleGrid>
+
+            {source === 'upload' ? (
+              <ModelFileDropzone file={file} onChange={setFile} disabled={check.isPending} />
+            ) : (
+              <TextInput
+                label="Model id"
+                placeholder="org/model-name"
+                autoFocus
+                value={hubId}
+                onChange={(e) => setHubId(e.currentTarget.value)}
+                onKeyDown={(e) => e.key === 'Enter' && startCheck()}
+              />
+            )}
+
+            <Group justify="flex-end">
+              <Button variant="subtle" onClick={close}>
+                Cancel
+              </Button>
+              <Button
+                rightSection={<ArrowRightIcon size={16} />}
+                loading={check.isPending}
+                disabled={!sourceReady}
+                onClick={startCheck}
+              >
+                Check model
+              </Button>
+            </Group>
+          </Stack>
+        )}
+
+        {step === 1 && inspection && (
+          <Stack gap="lg">
+            <Paper withBorder radius="md" p="lg">
+              <Stack gap="md">
+                <Group gap="md" wrap="nowrap" align="flex-start">
+                  <ThemeIcon size={44} radius="md" variant="light" color={blocked ? 'red' : 'primary'}>
+                    {source === 'upload' ? <FileZipIcon size={24} /> : <CloudArrowDownIcon size={24} />}
+                  </ThemeIcon>
+                  <div className="min-w-0 flex-1">
+                    <Text fw={700} truncate>
+                      {source === 'upload' ? file?.name : hubId.trim()}
+                    </Text>
+                    <Text size="sm" c="dimmed">
+                      {describeInspection(inspection, source === 'upload' ? file?.size : undefined)}
+                    </Text>
+                  </div>
+                  {blocked ? (
+                    <Badge color="red" variant="light">
+                      Cannot import
+                    </Badge>
+                  ) : (
+                    <Badge color="teal" variant="light" leftSection={<CheckCircleIcon size={12} />}>
+                      Looks good
+                    </Badge>
+                  )}
+                </Group>
+
+                {!byName &&
+                  inspection.errors.map((message) => (
+                    <Alert key={message} color="red" icon={<WarningCircleIcon size={16} />} p="xs">
+                      {message}
+                    </Alert>
+                  ))}
+                {inspection.warnings.map((message) => (
+                  <Alert key={message} color="orange" icon={<WarningCircleIcon size={16} />} p="xs">
+                    {message}
+                  </Alert>
+                ))}
+                {blocked && source === 'hub' && byNameKind && (
+                  <Text size="sm" c="dimmed">
+                    Is this the name of a model in a library rather than a Hub repository?{' '}
+                    <Anchor
+                      component="button"
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        setByName(true)
+                        setKindValue(kindKey(byNameKind))
+                        setChangingKind(false)
+                      }}
+                    >
+                      Import it as “{byNameKind.label}”
+                    </Anchor>
+                  </Text>
                 )}
-              </Group>
-              {kind.unavailableReason && (
-                <Alert color="orange" icon={<WarningCircleIcon size={16} />} p="xs">
-                  {kind.unavailableReason}
-                </Alert>
-              )}
-            </Stack>
-          )}
+              </Stack>
+            </Paper>
 
-          {kind && kind.sourceKinds.length > 1 && (
-            <SegmentedControl
-              value={form.values.sourceKind}
-              onChange={(v) => form.setFieldValue('sourceKind', v as 'hub' | 'upload')}
-              disabled={busy}
-              data={[
-                { value: 'hub', label: 'Hugging Face Hub' },
-                { value: 'upload', label: 'Upload files' },
-              ]}
-            />
-          )}
+            {(!blocked || byName) && (
+              <Paper withBorder radius="md" p="lg">
+                <Stack gap="sm">
+                  {kind && !changingKind ? (
+                    <Group justify="space-between" wrap="nowrap">
+                      <div>
+                        <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                          {kindValue === detected ? 'Detected' : 'Kind of model'}
+                        </Text>
+                        <Group gap={6}>
+                          <Text fw={700}>{kind.label}</Text>
+                          {kind.status === 'experimental' && (
+                            <Badge size="xs" color="orange" variant="light">
+                              experimental
+                            </Badge>
+                          )}
+                        </Group>
+                      </div>
+                      {!byName && (
+                        <Anchor component="button" type="button" size="sm" onClick={() => setChangingKind(true)}>
+                          Change
+                        </Anchor>
+                      )}
+                    </Group>
+                  ) : (
+                    <Select
+                      label="Kind of model"
+                      placeholder={kinds.length ? 'Choose…' : 'Loading…'}
+                      data={fromSource.map((k) => ({
+                        value: kindKey(k),
+                        label: k.label,
+                        disabled: !!k.unavailableReason,
+                      }))}
+                      value={kindValue || null}
+                      onChange={(value) => {
+                        setKindValue(value ?? '')
+                        if (value) setChangingKind(false)
+                      }}
+                      allowDeselect={false}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                  )}
 
-          {kind && form.values.sourceKind === 'hub' && (
-            <TextInput
-              label="Model id"
-              description="A public repository on the Hugging Face Hub. Its current version is pinned when it is checked."
-              placeholder="org/model-name"
-              {...form.getInputProps('sourceRef')}
-            />
-          )}
-          {kind && form.values.sourceKind === 'upload' && (
-            <Stack gap={4}>
-              <ModelFileDropzone file={file} onChange={setFile} disabled={busy} />
-              {form.errors.sourceKind && (
-                <Text size="xs" c="red">
-                  {form.errors.sourceKind}
+                  {kind && (
+                    <>
+                      <Text size="sm" c="dimmed">
+                        {kind.description}
+                      </Text>
+                      {kind.unavailableReason && (
+                        <Alert color="orange" icon={<WarningCircleIcon size={16} />} p="xs">
+                          {kind.unavailableReason}
+                        </Alert>
+                      )}
+                      <div>
+                        <Text size="xs" c="dimmed" mb={4}>
+                          Available for these tasks
+                        </Text>
+                        <Group gap={6}>
+                          {kind.tasks.map((t) => (
+                            <Badge key={t} variant="outline" color="gray">
+                              {taskLabel(t)}
+                            </Badge>
+                          ))}
+                        </Group>
+                      </div>
+                    </>
+                  )}
+                </Stack>
+              </Paper>
+            )}
+
+            <Group justify="space-between">
+              <Button variant="subtle" leftSection={<ArrowLeftIcon size={16} />} onClick={() => setStep(0)}>
+                Back
+              </Button>
+              <Button rightSection={<ArrowRightIcon size={16} />} disabled={!canContinue} onClick={toDetails}>
+                Next
+              </Button>
+            </Group>
+          </Stack>
+        )}
+
+        {step === 2 && (
+          <Stack gap="lg">
+            <Paper withBorder radius="md" p="lg">
+              <Stack gap="md">
+                <TextInput
+                  label="Name"
+                  placeholder="e.g. Legal-BERT"
+                  data-autofocus
+                  value={name}
+                  onChange={(e) => setName(e.currentTarget.value)}
+                  error={name.trim() ? null : 'Give the imported model a name'}
+                />
+                <Textarea
+                  label="Description"
+                  placeholder="Optional"
+                  autosize
+                  minRows={2}
+                  maxRows={6}
+                  value={description}
+                  onChange={(e) => setDescription(e.currentTarget.value)}
+                />
+              </Stack>
+            </Paper>
+
+            <Paper withBorder radius="md" p="md">
+              <Stack gap={4}>
+                <SummaryRow label="Source" value={source === 'upload' ? (file?.name ?? '') : hubId.trim()} />
+                <SummaryRow label="Kind" value={kind?.label ?? ''} />
+                <SummaryRow label="Available for" value={(kind?.tasks ?? []).map(taskLabel).join(', ')} />
+              </Stack>
+            </Paper>
+
+            {progress !== null && (
+              <Stack gap={2}>
+                <Progress value={progress * 100} animated />
+                <Text size="xs" c="dimmed">
+                  Uploading… {Math.round(progress * 100)}%
                 </Text>
-              )}
-            </Stack>
-          )}
+              </Stack>
+            )}
 
-          <MultiSelect
-            label="Available for tasks"
-            description="Users can pick this model in training runs for these tasks only."
-            data={(kind?.tasks ?? []).map((t) => ({ value: t, label: taskLabel(t) }))}
-            disabled={!kind}
-            {...form.getInputProps('tasks')}
-          />
-
-          {progress !== null && (
-            <Stack gap={2}>
-              <Progress value={progress * 100} animated />
-              <Text size="xs" c="dimmed">
-                Uploading… {Math.round(progress * 100)}%
-              </Text>
-            </Stack>
-          )}
-
-          <Group justify="flex-end">
-            <Button variant="subtle" onClick={close} disabled={busy}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={create.isPending} disabled={!!kind?.unavailableReason}>
-              {form.values.sourceKind === 'upload' ? 'Import and upload' : 'Import model'}
-            </Button>
-          </Group>
-        </Stack>
-      </form>
+            <Group justify="space-between">
+              <Button
+                variant="subtle"
+                leftSection={<ArrowLeftIcon size={16} />}
+                onClick={() => setStep(1)}
+                disabled={busy}
+              >
+                Back
+              </Button>
+              <Button
+                loading={create.isPending}
+                disabled={!name.trim() || !canContinue}
+                onClick={() => create.mutate()}
+              >
+                {source === 'upload' ? 'Import and upload' : 'Import model'}
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </div>
     </Modal>
+  )
+}
+
+function SourceCard({
+  selected,
+  icon,
+  title,
+  description,
+  onClick,
+}: {
+  selected: boolean
+  icon: React.ReactNode
+  title: string
+  description: string
+  onClick: () => void
+}) {
+  return (
+    <UnstyledButton role="radio" aria-checked={selected} onClick={onClick}>
+      <Paper withBorder p="md" radius="md" h="100%" style={selectedStyle(selected)}>
+        <Group gap="md" wrap="nowrap" align="flex-start">
+          <ThemeIcon size={44} radius="md" variant={selected ? 'filled' : 'light'}>
+            {icon}
+          </ThemeIcon>
+          <div>
+            <Text fw={700}>{title}</Text>
+            <Text size="sm" c="dimmed">
+              {description}
+            </Text>
+          </div>
+        </Group>
+      </Paper>
+    </UnstyledButton>
+  )
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Group gap="md" wrap="nowrap" align="flex-start">
+      <Text size="sm" c="dimmed" w={110} style={{ flexShrink: 0 }}>
+        {label}
+      </Text>
+      <Text size="sm">{value}</Text>
+    </Group>
+  )
+}
+
+/** The facts the check found, on one line: family, architecture, size, pinned revision. */
+function describeInspection(result: InspectModelResponse, fileBytes?: number): string {
+  const size = result.sizeBytes ?? fileBytes
+  return (
+    [
+      result.modelType,
+      result.architectures.join(', '),
+      size != null && formatBytes(size),
+      result.revision && `revision ${result.revision.slice(0, 7)}`,
+    ]
+      .filter(Boolean)
+      .join(' · ') || 'No details in config.json'
   )
 }
