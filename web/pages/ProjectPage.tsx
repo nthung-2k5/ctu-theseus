@@ -1,54 +1,51 @@
-import { Alert, Badge, Button, Group, Paper, SimpleGrid, Stack, Table, Text } from '@mantine/core'
+import { ActionIcon, Alert, Badge, Button, Group, Menu, Paper, SimpleGrid, Stack, Text } from '@mantine/core'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
 import {
   ArchiveIcon,
-  ArrowRightIcon,
   BrainIcon,
   CheckCircleIcon,
-  CircleIcon,
-  type DatabaseIcon,
-  ExportIcon,
+  DatabaseIcon,
+  DotsThreeIcon,
   PencilSimpleIcon,
-  StackIcon,
-  TagIcon,
+  PlayIcon,
   TrashIcon,
-  UploadSimpleIcon,
+  TrophyIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react'
 import { STATUS_COLORS } from '@public/components/training/constants'
 import { UpdateProjectModal } from '@public/components/UpdateProjectModal'
-import { confirmDelete, PageHeader, SectionLabel, StatCard, StatusBadge } from '@public/components/ui'
+import { confirmDelete, LinkButton, PageHeader, SectionLabel, StatusBadge } from '@public/components/ui'
 import type { DatasetModality } from '@public/lib/api/enums'
 import { deleteProject as deleteProjectRequest } from '@public/lib/api/generated/projects/projects'
 import { formatDate } from '@public/lib/format'
 import { MODALITY_META } from '@public/lib/modality'
 import { invalidateProjectList, projectDetailQueryOptions, useTrainingRuns } from '@public/lib/queries'
+import { bestRun, scoreOf } from '@public/lib/runScore'
 import { getTaskDescriptor, isClassificationTask } from '@public/lib/tasks'
+import type { TrainingRunSummary } from '@public/store/types'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
+import type { ElementType, ReactNode } from 'react'
 
 const routeApi = getRouteApi('/_app/project/$projectId/')
-
-type StepTarget =
-  | '/project/$projectId/upload'
-  | '/project/$projectId/classes'
-  | '/project/$projectId/dataset'
-  | '/project/$projectId/snapshots'
-  | '/project/$projectId/training'
-  | '/project/$projectId/export'
 
 interface Step {
   id: string
   label: string
-  desc: string
-  icon: typeof DatabaseIcon
-  to: StepTarget
-  status: string
+  icon: ElementType
+  /** The one number worth reading at a glance. */
+  headline: string
+  detail: string
   done: boolean
-  disabled: boolean
-  action: string
+  /** Can't be started yet: an earlier step has to finish first. */
+  blocked: boolean
+  /** What the disabled button says while blocked. */
+  blockedLabel: string
+  cta: (variant: 'filled' | 'light') => ReactNode
 }
+
+const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
 
 export function ProjectPage() {
   const { projectId } = routeApi.useParams()
@@ -71,90 +68,125 @@ export function ProjectPage() {
   const classes = dataset?.classes ?? []
   const snapshots = dataset?.versions ?? []
   const readySnapshots = snapshots.filter((v) => v.status === 'ready').length
-  const runCount = project.runCount ?? runs.length
-  const succeededRuns = runs.filter((r) => r.status === 'succeeded').length
   const hasReadySnapshot = readySnapshots > 0
+  const runCount = project.runCount ?? runs.length
+  const succeeded = runs.filter((r) => r.status === 'succeeded')
+  const activeRuns = runs.filter((r) => r.status === 'running' || r.status === 'queued').length
+  const needsClasses = classification && classes.length < 2
+
+  const best = bestRun(succeeded)
+  const latest = runs[0] ?? null // the list is newest first
+  // The model to try: the best-scoring one, else the most recent that finished.
+  const tryRun = best ?? succeeded[0] ?? null
 
   const steps: Step[] = [
     {
-      id: 'upload',
-      label: 'Upload',
-      desc: 'Add images, audio, text or CSV rows to the pool.',
-      icon: UploadSimpleIcon,
-      to: '/project/$projectId/upload',
-      status: `${poolItems} items in pool`,
-      done: poolItems > 0,
-      disabled: false,
-      action: 'Upload items',
+      id: 'data',
+      label: 'Data',
+      icon: DatabaseIcon,
+      headline: plural(poolItems, 'item'),
+      detail: classification ? `${classes.length} ${classes.length === 1 ? 'class' : 'classes'}` : 'In the draft',
+      done: poolItems > 0 && !needsClasses,
+      blocked: false,
+      blockedLabel: 'Add data',
+      cta: (variant) =>
+        poolItems === 0 ? (
+          <LinkButton
+            to="/project/$projectId/data"
+            params={{ projectId }}
+            search={{ page: 1, perPage: 20, add: true }}
+            variant={variant}
+          >
+            Add data
+          </LinkButton>
+        ) : needsClasses ? (
+          <LinkButton
+            to="/project/$projectId/data"
+            params={{ projectId }}
+            search={{ page: 1, perPage: 20, tab: 'classes' }}
+            variant={variant}
+          >
+            Define classes
+          </LinkButton>
+        ) : (
+          <LinkButton
+            to="/project/$projectId/data"
+            params={{ projectId }}
+            search={{ page: 1, perPage: 20 }}
+            variant={variant}
+          >
+            Open data
+          </LinkButton>
+        ),
     },
-    ...(classification
-      ? [
-          {
-            id: 'classes',
-            label: 'Classes',
-            desc: 'Define the label classes, then assign them on the Dataset page.',
-            icon: TagIcon,
-            to: '/project/$projectId/classes' as const,
-            status: `${classes.length} classes`,
-            done: classes.length > 0,
-            disabled: false,
-            action: 'Configure classes',
-          },
-        ]
-      : []),
     {
-      id: 'dataset',
-      label: 'Dataset',
-      desc: 'Browse the draft, assign splits and labels.',
-      icon: StackIcon,
-      to: '/project/$projectId/dataset',
-      status: poolItems > 0 ? `${poolItems} items` : 'Empty draft',
-      done: poolItems > 0,
-      disabled: false,
-      action: 'Open dataset',
-    },
-    {
-      id: 'snapshots',
+      id: 'snapshot',
       label: 'Snapshot',
-      desc: 'Freeze the draft, optionally preprocessed and/or augmented, as an immutable version.',
       icon: ArchiveIcon,
-      to: '/project/$projectId/snapshots',
-      status: hasReadySnapshot ? `${readySnapshots} ready` : 'None yet',
+      headline: `${readySnapshots.toLocaleString()} ready`,
+      detail: snapshots.length > readySnapshots ? `${snapshots.length} in total` : 'Freeze the draft as a version',
       done: hasReadySnapshot,
-      disabled: poolItems === 0,
-      action: 'Open snapshots',
+      blocked: poolItems === 0,
+      blockedLabel: 'Create snapshot',
+      cta: (variant) =>
+        hasReadySnapshot ? (
+          <LinkButton to="/project/$projectId/snapshots" params={{ projectId }} variant={variant}>
+            Open snapshots
+          </LinkButton>
+        ) : (
+          <LinkButton to="/project/$projectId/snapshots/new" params={{ projectId }} variant={variant}>
+            Create snapshot
+          </LinkButton>
+        ),
     },
     {
-      id: 'training',
+      id: 'train',
       label: 'Train',
-      desc: 'Launch runs or sweeps and watch metrics stream live.',
       icon: BrainIcon,
-      to: '/project/$projectId/training',
-      status:
-        runCount > 0
-          ? `${runCount} run${runCount === 1 ? '' : 's'}`
-          : hasReadySnapshot
-            ? 'Ready to train'
-            : 'Needs a snapshot',
-      done: runCount > 0,
-      disabled: !hasReadySnapshot,
-      action: 'Open training',
+      headline: plural(runCount, 'run'),
+      detail: activeRuns > 0 ? `${activeRuns} in progress` : 'Runs and sweeps',
+      done: succeeded.length > 0,
+      blocked: !hasReadySnapshot,
+      blockedLabel: 'New run',
+      cta: (variant) =>
+        runCount > 0 ? (
+          <LinkButton to="/project/$projectId/training" params={{ projectId }} variant={variant}>
+            Open training
+          </LinkButton>
+        ) : (
+          <LinkButton
+            to="/project/$projectId/training/new"
+            params={{ projectId }}
+            search={{ mode: 'run' }}
+            variant={variant}
+          >
+            New run
+          </LinkButton>
+        ),
     },
     {
-      id: 'export',
-      label: 'Test & export',
-      desc: 'Try a fine-tuned model, then package it.',
-      icon: ExportIcon,
-      to: '/project/$projectId/export',
-      status:
-        succeededRuns > 0
-          ? `${succeededRuns} fine-tuned model${succeededRuns === 1 ? '' : 's'} ready`
-          : 'Needs a finished run',
-      done: succeededRuns > 0,
-      disabled: succeededRuns === 0,
-      action: 'Open export',
+      id: 'use',
+      label: 'Try & export',
+      icon: PlayIcon,
+      headline: succeeded.length > 0 ? plural(succeeded.length, 'model') : 'No model yet',
+      detail: succeeded.length > 0 ? 'Ready to test and package' : 'Needs a finished run',
+      // Using a model is never "finished"; this step is the end of the road, not a box to tick.
+      done: false,
+      blocked: !tryRun,
+      blockedLabel: 'Try a model',
+      cta: (variant) =>
+        tryRun ? (
+          <LinkButton
+            to="/project/$projectId/training/$runId/try"
+            params={{ projectId, runId: tryRun.id }}
+            variant={variant}
+          >
+            Try {best ? 'best' : 'latest'} model
+          </LinkButton>
+        ) : null,
     },
   ]
+  const nextId = steps.find((step) => !step.done && !step.blocked)?.id
 
   const handleEdit = () =>
     modals.open({
@@ -207,159 +239,192 @@ export function ProjectPage() {
           </>
         }
         actions={
-          <Button variant="default" leftSection={<PencilSimpleIcon size={14} />} onClick={handleEdit}>
-            Edit details
-          </Button>
+          <>
+            <Button variant="default" leftSection={<PencilSimpleIcon size={14} />} onClick={handleEdit}>
+              Edit details
+            </Button>
+            <Menu position="bottom-end" width={200}>
+              <Menu.Target>
+                <ActionIcon
+                  variant="default"
+                  size="lg"
+                  aria-label="More project actions"
+                  loading={deleteProject.isPending}
+                >
+                  <DotsThreeIcon size={16} weight="bold" />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item color="red" leftSection={<TrashIcon size={14} />} onClick={handleDelete}>
+                  Delete project…
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </>
         }
       />
 
-      {classification && classes.length < 2 && (
+      {needsClasses && (
         <Alert color="yellow" p="xs" icon={<WarningCircleIcon size={16} />} title="Not enough classes">
           A classification project needs at least two classes before it can be trained on.
         </Alert>
       )}
 
-      <SimpleGrid cols={{ base: 2, md: 4 }} spacing="sm">
-        <StatCard label="Pool items" value={poolItems} />
-        <StatCard label={classification ? 'Classes' : 'Target'} value={classification ? classes.length : 'Single'} />
-        <StatCard
-          label="Snapshots"
-          value={readySnapshots}
-          hint={snapshots.length > readySnapshots ? `${snapshots.length} total` : undefined}
-        />
-        <StatCard label="Runs" value={runCount} hint={succeededRuns > 0 ? `${succeededRuns} succeeded` : undefined} />
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
+        {steps.map((step, index) => {
+          const isNext = step.id === nextId
+          const StepIcon = step.icon
+          return (
+            <Paper
+              key={step.id}
+              p="md"
+              style={isNext ? { borderColor: 'var(--mantine-primary-color-filled)', borderWidth: 2 } : undefined}
+              aria-current={isNext ? 'step' : undefined}
+            >
+              <Stack gap="xs" h="100%" justify="space-between">
+                <Stack gap={6}>
+                  <Group justify="space-between" wrap="nowrap">
+                    <Group gap={6} wrap="nowrap">
+                      <StepIcon size={16} color="var(--mantine-color-dimmed)" />
+                      <SectionLabel>
+                        {index + 1} · {step.label}
+                      </SectionLabel>
+                    </Group>
+                    {step.done ? (
+                      <CheckCircleIcon size={18} weight="fill" color="var(--mantine-color-teal-5)" aria-label="Done" />
+                    ) : isNext ? (
+                      <Badge>Next</Badge>
+                    ) : null}
+                  </Group>
+                  <Text fw={600} size="xl" className="tnum" c={step.blocked ? 'dimmed' : undefined}>
+                    {step.headline}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {step.detail}
+                  </Text>
+                </Stack>
+                {step.blocked ? (
+                  <Button variant="light" disabled>
+                    {step.blockedLabel}
+                  </Button>
+                ) : (
+                  step.cta(isNext ? 'filled' : 'light')
+                )}
+              </Stack>
+            </Paper>
+          )
+        })}
       </SimpleGrid>
 
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="sm">
-        <Paper p="md">
-          <Stack gap="xs">
-            <Group justify="space-between">
-              <SectionLabel>Get going</SectionLabel>
-              <Text size="xs" c="dimmed" className="tnum">
-                {steps.filter((s) => s.done).length} / {steps.length} stages ready
-              </Text>
-            </Group>
-            {steps.map((step) => {
-              const StepIcon = step.icon
-              return (
-                <Group key={step.id} justify="space-between" wrap="nowrap" gap="sm">
-                  <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                    {step.done ? (
-                      <CheckCircleIcon size={18} weight="fill" color="var(--mantine-color-teal-5)" />
-                    ) : (
-                      <CircleIcon size={18} color="var(--mantine-color-dimmed)" />
-                    )}
-                    <div style={{ minWidth: 0 }}>
-                      <Group gap={6} wrap="nowrap">
-                        <StepIcon size={14} />
-                        <Text size="sm" fw={500}>
-                          {step.label}
-                        </Text>
-                        <Badge color={step.done ? 'teal' : 'gray'}>{step.status}</Badge>
-                      </Group>
-                      <Text size="xs" c="dimmed" truncate>
-                        {step.desc}
-                      </Text>
-                    </div>
-                  </Group>
-                  <Button
-                    variant="light"
-                    size="compact-sm"
-                    rightSection={<ArrowRightIcon size={12} />}
-                    disabled={step.disabled}
-                    onClick={() => navigate({ to: step.to, params: { projectId } })}
-                  >
-                    {step.action}
-                  </Button>
-                </Group>
-              )
-            })}
-          </Stack>
-        </Paper>
-
-        <Paper p="md">
-          <Stack gap="xs">
-            <Group justify="space-between">
-              <SectionLabel>Recent training runs</SectionLabel>
-              {runs.length > 0 && (
-                <Button
-                  variant="subtle"
-                  size="compact-xs"
-                  rightSection={<ArrowRightIcon size={12} />}
-                  onClick={() => navigate({ to: '/project/$projectId/training', params: { projectId } })}
+        <RunCard
+          projectId={projectId}
+          title="Best model"
+          icon={<TrophyIcon size={14} weight="fill" color="var(--mantine-color-yellow-6)" />}
+          run={best}
+          empty="No evaluated model yet. Finish a run and its score shows up here."
+          actions={
+            best && (
+              <>
+                <LinkButton
+                  to="/project/$projectId/training/$runId/try"
+                  params={{ projectId, runId: best.id }}
+                  variant="light"
                 >
-                  View all ({runs.length})
-                </Button>
-              )}
-            </Group>
-            {runs.length === 0 ? (
-              <Text size="sm" c="dimmed" ta="center" py="md">
-                No training runs yet. Build a snapshot, then launch a run.
-              </Text>
-            ) : (
-              <Table highlightOnHover verticalSpacing={6}>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Run</Table.Th>
-                    <Table.Th>Status</Table.Th>
-                    <Table.Th>Started</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {runs.slice(0, 5).map((run) => (
-                    <Table.Tr
-                      key={run.id}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() =>
-                        navigate({
-                          to: '/project/$projectId/training/$runId',
-                          params: { projectId, runId: run.id },
-                        })
-                      }
-                    >
-                      <Table.Td>
-                        <Text size="sm" fw={500} truncate>
-                          {run.name}
-                        </Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <StatusBadge value={run.status} colorMap={STATUS_COLORS} />
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="xs" c="dimmed" className="tnum">
-                          {formatDate(run.createdAt)}
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            )}
-          </Stack>
-        </Paper>
+                  Try
+                </LinkButton>
+                <LinkButton
+                  to="/project/$projectId/training/$runId/export"
+                  params={{ projectId, runId: best.id }}
+                  variant="light"
+                >
+                  Export
+                </LinkButton>
+              </>
+            )
+          }
+        />
+        <RunCard
+          projectId={projectId}
+          title="Latest run"
+          icon={<BrainIcon size={14} />}
+          run={latest}
+          empty="No training runs yet. Build a snapshot, then launch a run."
+          actions={
+            runs.length > 0 && (
+              <LinkButton to="/project/$projectId/training" params={{ projectId }} variant="subtle">
+                All runs ({runs.length})
+              </LinkButton>
+            )
+          }
+        />
       </SimpleGrid>
-
-      <Paper p="md" style={{ borderColor: 'var(--mantine-color-red-8)' }}>
-        <Group justify="space-between" wrap="nowrap">
-          <div>
-            <Text size="sm" fw={500}>
-              Delete this project
-            </Text>
-            <Text size="xs" c="dimmed">
-              Permanently removes its dataset, snapshots, items, runs and exports.
-            </Text>
-          </div>
-          <Button
-            color="red"
-            variant="light"
-            leftSection={<TrashIcon size={14} />}
-            loading={deleteProject.isPending}
-            onClick={handleDelete}
-          >
-            Delete project
-          </Button>
-        </Group>
-      </Paper>
     </div>
+  )
+}
+
+function RunCard({
+  projectId,
+  title,
+  icon,
+  run,
+  empty,
+  actions,
+}: {
+  projectId: string
+  title: string
+  icon: ReactNode
+  run: TrainingRunSummary | null
+  empty: string
+  actions: ReactNode
+}) {
+  const score = run ? scoreOf(run) : null
+  return (
+    <Paper p="md">
+      <Stack gap="xs">
+        <Group gap={6}>
+          {icon}
+          <SectionLabel>{title}</SectionLabel>
+        </Group>
+        {run ? (
+          <>
+            <Group justify="space-between" wrap="nowrap" align="flex-start">
+              <div style={{ minWidth: 0 }}>
+                <LinkButton
+                  to="/project/$projectId/training/$runId"
+                  params={{ projectId, runId: run.id }}
+                  variant="subtle"
+                  size="compact-md"
+                  px={0}
+                >
+                  {run.name}
+                </LinkButton>
+                <Text size="xs" c="dimmed" className="tnum">
+                  {run.id.slice(0, 8)} · {formatDate(run.createdAt)}
+                </Text>
+              </div>
+              <Group gap="sm" wrap="nowrap">
+                {score && (
+                  <div style={{ textAlign: 'right' }}>
+                    <Text fw={600} size="lg" className="tnum">
+                      {score.value.toFixed(3)}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {score.label}
+                    </Text>
+                  </div>
+                )}
+                <StatusBadge value={run.status} colorMap={STATUS_COLORS} />
+              </Group>
+            </Group>
+            <Group gap="xs">{actions}</Group>
+          </>
+        ) : (
+          <Text size="sm" c="dimmed" py="sm">
+            {empty}
+          </Text>
+        )}
+      </Stack>
+    </Paper>
   )
 }
