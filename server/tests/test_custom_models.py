@@ -629,10 +629,12 @@ def hub_row(**kw) -> CustomModel:
 
 def fake_hub(monkeypatch, *, sha="c0ffee", size=100):
     monkeypatch.setattr(
-        cm, "hub_pin", lambda repo_id: cm.HubPin(revision=sha, size_bytes=size, has_safetensors=True, has_config=True)
+        cm,
+        "hub_pin",
+        lambda repo_id, token=None: cm.HubPin(revision=sha, size_bytes=size, has_safetensors=True, has_config=True),
     )
 
-    def fetch(row, dest: Path):
+    def fetch(row, dest: Path, token=None):
         assert row.revision == sha  # pinned before anything is downloaded
         (dest / "config.json").write_text('{"model_type": "bert", "architectures": ["BertModel"]}')
         (dest / "model.safetensors").write_bytes(b"\0" * 8)
@@ -762,7 +764,7 @@ async def test_a_run_on_a_custom_model_gets_its_files_back_before_loading(db, ma
         await s.commit()
 
     ensured: list[uuid.UUID] = []
-    monkeypatch.setattr(cm, "ensure_local", lambda row: ensured.append(row.id))
+    monkeypatch.setattr(cm, "ensure_local", lambda row, token=None: ensured.append(row.id))
     await run_models.ensure_run_custom_model(without)  # a built-in run: nothing to do
     assert ensured == []
     await run_models.ensure_run_custom_model(str(with_model))  # accepts the string form the cache uses
@@ -830,8 +832,8 @@ async def test_a_string_that_is_not_a_run_id_has_no_custom_model_and_touches_not
 
 def fake_inspection(monkeypatch, config, *, safetensors=True, size=100):
     pin = cm.HubPin(revision="c0ffee", size_bytes=size, has_safetensors=safetensors, has_config=config is not None)
-    monkeypatch.setattr(cm, "hub_pin", lambda repo_id: pin)
-    monkeypatch.setattr(cm, "fetch_hub_config", lambda repo_id, revision: config)
+    monkeypatch.setattr(cm, "hub_pin", lambda repo_id, token=None: pin)
+    monkeypatch.setattr(cm, "fetch_hub_config", lambda repo_id, revision, token=None: config)
 
 
 async def inspect(user, ref="org/bert"):
@@ -865,7 +867,7 @@ async def test_inspecting_reports_what_would_make_the_import_fail(new_user, monk
     out = await inspect(await new_user())
     assert any("no .safetensors" in e for e in out["errors"]) and any("auto_map" in e for e in out["errors"])
 
-    def missing(repo_id):
+    def missing(repo_id, token=None):
         raise cm.CustomModelFileError(f"'{repo_id}' was not found on the Hugging Face Hub")
 
     monkeypatch.setattr(cm, "hub_pin", missing)

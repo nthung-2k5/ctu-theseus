@@ -22,6 +22,7 @@ from theseus.schemas.custom_models import (
     UploadUrlResponse,
 )
 from theseus.services import custom_model_ops as ops
+from theseus.services import integrations
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -33,10 +34,12 @@ async def list_custom_model_kinds(_: UserId) -> CustomModelKindListResponse:
 
 
 @router.post("/inspect", response_model=InspectModelResponse)
-async def inspect_model(body: InspectModelBody, _: UserId) -> InspectModelResponse:
+async def inspect_model(body: InspectModelBody, user_id: UserId, session: SessionDep) -> InspectModelResponse:
     """Check a model before importing it, creating nothing: a Hugging Face repository by id (pin, size,
-    weights, config.json) or a config.json read out of an uploaded zip. Also used by the admin form."""
-    return await ops.inspect_model(body)
+    weights, config.json) or a config.json read out of an uploaded zip. A private or gated repository is
+    looked up with the caller's own saved Hugging Face token, unless the model is being made for everyone."""
+    token = None if body.shared else await integrations.huggingface_token(session, user_id)
+    return await ops.inspect_model(body, token=token)
 
 
 @router.get("", response_model=CustomModelListResponse)

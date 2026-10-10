@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     s3_secret_key: str = Field(default="ctu-theseus-secret", validation_alias="S3_SECRET_KEY")
 
     jwt_secret: str = Field(default=_DEV_JWT_SECRET, validation_alias="JWT_SECRET")
+    # Encrypts third-party tokens users save (the Hugging Face integration) before they reach the database: a
+    # Fernet key (`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`).
+    # Unset, a key is derived from JWT_SECRET, so existing deployments keep working; set it to rotate the
+    # two independently. Changing either makes saved tokens unreadable, and users simply reconnect.
+    secrets_key: str | None = Field(default=None, validation_alias="THESEUS_SECRETS_KEY")
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_seconds: int = 30 * 24 * 3600
     # None means Secure cookies in production only, so plain-http local dev still works.

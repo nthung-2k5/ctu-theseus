@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 from theseus.db.base import get_sessionmaker
 from theseus.db.models import CustomModel, TrainingRun
-from theseus.services import custom_models
+from theseus.services import custom_models, integrations
 
 
 async def ensure_run_custom_model(run_id: uuid.UUID | str) -> None:
@@ -35,4 +35,6 @@ async def ensure_run_custom_model(run_id: uuid.UUID | str) -> None:
             )
         ).scalar_one_or_none()
     if row is not None:
-        await asyncio.to_thread(custom_models.ensure_local, row)
+        # A private Hub model is fetched again with its owner's token (the files are temporary).
+        token = await integrations.huggingface_token_for(row.owner_user_id) if row.source_kind == "hub" else None
+        await asyncio.to_thread(custom_models.ensure_local, row, token)

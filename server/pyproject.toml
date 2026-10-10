@@ -22,6 +22,8 @@ dependencies = [
   # Auth
   'pyjwt',
   'argon2-cffi',
+  # Encrypting stored third-party tokens (the Hugging Face integration)
+  'cryptography>=50.0.2',
 
   # Snapshots / config / ids
   'pyarrow',

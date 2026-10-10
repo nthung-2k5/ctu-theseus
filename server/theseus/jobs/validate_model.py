@@ -31,7 +31,7 @@ from theseus.db.base import get_sessionmaker
 from theseus.db.models import CustomModel
 from theseus.jobs import queue
 from theseus.jobs.executors import run_in_executor, validate_executor
-from theseus.services import custom_models
+from theseus.services import custom_models, integrations
 from theseus.services.custom_models import CustomModelFileError
 from theseus.services.model_catalog import kind_and_tasks
 from theseus.services.task_registry import get_task_descriptor
@@ -45,6 +45,8 @@ class Validated:
     revision: str | None = None
     sha256: str | None = None
     size_bytes: int | None = None
+    # A Hub model that needs its owner's token. Lives in the row's `spec`, not a column.
+    private: bool | None = None
 
 
 def _kind_for(row: CustomModel) -> tuple[CustomModelKind, list[str]]:
@@ -54,9 +56,10 @@ def _kind_for(row: CustomModel) -> tuple[CustomModelKind, list[str]]:
     return kind, tasks
 
 
-def validate_sync(row: CustomModel) -> Validated:
+def validate_sync(row: CustomModel, token: str | None = None) -> Validated:
     """Everything that touches the network or the disk. Runs in a worker thread; mutates the detached
-    `row` only to carry the pin forward, and returns what to persist."""
+    `row` only to carry the pin forward, and returns what to persist. `token` is the owner's Hugging Face
+    token, for a private or gated Hub model."""
     limit = get_settings().max_custom_model_bytes
     backend = get_backend(row.backend)
     kind, tasks = _kind_for(row)
@@ -67,13 +70,14 @@ def validate_sync(row: CustomModel) -> Validated:
     if not kind.materialize:
         pass  # the framework fetches its own weights by name; nothing to pin or check on disk
     elif row.source_kind == "hub":
-        pin = custom_models.hub_pin(row.source_ref)
+        pin = custom_models.hub_pin(row.source_ref, token)
         if pin.size_bytes > limit:
             raise CustomModelFileError(
                 f"The model is {pin.size_bytes // 2**20} MiB, over the {limit // 2**20} MiB limit"
             )
         row.revision = result.revision = pin.revision
-        path = custom_models.ensure_local(row)
+        result.private = pin.private
+        path = custom_models.ensure_local(row, token)
         result.size_bytes = custom_models.check_tree(path, max_bytes=limit)
     else:
         imported = custom_models.import_upload(row)
@@ -108,20 +112,23 @@ async def run_validate(model_id: uuid.UUID) -> None:
             return
         s.expunge(row)  # detached: the worker thread reads and updates it without a session
 
+    # Only the model's own owner's token is ever used: a global model has no owner, so it never carries one.
+    token = await integrations.huggingface_token_for(row.owner_user_id) if row.source_kind == "hub" else None
     try:
-        result = await run_in_executor(validate_executor, validate_sync, row)
+        result = await run_in_executor(validate_executor, validate_sync, row, token)
     except (CustomModelFileError, ConfigError) as e:
         logger.info("Custom model %s failed validation: %s", model_id, e)
-        await _finish(model_id, status="failed", last_error=str(e)[:2000])
+        message = str(e)
+        if row.source_kind == "hub" and row.owner_user_id is None and token is None:
+            message += " (Models shared with everyone can only come from public repositories.)"
+        await _finish(model_id, status="failed", last_error=message[:2000])
         _forget(row)
         return
 
-    await _finish(
-        model_id,
-        status="ready",
-        last_error=None,
-        **{k: v for k, v in vars(result).items() if v is not None},
-    )
+    values: dict[str, Any] = {k: v for k, v in vars(result).items() if v is not None and k != "private"}
+    if result.private is not None:
+        values["spec"] = {**(row.spec or {}), "private": result.private}
+    await _finish(model_id, status="ready", last_error=None, **values)
     logger.info("Custom model %s is ready", model_id)
 
 

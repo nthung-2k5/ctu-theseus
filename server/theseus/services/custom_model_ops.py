@@ -68,6 +68,7 @@ def _out(row: CustomModel, run_count: int, owner_email: str | None = None) -> Cu
         last_error=row.last_error,
         enabled=row.enabled,
         archived=row.archived_at is not None,
+        private=bool((row.spec or {}).get("private")),
         scope="private" if row.owner_user_id is not None else "global",
         owner_user_id=row.owner_user_id,
         owner_email=owner_email,
@@ -208,34 +209,36 @@ def _describe_config(out: InspectModelResponse, config: dict[str, Any]) -> None:
         )
 
 
-def _inspect_hub_sync(repo_id: str) -> InspectModelResponse:
+def _inspect_hub_sync(repo_id: str, token: str | None) -> InspectModelResponse:
     out = _new_inspection(repo_id)
     try:
-        pin = custom_models.hub_pin(repo_id)
-        out.revision, out.size_bytes = pin.revision, pin.size_bytes
+        pin = custom_models.hub_pin(repo_id, token)
+        out.revision, out.size_bytes, out.private = pin.revision, pin.size_bytes, pin.private
         limit = get_settings().max_custom_model_bytes
         if pin.size_bytes > limit:
             out.errors.append(f"The model is {pin.size_bytes // 2**20} MiB, over the {limit // 2**20} MiB limit")
         if not pin.has_safetensors:
             out.errors.append("The repository has no .safetensors weights (pickle-based weights are not accepted)")
-        config = custom_models.fetch_hub_config(repo_id, pin.revision) if pin.has_config else None
+        config = custom_models.fetch_hub_config(repo_id, pin.revision, token) if pin.has_config else None
     except custom_models.CustomModelFileError as e:
         out.errors.append(str(e))
         return out
 
     if config is None:
         out.warnings.append(
-            "No config.json was found, so the task cannot be read from it. "
-            "Choose the kind of model yourself."
+            "No config.json was found, so the task cannot be read from it. Choose the kind of model yourself."
         )
         return out
     _describe_config(out, config)
     return out
 
 
-async def inspect_model(body: InspectModelBody) -> InspectModelResponse:
+async def inspect_model(body: InspectModelBody, token: str | None = None) -> InspectModelResponse:
     """Check a model before importing it, creating nothing: look a Hub repository up and read its config.json,
-    or describe a config.json the browser read out of an uploaded zip."""
+    or describe a config.json the browser read out of an uploaded zip.
+
+    `token` is the caller's own Hugging Face token, so they can look at their private and gated repositories.
+    None for a model made for everyone, which never carries one person's access."""
     if body.config is not None:
         out = _new_inspection(None)
         _describe_config(out, body.config)
@@ -243,7 +246,7 @@ async def inspect_model(body: InspectModelBody) -> InspectModelResponse:
     source_ref = (body.source_ref or "").strip()
     if not _SOURCE_REF.match(source_ref):
         raise HTTPException(400, "Enter the model's Hugging Face repository id (e.g. bert-base-uncased or org/name)")
-    return await asyncio.to_thread(_inspect_hub_sync, source_ref)
+    return await asyncio.to_thread(_inspect_hub_sync, source_ref, token)
 
 
 # -- Validation helpers ------------------------------------------------------------------------

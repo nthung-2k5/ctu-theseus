@@ -132,6 +132,8 @@ const api = await builder
   .withEnvironment('ALLOWED_ORIGINS', process.env.ALLOWED_ORIGINS ?? '')
   // Comma-separated emails promoted to admin when they register or sign in: how the first admin comes to exist.
   .withEnvironment('THESEUS_ADMIN_EMAILS', process.env.THESEUS_ADMIN_EMAILS ?? '')
+  // Encrypts users' saved Hugging Face tokens. Empty means "derive it from JWT_SECRET" (see services/secrets.py).
+  .withEnvironment('THESEUS_SECRETS_KEY', process.env.THESEUS_SECRETS_KEY ?? '')
   .waitFor(db)
   .waitFor(rustfs)
 

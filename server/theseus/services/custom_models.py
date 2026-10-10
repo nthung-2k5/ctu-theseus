@@ -1,10 +1,14 @@
 """Bring-your-own models: where their files live locally, putting them there, and the generic file checks.
 
 A custom model's weights are either on the Hugging Face Hub (fetched at a pinned commit) or an uploaded
-bundle in `theseus-models/custom/{modelId}/`. A trainer backend reads them from a local directory whose
-path is written into the compiled config, so that path is DETERMINISTIC (model id + pinned revision or
-content hash) and `ensure_local` recreates it on demand: before a run trains, and again before a trained
-model is loaded for inference or export, even after a restart wiped the temp directory.
+bundle in `theseus-models/custom/{modelId}/`. A Hub model may be private or gated: it is then fetched with
+the OWNER's saved Hugging Face token (`services/integrations.py`), which callers pass in as `token`. With no
+token the Hub is asked anonymously, never with whatever token happens to be configured on the server.
+
+A trainer backend reads the files from a local directory whose path is written into the compiled config, so
+that path is DETERMINISTIC (model id + pinned revision or content hash) and `ensure_local` recreates it on
+demand: before a run trains, and again before a trained model is loaded for inference or export, even after
+a restart wiped the temp directory.
 
 Everything here is synchronous (boto3, huggingface_hub, zipfile): call it through an executor.
 
@@ -84,8 +88,10 @@ def needs_files(row: CustomModel) -> bool:
     return bool((row.spec or {}).get("materialize", True))
 
 
-def ensure_local(row: CustomModel) -> Path:
-    """Make the model's files exist at `local_dir_for(row)` and return that path. Idempotent."""
+def ensure_local(row: CustomModel, token: str | None = None) -> Path:
+    """Make the model's files exist at `local_dir_for(row)` and return that path. Idempotent.
+
+    `token` is the owner's Hugging Face token, needed only when the model is private or gated."""
     dest = local_dir_for(row)
     if not needs_files(row):
         return dest
@@ -94,7 +100,7 @@ def ensure_local(row: CustomModel) -> Path:
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
     if row.source_kind == "hub":
-        _fetch_hub(row, dest)
+        _fetch_hub(row, dest, token)
     else:
         _fetch_upload(row, dest)
     (dest / _COMPLETE_MARKER).touch()
@@ -107,25 +113,69 @@ class HubPin:
     size_bytes: int
     has_safetensors: bool
     has_config: bool
+    # Needs the owner's token to read: private, or gated and granted to them.
+    private: bool = False
 
 
-def hub_pin(repo_id: str | None) -> HubPin:
-    """The commit to pin and the bytes to download for a Hub model, refusing one that cannot be used."""
+def _hub_token(token: str | None) -> str | bool:
+    """What to hand huggingface_hub: the given token, or `False`, meaning NO token. `None` would make the
+    library fall back to a token in the server's environment or cache, which must never speak for a user."""
+    return token or False
+
+
+def _access_error(repo_id: str, exc: BaseException, token: str | None) -> CustomModelFileError | None:
+    """The user-facing reason Hugging Face refused to show or serve `repo_id`, or None for an unrelated error."""
+    from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
+
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(exc, GatedRepoError):
+        if token:
+            return CustomModelFileError(
+                f"'{repo_id}' is gated and your Hugging Face account has not been granted access. "
+                "Accept the model's terms on huggingface.co, then try again"
+            )
+        return CustomModelFileError(
+            f"'{repo_id}' is gated. Connect your Hugging Face account in Settings (and accept the model's terms "
+            "on huggingface.co) to import it"
+        )
+    if isinstance(exc, RepositoryNotFoundError):
+        if token:
+            return CustomModelFileError(f"'{repo_id}' was not found, or your Hugging Face account cannot read it")
+        return CustomModelFileError(
+            f"'{repo_id}' was not found on the Hugging Face Hub. If it is private, connect your Hugging Face "
+            "account in Settings"
+        )
+    if isinstance(exc, HfHubHTTPError) and status in (401, 403):
+        if token:
+            return CustomModelFileError(
+                "Hugging Face refused your saved token. Reconnect your Hugging Face account in Settings"
+            )
+        return CustomModelFileError(f"'{repo_id}' needs a Hugging Face account. Connect yours in Settings to import it")
+    return None
+
+
+def hub_pin(repo_id: str | None, token: str | None = None) -> HubPin:
+    """The commit to pin and the bytes to download for a Hub model, refusing one that cannot be used.
+
+    Without a token only public, ungated models pass. With the owner's, a private or gated one their
+    account can read passes too."""
     from huggingface_hub import HfApi
-    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError
+    from huggingface_hub.errors import HfHubHTTPError, RevisionNotFoundError
 
     if not repo_id:
         raise CustomModelFileError("A Hub model needs its repository id")
     try:
-        info = HfApi().model_info(repo_id, files_metadata=True)
-    except RepositoryNotFoundError:
-        raise CustomModelFileError(f"'{repo_id}' was not found on the Hugging Face Hub") from None
-    except GatedRepoError:
-        raise CustomModelFileError(f"'{repo_id}' is gated: only public, ungated models are supported") from None
+        info = HfApi().model_info(repo_id, files_metadata=True, token=_hub_token(token))
     except RevisionNotFoundError:
         raise CustomModelFileError(f"'{repo_id}' has no default revision") from None
-    if info.private:
-        raise CustomModelFileError(f"'{repo_id}' is private: only public models are supported")
+    except HfHubHTTPError as e:
+        if (refusal := _access_error(repo_id, e, token)) is not None:
+            raise refusal from None
+        raise
+    if info.private and not token:
+        raise CustomModelFileError(
+            f"'{repo_id}' is private. Connect your Hugging Face account in Settings to import it"
+        )
     if not info.sha:
         raise CustomModelFileError(f"Could not determine the current revision of '{repo_id}'")
 
@@ -141,20 +191,25 @@ def hub_pin(repo_id: str | None) -> HubPin:
         size_bytes=sum(s.size or 0 for s in wanted),
         has_safetensors=any(s.rfilename.lower().endswith(".safetensors") for s in wanted),
         has_config=any(s.rfilename == "config.json" for s in siblings),
+        private=bool(info.private or info.gated),
     )
 
 
-def fetch_hub_config(repo_id: str, revision: str) -> dict | None:
+def fetch_hub_config(repo_id: str, revision: str, token: str | None = None) -> dict | None:
     """The repo's top-level config.json at `revision`, or None when it has none or is not a JSON object."""
     import json
 
     from huggingface_hub import hf_hub_download
-    from huggingface_hub.errors import EntryNotFoundError
+    from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 
     try:
-        path = Path(hf_hub_download(repo_id, "config.json", revision=revision))
+        path = Path(hf_hub_download(repo_id, "config.json", revision=revision, token=_hub_token(token)))
     except EntryNotFoundError:
         return None
+    except HfHubHTTPError as e:
+        if (refusal := _access_error(repo_id, e, token)) is not None:
+            raise refusal from None
+        raise
     if path.stat().st_size > _MAX_CONFIG_BYTES:
         raise CustomModelFileError("config.json is unreasonably large")
     try:
@@ -164,18 +219,25 @@ def fetch_hub_config(repo_id: str, revision: str) -> dict | None:
     return config if isinstance(config, dict) else None
 
 
-def _fetch_hub(row: CustomModel, dest: Path) -> None:
+def _fetch_hub(row: CustomModel, dest: Path, token: str | None = None) -> None:
     if not row.source_ref or not row.revision:
         raise CustomModelFileError("This Hub model has not been validated yet, so it has no pinned revision")
     from huggingface_hub import snapshot_download  # lazy: only Hub models need it
+    from huggingface_hub.errors import HfHubHTTPError
 
-    snapshot_download(
-        repo_id=row.source_ref,
-        revision=row.revision,
-        local_dir=str(dest),
-        allow_patterns=list(_HUB_ALLOW),
-        ignore_patterns=[f"*{ext}" for ext in sorted(FORBIDDEN_EXTENSIONS)],
-    )
+    try:
+        snapshot_download(
+            repo_id=row.source_ref,
+            revision=row.revision,
+            local_dir=str(dest),
+            allow_patterns=list(_HUB_ALLOW),
+            ignore_patterns=[f"*{ext}" for ext in sorted(FORBIDDEN_EXTENSIONS)],
+            token=_hub_token(token),
+        )
+    except HfHubHTTPError as e:
+        if (refusal := _access_error(row.source_ref, e, token)) is not None:
+            raise refusal from None
+        raise
 
 
 def _fetch_upload(row: CustomModel, dest: Path) -> None:

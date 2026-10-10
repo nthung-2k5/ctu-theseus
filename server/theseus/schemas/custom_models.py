@@ -50,6 +50,8 @@ class CustomModelOut(ApiModel):
     last_error: str | None
     enabled: bool
     archived: bool
+    # Fetched with its owner's Hugging Face token (a private or gated repository).
+    private: bool = False
     scope: Scope
     owner_user_id: uuid.UUID | None
     # Only filled in for admins, who see everyone's models.
@@ -84,6 +86,9 @@ class InspectModelBody(ApiModel):
 
     source_ref: str | None = Field(default=None, min_length=1, max_length=200)
     config: dict[str, Any] | None = None
+    # The model is being made for everyone (an admin's form). A shared model never carries one person's
+    # Hugging Face access, so it is looked up anonymously and only a public repository passes.
+    shared: bool = False
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "InspectModelBody":
@@ -107,6 +112,8 @@ class InspectModelResponse(ApiModel):
     # Errors mean the model cannot be imported; warnings do not.
     errors: list[str]
     warnings: list[str]
+    # Private or gated on Hugging Face: only readable with the importer's own saved token.
+    private: bool = False
 
 
 class UpdateCustomModelBody(ApiModel):
