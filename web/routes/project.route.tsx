@@ -1,11 +1,6 @@
 import { projectDetailQueryOptions } from '@public/lib/queries'
-import { ClassesPage } from '@public/pages/ClassesPage'
-import { DatasetPage } from '@public/pages/DatasetPage'
-import { ExportPage } from '@public/pages/export/ExportPage'
-import { ExportRunPage } from '@public/pages/export/ExportRunPage'
+import { DataPage } from '@public/pages/DataPage'
 import { ProjectPage } from '@public/pages/ProjectPage'
-import { PlaygroundPage } from '@public/pages/playground/PlaygroundPage'
-import { PlaygroundRunPage } from '@public/pages/playground/PlaygroundRunPage'
 import { SnapshotBuilderPage } from '@public/pages/SnapshotBuilderPage'
 import { SnapshotDetailPage } from '@public/pages/SnapshotDetailPage'
 import { SnapshotsPage } from '@public/pages/SnapshotsPage'
@@ -13,11 +8,12 @@ import { NewTrainingPage } from '@public/pages/training/NewTrainingPage'
 import { RunComparePage } from '@public/pages/training/RunComparePage'
 import { RunConfigPage } from '@public/pages/training/RunConfigPage'
 import { RunEvaluationPage } from '@public/pages/training/RunEvaluationPage'
+import { RunExportPage } from '@public/pages/training/RunExportPage'
 import { RunLayout } from '@public/pages/training/RunLayout'
 import { RunLivePage } from '@public/pages/training/RunLivePage'
+import { RunTryPage } from '@public/pages/training/RunTryPage'
 import { SweepPage } from '@public/pages/training/SweepPage'
 import { TrainingPage } from '@public/pages/training/TrainingPage'
-import { UploadPage } from '@public/pages/UploadPage'
 import { createRoute, Outlet, redirect, stripSearchParams } from '@tanstack/react-router'
 import { z } from 'zod'
 import { appRoute } from './app.route'
@@ -36,18 +32,6 @@ export const projectIndexRoute = createRoute({
   component: ProjectPage,
 })
 
-export const uploadRoute = createRoute({
-  getParentRoute: () => projectRoute,
-  path: '/upload',
-  component: UploadPage,
-})
-
-export const classesRoute = createRoute({
-  getParentRoute: () => projectRoute,
-  path: '/classes',
-  component: ClassesPage,
-})
-
 const paginationDefaults = { page: 1, perPage: 20 }
 
 const itemSortSchema = z.enum(['newest', 'oldest', 'filename']).optional().catch(undefined)
@@ -64,7 +48,7 @@ const itemClassIdSchema = z
   .catch(undefined)
 
 // The draft is a single, implicit version — no versionId to pick.
-const datasetSearchSchema = z.object({
+const dataSearchSchema = z.object({
   page: z.coerce.number().int().min(1).catch(paginationDefaults.page),
   perPage: z.coerce.number().int().min(1).max(1000).catch(paginationDefaults.perPage),
   split: z.enum(['train', 'validation', 'test']).optional().catch(undefined),
@@ -72,16 +56,42 @@ const datasetSearchSchema = z.object({
   search: z.string().optional().catch(undefined),
   sort: itemSortSchema,
   labeled: itemLabeledSchema,
-  // Absent means Browse.
-  tab: z.enum(['browse', 'distribution']).optional().catch(undefined),
+  // Absent means Browse. Classes only exists for tasks that label with classes.
+  tab: z.enum(['browse', 'classes', 'distribution']).optional().catch(undefined),
+  // The add-data drawer, so the overview and the empty states can open it with a link.
+  add: z.literal(true).optional().catch(undefined),
 })
 
-export const datasetRoute = createRoute({
+/** The project's data in one place: browse the draft, manage its classes, check its health, add more. */
+export const dataRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/data',
+  validateSearch: dataSearchSchema.parse,
+  search: { middlewares: [stripSearchParams(paginationDefaults)] },
+  component: DataPage,
+})
+
+/* Old URLs: the dataset, upload and classes pages are tabs and a drawer of the data page now. */
+export const legacyDatasetRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/dataset',
-  validateSearch: datasetSearchSchema.parse,
-  search: { middlewares: [stripSearchParams(paginationDefaults)] },
-  component: DatasetPage,
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/data', params, search: { ...paginationDefaults } })
+  },
+})
+export const legacyUploadRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/upload',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/data', params, search: { ...paginationDefaults, add: true } })
+  },
+})
+export const legacyClassesRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/classes',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/data', params, search: { ...paginationDefaults, tab: 'classes' } })
+  },
 })
 
 /** Search params for browsing one snapshot's items. */
@@ -138,12 +148,18 @@ export const trainingRoute = createRoute({
 export const trainingIndexRoute = createRoute({
   getParentRoute: () => trainingRoute,
   path: '/',
-  // Optional keys, so a plain link to the list needs no `search`.
+  // Optional keys, so a plain link to the list needs no `search`. `runId`, `view`, `sweepId` and `tab` are the old
+  // single-page URLs, redirected below; `q`, `status`, `sort` and `show` are the list's own filters.
   validateSearch: z.object({
     runId: z.string().optional().catch(undefined),
     view: z.enum(['create', 'sweep']).optional().catch(undefined),
     sweepId: z.string().optional().catch(undefined),
     tab: z.string().optional().catch(undefined),
+    q: z.string().optional().catch(undefined),
+    // Comma-separated run statuses.
+    status: z.string().optional().catch(undefined),
+    sort: z.enum(['newest', 'best']).optional().catch(undefined),
+    show: z.enum(['runs', 'sweeps']).optional().catch(undefined),
   }).parse,
   beforeLoad: ({ params, search }) => {
     const { projectId } = params
@@ -163,9 +179,9 @@ export const trainingIndexRoute = createRoute({
       if (search.tab === 'evaluation')
         throw redirect({ to: '/project/$projectId/training/$runId/evaluation', params: { projectId, runId } })
       if (search.tab === 'inference')
-        throw redirect({ to: '/project/$projectId/playground/$runId', params: { projectId, runId } })
+        throw redirect({ to: '/project/$projectId/training/$runId/try', params: { projectId, runId } })
       if (search.tab === 'export')
-        throw redirect({ to: '/project/$projectId/export/$runId', params: { projectId, runId } })
+        throw redirect({ to: '/project/$projectId/training/$runId/export', params: { projectId, runId } })
       throw redirect({ to: '/project/$projectId/training/$runId', params: { projectId, runId } })
     }
   },
@@ -189,6 +205,15 @@ export const sweepRoute = createRoute({
   component: SweepPage,
 })
 
+/** Any number of runs side by side. The list's selection bar links here; a run's own page can start one too. */
+export const compareRoute = createRoute({
+  getParentRoute: () => trainingRoute,
+  path: '/compare',
+  // Comma-separated run ids.
+  validateSearch: z.object({ runs: z.string().optional().catch(undefined) }).parse,
+  component: RunComparePage,
+})
+
 /** The run layout owns the SSE stream and tab strip; each tab is a child route. */
 export const runRoute = createRoute({
   getParentRoute: () => trainingRoute,
@@ -202,41 +227,48 @@ export const runEvaluationRoute = createRoute({
   path: '/evaluation',
   component: RunEvaluationPage,
 })
-export const runCompareRoute = createRoute({
-  getParentRoute: () => runRoute,
-  path: '/compare',
-  // Comma-separated run ids to compare against; the current run is always included.
-  validateSearch: z.object({ with: z.string().optional().catch(undefined) }).parse,
-  component: RunComparePage,
-})
+export const runTryRoute = createRoute({ getParentRoute: () => runRoute, path: '/try', component: RunTryPage })
+export const runExportRoute = createRoute({ getParentRoute: () => runRoute, path: '/export', component: RunExportPage })
 export const runConfigRoute = createRoute({ getParentRoute: () => runRoute, path: '/config', component: RunConfigPage })
 
-/* ── Playground and export ── */
+/** Old URL: comparing is a page of its own now, which this run is the first entry of. */
+export const runCompareRedirectRoute = createRoute({
+  getParentRoute: () => runRoute,
+  path: '/compare',
+  validateSearch: z.object({ with: z.string().optional().catch(undefined) }).parse,
+  beforeLoad: ({ params, search }) => {
+    const ids = [params.runId, ...(search.with ?? '').split(',').filter((id) => id && id !== params.runId)]
+    throw redirect({ to: '/project/$projectId/training/compare', params, search: { runs: ids.join(',') } })
+  },
+})
 
-export const playgroundRoute = createRoute({
+/* ── Old playground and export URLs: both are tabs of the run now ── */
+
+export const legacyPlaygroundRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/playground',
-  component: () => <Outlet />,
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/training', params })
+  },
 })
-export const playgroundIndexRoute = createRoute({
-  getParentRoute: () => playgroundRoute,
-  path: '/',
-  component: PlaygroundPage,
+export const legacyPlaygroundRunRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/playground/$runId',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/training/$runId/try', params })
+  },
 })
-export const playgroundRunRoute = createRoute({
-  getParentRoute: () => playgroundRoute,
-  path: '/$runId',
-  component: PlaygroundRunPage,
-})
-
-export const exportRoute = createRoute({
+export const legacyExportRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/export',
-  component: () => <Outlet />,
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/training', params })
+  },
 })
-export const exportIndexRoute = createRoute({ getParentRoute: () => exportRoute, path: '/', component: ExportPage })
-export const exportRunRoute = createRoute({
-  getParentRoute: () => exportRoute,
-  path: '/$runId',
-  component: ExportRunPage,
+export const legacyExportRunRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/export/$runId',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/project/$projectId/training/$runId/export', params })
+  },
 })

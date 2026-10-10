@@ -1,5 +1,5 @@
 /**
- * The three row kinds of the Upload page's filesystem view: class folders, split folders and files.
+ * The three row kinds of the add-data panel's filesystem view: class folders, split folders and files.
  *
  * Rows are deliberately plain (text, icons, one checkbox) — no per-row `Select`s or thumbnails — because the
  * view renders through a virtualizer and every row that scrolls into view is mounted from scratch.

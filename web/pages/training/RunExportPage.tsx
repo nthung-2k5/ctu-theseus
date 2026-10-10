@@ -1,25 +1,12 @@
 import { ActionIcon, Code, CopyButton, Paper, SimpleGrid, Stack, Tabs, Text, Tooltip } from '@mantine/core'
-import { CheckIcon, CopyIcon } from '@phosphor-icons/react'
-import { STATUS_COLORS } from '@public/components/training/constants'
+import { CheckIcon, CopyIcon, ExportIcon } from '@phosphor-icons/react'
+import { useRunContext } from '@public/components/training/RunContext'
 import { RunExportPanel } from '@public/components/training/RunExportPanel'
-import {
-  CopyField,
-  EmptyState,
-  LinkButton,
-  PageHeader,
-  QueryBoundary,
-  SectionLabel,
-  StatusBadge,
-} from '@public/components/ui'
+import { CopyField, EmptyState, SectionLabel } from '@public/components/ui'
 import { formatDateTime } from '@public/lib/format'
-import { projectDetailQueryOptions, useTrainingRuns } from '@public/lib/queries'
 import { getInferenceInputSpec, getTaskDescriptor } from '@public/lib/tasks'
 import { MONO_STACK } from '@public/theme'
-import { useSuspenseQuery } from '@tanstack/react-query'
-import { getRouteApi } from '@tanstack/react-router'
 import { predictSnippets } from './snippets'
-
-const routeApi = getRouteApi('/_app/project/$projectId/export/$runId')
 
 function Snippet({ code }: { code: string }) {
   return (
@@ -46,50 +33,36 @@ function Snippet({ code }: { code: string }) {
   )
 }
 
-export function ExportRunPage() {
-  const { projectId, runId } = routeApi.useParams()
-  const {
-    data: { project },
-  } = useSuspenseQuery(projectDetailQueryOptions(projectId))
-  const { data, isLoading, isError, refetch } = useTrainingRuns(projectId)
-  const run = data?.runs.find((r) => r.id === runId)
+/** Package this run's model to download, or call it over the prediction API. */
+export function RunExportPage() {
+  const { project, run, status } = useRunContext()
 
-  if (!run) {
+  if (status !== 'succeeded')
     return (
-      <div className="flex flex-col gap-3 p-3">
-        <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
-          <EmptyState title="Run not found" description="It may have been deleted." />
-        </QueryBoundary>
-      </div>
+      <EmptyState
+        icon={ExportIcon}
+        title="Not ready to export yet"
+        description="A model can be packaged once its run has finished successfully."
+        compact
+      />
     )
-  }
 
   const descriptor = getTaskDescriptor(project.task)
   const snapshot = project.dataset?.versions?.find((v) => v.id === run.datasetVersionId)
   const evaluation = run.evaluation?.status === 'success' ? run.evaluation : null
-  const snippets = predictSnippets(runId, getInferenceInputSpec(project.task), window.location.origin)
+  const score = evaluation?.score ?? null
+  const snippets = predictSnippets(run.id, getInferenceInputSpec(project.task), window.location.origin)
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <PageHeader
-        title={`Export · ${run.name}`}
-        badges={<StatusBadge value={run.status} colorMap={STATUS_COLORS} />}
-        description="Build a bundle to download, or call the model over the prediction API."
-        actions={
-          <LinkButton to="/project/$projectId/export" params={{ projectId }} variant="default">
-            All fine-tuned models
-          </LinkButton>
-        }
-      />
-
+    <div className="flex flex-col gap-3">
       <Paper p="md">
         <Stack gap="xs">
           <SectionLabel>Model card</SectionLabel>
           <SimpleGrid cols={{ base: 2, md: 5 }} spacing="sm">
             <Fact label="Task" value={descriptor.label} />
             <Fact label="Snapshot" value={snapshot?.versionTag ?? run.datasetVersionId.slice(0, 8)} />
-            <Fact label="Accuracy" value={evaluation?.accuracy != null ? evaluation.accuracy.toFixed(3) : '—'} />
-            <Fact label="Macro F1" value={evaluation?.macroF1 != null ? evaluation.macroF1.toFixed(3) : '—'} />
+            <Fact label={score?.label ?? 'Score'} value={score ? score.value.toFixed(3) : '—'} />
+            {evaluation?.macroF1 != null && <Fact label="Macro F1" value={evaluation.macroF1.toFixed(3)} />}
             <Fact label="Trained" value={run.completedAt ? formatDateTime(run.completedAt) : '—'} />
           </SimpleGrid>
           <div>
@@ -111,7 +84,7 @@ export function ExportRunPage() {
           <SectionLabel>Use it: prediction API</SectionLabel>
           <Text size="xs" c="dimmed">
             Authenticate with an API key (create one under Settings) sent as a bearer token. The response is the same
-            prediction the playground shows.
+            prediction the Try tab shows.
           </Text>
           <Tabs defaultValue="curl">
             <Tabs.List>

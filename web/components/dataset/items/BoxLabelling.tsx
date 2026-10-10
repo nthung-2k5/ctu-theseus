@@ -96,7 +96,7 @@ export const BoxLabelling = ({
 
       {editing && classes.length === 0 && (
         <Text size="xs" c="dimmed">
-          Add at least one class on the Classes page, then draw boxes here.
+          Add at least one class in the Classes tab of the Data page, then draw boxes here.
         </Text>
       )}
 

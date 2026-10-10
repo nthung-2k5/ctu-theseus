@@ -1,5 +1,5 @@
 /**
- * Upload page – gets raw data into the project.
+ * Add-data panel – gets raw data into the project. It opens in a drawer of the data page.
  *
  * File tasks (vision/audio) get a filesystem view: class folders holding
  * train/validation/test folders, filled by dropping files, folders or archives
@@ -9,11 +9,11 @@
  * button that actually sends it.
  *
  * Either way, nothing is sent until the user presses Upload, and uploaded
- * items land in the mutable draft ready for snapshotting on the Dataset page.
- * This page doesn't browse the pool itself — see DatasetPage.
+ * items land in the mutable draft ready for snapshotting. The drawer stays mounted
+ * while closed so a half-staged batch survives closing it.
  */
 
-import { Button, Group, Modal, Paper, Select, Stack, Tabs, Textarea } from '@mantine/core'
+import { Button, Group, Modal, Paper, Select, Stack, Tabs, Text, Textarea } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { CloudArrowUpIcon } from '@phosphor-icons/react'
 import { FileTreeView } from '@public/components/dataset/FileTreeView'
@@ -22,7 +22,7 @@ import { TabularCsvImporter } from '@public/components/dataset/TabularCsvImporte
 import { TextBatchImporter } from '@public/components/dataset/TextBatchImporter'
 import { UploadQueuePanel } from '@public/components/dataset/UploadQueuePanel'
 import { YoloImporter } from '@public/components/dataset/YoloImporter'
-import { PageHeader, SectionLabel } from '@public/components/ui'
+import { SectionLabel } from '@public/components/ui'
 import { SPLIT_OPTIONS } from '@public/lib/constants'
 import { projectDetailQueryOptions, useLabelClasses } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
@@ -30,10 +30,7 @@ import { useFileStaging } from '@public/lib/upload/useFileStaging'
 import { type StagedDraft, useUploadQueue } from '@public/lib/uploadQueue'
 import type { LabelClass, SplitType } from '@public/store/types'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { getRouteApi } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
-
-const routeApi = getRouteApi('/_app/project/$projectId/upload')
 
 /**
  * The text entry panel picks a split/class up front purely as the *default* for
@@ -155,9 +152,8 @@ function TextStagePanel({
   )
 }
 
-/* ── Main Upload page ── */
-export function UploadPage() {
-  const { projectId } = routeApi.useParams()
+/* ── The panel ── */
+export function AddDataPanel({ projectId }: { projectId: string }) {
   const {
     data: { project: activeProject },
   } = useSuspenseQuery(projectDetailQueryOptions(projectId))
@@ -182,28 +178,24 @@ export function UploadPage() {
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [yoloOpened, { open: openYolo, close: closeYolo }] = useDisclosure(false)
 
+  const hint = labelsWithBoxes
+    ? 'Drop images into split folders and upload them, then draw the boxes in Browse. Or import a dataset that is already labelled in YOLO format.'
+    : isFileTask
+      ? 'Drop files, folders or archives into class and split folders, review them, then upload.'
+      : 'Stage items, review their split and class in the preview, then upload.'
+
   return (
-    <div
-      className="flex flex-col gap-3 p-3"
-      style={{ height: 'calc(100vh - var(--app-shell-header-offset, 0rem))', overflow: 'hidden' }}
-    >
-      <PageHeader
-        title="Upload"
-        description={
-          labelsWithBoxes
-            ? 'Drop images into split folders and upload them, then draw the boxes on the Dataset page. Or import a dataset that is already labelled in YOLO format.'
-            : isFileTask
-              ? 'Drop files, folders or archives into class and split folders, review them, then upload. Manage splits, classes and snapshots from the Dataset page.'
-              : 'Stage items, review their split and class in the preview, then upload. Manage splits, classes and snapshots from the Dataset page.'
-        }
-        actions={
-          labelsWithBoxes && (
-            <Button size="compact-md" variant="default" leftSection={<CloudArrowUpIcon size={14} />} onClick={openYolo}>
-              Import YOLO dataset
-            </Button>
-          )
-        }
-      />
+    <div className="flex flex-col gap-3" style={{ height: '100%', minHeight: 0, overflow: 'hidden' }}>
+      <Group justify="space-between" wrap="nowrap" align="flex-start">
+        <Text size="xs" c="dimmed">
+          {hint}
+        </Text>
+        {labelsWithBoxes && (
+          <Button size="compact-md" variant="default" leftSection={<CloudArrowUpIcon size={14} />} onClick={openYolo}>
+            Import YOLO dataset
+          </Button>
+        )}
+      </Group>
 
       <Modal opened={yoloOpened} onClose={closeYolo} title="Import a YOLO dataset" size="lg" centered>
         <YoloImporter projectId={projectId} />
@@ -229,7 +221,7 @@ export function UploadPage() {
         </div>
       ) : (
         // The row track must be capped (minmax(0,1fr)), or thousands of staged rows stretch it past the viewport.
-        <div className="grid gap-3 md:grid-cols-[30rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden flex-1 min-h-0">
+        <div className="grid gap-3 md:grid-cols-[26rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] overflow-hidden flex-1 min-h-0">
           <Paper p="md" style={{ overflowY: 'auto', minHeight: 0 }}>
             <SectionLabel mb="sm">Add items</SectionLabel>
             {descriptor.itemSpec.payload === 'inline_text' && (

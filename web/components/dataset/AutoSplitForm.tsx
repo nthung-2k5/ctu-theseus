@@ -8,7 +8,7 @@ import { useState } from 'react'
 
 /**
  * Randomly reassigns every draft item to train/validation/test in a given ratio. Shared by the
- * Dataset page's modal and the snapshot builder's "Split" step.
+ * Data page's modal and the snapshot builder's "Split" step.
  */
 export function AutoSplitForm({
   projectId,

@@ -1,5 +1,5 @@
 /**
- * The Classes page's editable draft, as pure functions so the rules can be unit-tested.
+ * The Classes tab's editable draft, as pure functions so the rules can be unit-tested.
  *
  * The page edits a local list and saves it in one batch (PUT /projects/:id/classes). `rows` is the list as it
  * would be saved; a class that is in the saved list but not in `rows` is being removed, and `mergeInto` can say

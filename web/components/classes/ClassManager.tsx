@@ -37,7 +37,7 @@ import { ClassTable } from './ClassTable'
 import { PendingRemovals } from './PendingRemovals'
 import { openRemoveClass } from './RemoveClassDialog'
 
-const routeApi = getRouteApi('/_app/project/$projectId/classes')
+const routeApi = getRouteApi('/_app/project/$projectId/data')
 
 const SORT_OPTIONS: { value: SortMode; label: string }[] = [
   { value: 'created', label: 'Creation order' },
@@ -359,7 +359,7 @@ export function ClassManager({
               mergeTargets={supportsMerge && row.classId && (countOf(row) ?? 1) > 0 ? targetsFor(row) : []}
               onViewItems={() =>
                 void navigate({
-                  to: '/project/$projectId/dataset',
+                  to: '/project/$projectId/data',
                   params: { projectId },
                   search: { page: 1, perPage: 20, classId: row.classId },
                 })

@@ -1,25 +1,21 @@
 /**
- * Classes page – the label-class registry for classification tasks.
+ * Classes tab – the label-class registry for classification tasks.
  *
  * Edits (add, rename, recolour, describe, merge, remove) build up in a local draft and are saved in one batch
  * (PUT /projects/:id/classes), so a half-finished rename never reaches the server. Classes are listed in
  * creation order. Snapshots are immutable: changes only apply to new snapshots and runs. The editor and its
- * parts live in components/classes; this page loads the data and picks the right state to show.
+ * parts live in components/classes; this panel loads the data and picks the right state to show.
  */
 
 import { Alert } from '@mantine/core'
 import { InfoIcon } from '@phosphor-icons/react'
 import { ClassManager } from '@public/components/classes/ClassManager'
-import { PageHeader, QueryBoundary } from '@public/components/ui'
+import { QueryBoundary } from '@public/components/ui'
 import { invalidateProjectScope, projectDetailQueryOptions, useClassStats, useLabelClasses } from '@public/lib/queries'
 import { getTaskDescriptor } from '@public/lib/tasks'
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { getRouteApi } from '@tanstack/react-router'
 
-const routeApi = getRouteApi('/_app/project/$projectId/classes')
-
-export function ClassesPage() {
-  const { projectId } = routeApi.useParams()
+export function ClassesPanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
   const {
     data: { project },
@@ -35,12 +31,7 @@ export function ClassesPage() {
   const stats = useClassStats(projectId, usesClasses)
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <PageHeader
-        title="Classes"
-        description={`The labels this project's ${descriptor.label.toLowerCase()} model predicts.`}
-      />
-
+    <div className="flex flex-col gap-3">
       {!usesClasses ? (
         <Alert icon={<InfoIcon size={16} />} color="blue" title="This task has no classes">
           {descriptor.label} predicts a value rather than a label from a fixed set, so there is nothing to manage here.

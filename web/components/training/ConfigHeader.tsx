@@ -115,7 +115,11 @@ export function ConfigHeader({
             multiline
             w={240}
           >
-            <Link to="/project/$projectId/classes" params={{ projectId: project.id }}>
+            <Link
+              to="/project/$projectId/data"
+              params={{ projectId: project.id }}
+              search={{ page: 1, perPage: 20, tab: 'classes' }}
+            >
               <Badge size="lg" color={classCount < 2 ? 'yellow' : 'teal'} style={{ cursor: 'pointer' }}>
                 {classCount} classes
               </Badge>

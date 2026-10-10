@@ -1,6 +1,6 @@
 import { Button, Tabs } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
-import { BrainIcon, ExportIcon, PlayIcon, StopIcon, TrashIcon } from '@phosphor-icons/react'
+import { BrainIcon, ScalesIcon, StopIcon, TrashIcon } from '@phosphor-icons/react'
 import { STATUS_COLORS } from '@public/components/training/constants'
 import { RunProvider } from '@public/components/training/RunContext'
 import { confirmDelete, EmptyState, LinkButton, PageHeader, QueryBoundary, StatusBadge } from '@public/components/ui'
@@ -22,7 +22,7 @@ import { getRouteApi, Outlet, useLocation, useNavigate } from '@tanstack/react-r
 
 const routeApi = getRouteApi('/_app/project/$projectId/training/$runId')
 
-const TABS = ['live', 'evaluation', 'compare', 'config'] as const
+const TABS = ['live', 'evaluation', 'try', 'export', 'config'] as const
 type RunTab = (typeof TABS)[number]
 
 /**
@@ -94,8 +94,10 @@ export function RunLayout() {
     switch (tab) {
       case 'evaluation':
         return navigate({ to: '/project/$projectId/training/$runId/evaluation', params })
-      case 'compare':
-        return navigate({ to: '/project/$projectId/training/$runId/compare', params, search: {} })
+      case 'try':
+        return navigate({ to: '/project/$projectId/training/$runId/try', params })
+      case 'export':
+        return navigate({ to: '/project/$projectId/training/$runId/export', params })
       case 'config':
         return navigate({ to: '/project/$projectId/training/$runId/config', params })
       default:
@@ -117,26 +119,15 @@ export function RunLayout() {
           }
           actions={
             <>
-              {succeeded && (
-                <>
-                  <LinkButton
-                    to="/project/$projectId/playground/$runId"
-                    params={{ projectId, runId }}
-                    variant="light"
-                    leftSection={<PlayIcon size={14} />}
-                  >
-                    Try
-                  </LinkButton>
-                  <LinkButton
-                    to="/project/$projectId/export/$runId"
-                    params={{ projectId, runId }}
-                    variant="light"
-                    leftSection={<ExportIcon size={14} />}
-                  >
-                    Export
-                  </LinkButton>
-                </>
-              )}
+              <LinkButton
+                to="/project/$projectId/training/compare"
+                params={{ projectId }}
+                search={{ runs: runId }}
+                variant="default"
+                leftSection={<ScalesIcon size={14} />}
+              >
+                Compare
+              </LinkButton>
               {isActive && (
                 <Button
                   color="red"
@@ -185,7 +176,20 @@ export function RunLayout() {
             >
               Evaluation
             </Tabs.Tab>
-            <Tabs.Tab value="compare">Compare</Tabs.Tab>
+            <Tabs.Tab
+              value="try"
+              disabled={!succeeded}
+              title={succeeded ? undefined : 'Available once the run succeeds'}
+            >
+              Try
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="export"
+              disabled={!succeeded}
+              title={succeeded ? undefined : 'Available once the run succeeds'}
+            >
+              Export
+            </Tabs.Tab>
             <Tabs.Tab value="config">Config</Tabs.Tab>
           </Tabs.List>
         </Tabs>

@@ -1,5 +1,5 @@
 /**
- * The staging queue behind the Upload page's preview pane for text and tabular tasks.
+ * The staging queue behind the add-data panel's preview pane for text and tabular tasks.
  *
  * Nothing here talks to the server: the left-hand panels turn typed text and
  * parsed CSV rows into `StagedItem`s, the preview pane lets the user retarget

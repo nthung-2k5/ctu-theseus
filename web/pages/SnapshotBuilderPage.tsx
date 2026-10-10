@@ -103,7 +103,7 @@ export function SnapshotBuilderPage() {
   })
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div className="flex flex-col gap-3 p-3 max-w-6xl">
       <PageHeader
         title="New snapshot"
         description="Freeze the current draft as an immutable, versioned dataset for training."
@@ -231,7 +231,7 @@ export function SnapshotBuilderPage() {
 
                   {isEmpty && (
                     <Alert icon={<WarningCircleIcon size={16} />} color="red" p="xs" title="The draft is empty">
-                      Add items on the Upload page first; there is nothing to freeze yet.
+                      Add data on the Data page first; there is nothing to freeze yet.
                     </Alert>
                   )}
                   {needsAnnotations && unlabeledCount > 0 && (

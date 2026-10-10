@@ -6,7 +6,7 @@
  * target column -> stage one item per row, with both featuresJson AND the
  * matching class resolved from the target value.
  *
- * Rows are handed to the Upload page's staging queue rather than created
+ * Rows are handed to the add-data panel's staging queue rather than created
  * directly, so the split and class of every row stay editable in the preview
  * pane until the user presses Upload. That also means a target value with no
  * matching class no longer blocks the import — those rows stage unassigned
@@ -150,7 +150,7 @@ export function TabularCsvImporter({
             <Alert icon={<WarningCircleIcon size={16} />} color="yellow" title="Unmatched class names">
               {unmatchedValues.slice(0, 10).join(', ')}
               {unmatchedValues.length > 10 ? `, +${unmatchedValues.length - 10} more` : ''} — those rows stage without a
-              class. Assign one in the preview, or create the classes on the Classes page first.
+              class. Assign one in the preview, or create the classes in the Classes tab first.
             </Alert>
           )}
 

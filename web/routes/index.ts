@@ -10,21 +10,24 @@ import {
 import { apiKeysRoute, appRoute, dashboardRoute, importedModelsRoute, settingsRoute } from './app.route'
 import { guestRoute, landingRoute, loginRoute, registerRoute } from './guest.route'
 import {
-  classesRoute,
-  datasetRoute,
-  exportIndexRoute,
-  exportRoute,
-  exportRunRoute,
-  playgroundIndexRoute,
-  playgroundRoute,
-  playgroundRunRoute,
+  compareRoute,
+  dataRoute,
+  legacyClassesRoute,
+  legacyDatasetRoute,
+  legacyExportRoute,
+  legacyExportRunRoute,
+  legacyPlaygroundRoute,
+  legacyPlaygroundRunRoute,
+  legacyUploadRoute,
   projectIndexRoute,
   projectRoute,
-  runCompareRoute,
+  runCompareRedirectRoute,
   runConfigRoute,
   runEvaluationRoute,
+  runExportRoute,
   runLiveRoute,
   runRoute,
+  runTryRoute,
   snapshotDetailRoute,
   snapshotNewRoute,
   snapshotsIndexRoute,
@@ -33,25 +36,35 @@ import {
   trainingIndexRoute,
   trainingNewRoute,
   trainingRoute,
-  uploadRoute,
 } from './project.route'
 
 const guestTree = guestRoute.addChildren([loginRoute])
 
 const projectTree = projectRoute.addChildren([
   projectIndexRoute,
-  uploadRoute,
-  classesRoute,
-  datasetRoute,
+  dataRoute,
   snapshotsRoute.addChildren([snapshotsIndexRoute, snapshotNewRoute, snapshotDetailRoute]),
   trainingRoute.addChildren([
     trainingIndexRoute,
     trainingNewRoute,
     sweepRoute,
-    runRoute.addChildren([runLiveRoute, runEvaluationRoute, runCompareRoute, runConfigRoute]),
+    compareRoute,
+    runRoute.addChildren([
+      runLiveRoute,
+      runEvaluationRoute,
+      runTryRoute,
+      runExportRoute,
+      runConfigRoute,
+      runCompareRedirectRoute,
+    ]),
   ]),
-  playgroundRoute.addChildren([playgroundIndexRoute, playgroundRunRoute]),
-  exportRoute.addChildren([exportIndexRoute, exportRunRoute]),
+  legacyDatasetRoute,
+  legacyUploadRoute,
+  legacyClassesRoute,
+  legacyPlaygroundRoute,
+  legacyPlaygroundRunRoute,
+  legacyExportRoute,
+  legacyExportRunRoute,
 ])
 
 const adminTree = adminRoute.addChildren([

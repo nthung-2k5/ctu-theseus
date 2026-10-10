@@ -1,5 +1,5 @@
 /**
- * The staging state behind the Upload page's filesystem view — pure, no React.
+ * The staging state behind the add-data panel's filesystem view — pure, no React.
  *
  * Files are staged in a normalized `Map` and tagged with a class *key* and a split; the folder tree the user
  * sees is derived from that (`buildIndex`), never stored. Class keys are `c:<classId>` for an existing class,

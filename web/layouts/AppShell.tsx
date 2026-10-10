@@ -22,29 +22,24 @@ import {
   CaretDownIcon,
   CubeIcon,
   DatabaseIcon,
-  ExportIcon,
   FoldersIcon,
   GearIcon,
   ListIcon,
   MoonIcon,
-  PlayIcon,
   ShieldCheckIcon,
   SignOutIcon,
-  StackIcon,
+  SquaresFourIcon,
   SunIcon,
-  TagIcon,
-  UploadSimpleIcon,
 } from '@phosphor-icons/react'
 import Logo from '@public/assets/CTU_logo.png'
 import { SectionLabel } from '@public/components/ui'
 import { logout } from '@public/lib/api/generated/auth/auth'
 import { sessionQueryOptions } from '@public/lib/auth'
 import { projectDetailQueryOptions, useProjects } from '@public/lib/queries'
-import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail } from '@public/store/types'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useMatch, useNavigate } from '@tanstack/react-router'
-import { Fragment, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 const hasReadyVersion = (project: ProjectDetail) =>
   project.dataset?.versions?.some((v) => v.status === 'ready') ?? false
@@ -54,57 +49,32 @@ interface ProjectNavItem {
   icon: typeof DatabaseIcon
   to:
     | '/project/$projectId'
-    | '/project/$projectId/upload'
-    | '/project/$projectId/classes'
-    | '/project/$projectId/dataset'
+    | '/project/$projectId/data'
     | '/project/$projectId/snapshots'
     | '/project/$projectId/training'
-    | '/project/$projectId/playground'
-    | '/project/$projectId/export'
   /** Overview must match exactly; everything else matches by prefix. */
   exact?: boolean
-  /** A heading shown above the first visible item of each group, so the data steps read as one flow. */
-  group?: string
-  color?: string
-  hidden?: (project: ProjectDetail) => boolean
   disabled?: (project: ProjectDetail) => boolean
   count?: (project: ProjectDetail) => number
 }
 
-/** Filled badges carry light text, so use a shade dark enough for 4.5:1 (the light variant keeps the plain color). */
-function filledBadgeColor(color: string | undefined) {
-  if (!color) return 'gray.7'
-  return color === 'primary' ? color : `${color}.${color === 'teal' ? 9 : 8}`
-}
-
+/**
+ * The project's flow, top to bottom. Counts are plain grey on purpose: colour in this app means status or a
+ * dataset split, so a coloured count would read as one of those.
+ */
 const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
-  { label: 'Overview', icon: DatabaseIcon, to: '/project/$projectId', exact: true },
-  { label: 'Upload', icon: UploadSimpleIcon, to: '/project/$projectId/upload', color: 'primary', group: 'Data' },
+  { label: 'Overview', icon: SquaresFourIcon, to: '/project/$projectId', exact: true },
   {
-    label: 'Classes',
-    icon: TagIcon,
-    to: '/project/$projectId/classes',
-    /** Only visible for tasks that use label classes */
-    hidden: (project) => !isClassificationTask(project.task),
-    count: (project) => project.dataset?.classes?.length ?? 0,
-    color: 'violet',
-    group: 'Data',
-  },
-  {
-    label: 'Dataset',
-    icon: StackIcon,
-    to: '/project/$projectId/dataset',
+    label: 'Data',
+    icon: DatabaseIcon,
+    to: '/project/$projectId/data',
     count: (project) => project.dataset?.draft?.itemCount ?? 0,
-    color: 'blue',
-    group: 'Data',
   },
   {
     label: 'Snapshots',
     icon: ArchiveIcon,
     to: '/project/$projectId/snapshots',
     count: (project) => project.dataset?.versions?.length ?? project.versionCount ?? 0,
-    color: 'grape',
-    group: 'Data',
   },
   {
     label: 'Training',
@@ -112,22 +82,6 @@ const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
     to: '/project/$projectId/training',
     disabled: (project) => !hasReadyVersion(project),
     count: (project) => project.runCount ?? 0,
-    color: 'teal',
-    group: 'Models',
-  },
-  {
-    label: 'Playground',
-    icon: PlayIcon,
-    to: '/project/$projectId/playground',
-    disabled: (project) => (project.runCount ?? 0) === 0,
-    group: 'Models',
-  },
-  {
-    label: 'Export',
-    icon: ExportIcon,
-    to: '/project/$projectId/export',
-    disabled: (project) => (project.runCount ?? 0) === 0,
-    group: 'Models',
   },
 ]
 
@@ -175,7 +129,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     enabled: !!projectId,
   })
   const activeProject = projectData?.project
-  const visibleNavItems = activeProject ? PROJECT_NAV_ITEMS.filter((item) => !item.hidden?.(activeProject)) : []
 
   const handleLogout = async () => {
     await logout().catch(() => undefined) // the cookies are cleared server-side; a network failure must not trap the user
@@ -248,20 +201,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </UnstyledButton>
               </Menu.Target>
               <Menu.Dropdown>
-                <Menu.Item leftSection={<FoldersIcon size={14} />} onClick={() => navigate({ to: '/projects' })}>
-                  All projects
-                </Menu.Item>
-                <Menu.Item leftSection={<CubeIcon size={14} />} onClick={() => navigate({ to: '/imported-models' })}>
-                  Imported models
-                </Menu.Item>
                 <Menu.Item leftSection={<GearIcon size={14} />} onClick={() => navigate({ to: '/settings' })}>
-                  Settings &amp; API keys
+                  Settings
                 </Menu.Item>
-                {isAdmin && (
-                  <Menu.Item leftSection={<ShieldCheckIcon size={14} />} onClick={() => navigate({ to: '/admin' })}>
-                    Administration
-                  </Menu.Item>
-                )}
                 <Menu.Divider />
                 <Menu.Item leftSection={<SignOutIcon size={14} />} color="red" onClick={handleLogout}>
                   Sign out
@@ -304,7 +246,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <SectionLabel px="xs" pt="sm" pb={2} truncate>
                   {activeProject.name}
                 </SectionLabel>
-                {visibleNavItems.map((item, index) => {
+                {PROJECT_NAV_ITEMS.map((item) => {
                   const resolvedPath = item.to.replace('$projectId', activeProject.id)
                   const count = item.count?.(activeProject)
                   const isActive = item.exact
@@ -312,32 +254,22 @@ export function AppShell({ children }: { children: ReactNode }) {
                     : location.pathname === resolvedPath || location.pathname.startsWith(`${resolvedPath}/`)
 
                   return (
-                    <Fragment key={item.to}>
-                      {item.group && item.group !== visibleNavItems[index - 1]?.group && (
-                        <SectionLabel px="xs" pt="xs" pb={2}>
-                          {item.group}
-                        </SectionLabel>
-                      )}
-                      <NavLink
-                        label={item.label}
-                        leftSection={<item.icon size={18} />}
-                        rightSection={
-                          count !== undefined ? (
-                            <Badge
-                              size="xs"
-                              variant={isActive ? 'filled' : 'light'}
-                              color={isActive ? filledBadgeColor(item.color) : (item.color ?? 'gray')}
-                            >
-                              {count}
-                            </Badge>
-                          ) : null
-                        }
-                        active={isActive}
-                        onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
-                        variant="light"
-                        disabled={item.disabled?.(activeProject)}
-                      />
-                    </Fragment>
+                    <NavLink
+                      key={item.to}
+                      label={item.label}
+                      leftSection={<item.icon size={18} />}
+                      rightSection={
+                        count !== undefined ? (
+                          <Badge size="xs" variant="light" color="gray">
+                            {count}
+                          </Badge>
+                        ) : null
+                      }
+                      active={isActive}
+                      onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
+                      variant="light"
+                      disabled={item.disabled?.(activeProject)}
+                    />
                   )
                 })}
               </>

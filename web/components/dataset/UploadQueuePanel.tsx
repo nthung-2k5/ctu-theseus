@@ -1,8 +1,8 @@
 /**
- * The Upload page's right-hand pane for text and tabular tasks: everything staged but not yet sent.
+ * The add-data panel's right-hand pane for text and tabular tasks: everything staged but not yet sent.
  *
  * The split and class of every staged item stay editable — per row, or across the whole batch — until the
- * user presses Upload, so a wrong split or class never has to be repaired afterwards on the Dataset page.
+ * user presses Upload, so a wrong split or class never has to be repaired afterwards on the Data page.
  * Rows go out through POST /projects/:id/items, which is per-item. (File tasks don't come through here; see
  * FileTreeView and FileUploadBar.)
  *

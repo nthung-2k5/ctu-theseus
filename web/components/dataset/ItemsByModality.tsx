@@ -14,7 +14,7 @@ export type { CaptionEditing, DatasetListItem, ItemEditing, ItemSelection } from
 /**
  * Dispatches to a thumbnail grid (vision/audio) or a table (text/tabular) by
  * dataset modality; clicking an item opens it in a drawer that steps through
- * the page. Shared by the Dataset page's draft browser and the Snapshot detail
+ * the page. Shared by the Data page's draft browser and the Snapshot detail
  * page's per-version/split item viewer so both present items the same way.
  * Never shows the item's internal id — only externalId, which is what an
  * operator actually recognizes an item by.

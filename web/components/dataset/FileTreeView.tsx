@@ -1,5 +1,5 @@
 /**
- * The Upload page's filesystem view for file-based tasks (vision / audio).
+ * The add-data panel's filesystem view for file-based tasks (vision / audio).
  *
  * Class folders are the parents and `train` / `validation` / `test` their children. Files, folders and
  * archives are added by dropping them anywhere in the tree (the layout is detected from their paths) or onto

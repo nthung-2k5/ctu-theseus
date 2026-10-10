@@ -44,7 +44,7 @@ const STEPS = [
   {
     icon: ExportIcon,
     title: 'Export',
-    text: 'Test in the playground, then export ONNX or another format and call the prediction API.',
+    text: 'Try the model on real inputs, then export ONNX or another format and call the prediction API.',
   },
 ]
 
@@ -76,7 +76,7 @@ const FEATURES = [
   },
   {
     icon: PlayIcon,
-    title: 'Playground and export',
+    title: 'Try and export',
     text: 'Try a fine-tuned model on real inputs, then package it in the format you deploy with.',
   },
 ]

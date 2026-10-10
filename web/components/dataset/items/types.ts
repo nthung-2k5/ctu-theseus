@@ -3,7 +3,7 @@ import type { Annotation, LabelClass } from '@public/store/types'
 import type { SPLIT_TYPES } from '../VersionBrowsing'
 
 /**
- * The item shape both the Dataset page's draft viewer and the Snapshot detail
+ * The item shape both the Data page's draft viewer and the Snapshot detail
  * page's per-version viewer render — a superset of every modality's fields,
  * since `GET /projects/{id}/items` always joins all four feature tables
  * regardless of the dataset's modality (see server/theseus/routers/datasets.py).

@@ -2,12 +2,12 @@ import { Button, SimpleGrid } from '@mantine/core'
 import { StatCard } from '@public/components/ui'
 import { getRouteApi } from '@tanstack/react-router'
 
-const routeApi = getRouteApi('/_app/project/$projectId/classes')
+const routeApi = getRouteApi('/_app/project/$projectId/data')
 
 /**
  * The dataset's label coverage at a glance: how many classes, how much of the draft is labelled, what is not,
  * and how many classes need a look. Both of the last two are actions: one opens the unlabelled items on the
- * Dataset page, the other narrows this table to the classes with a problem.
+ * Data page, the other narrows this table to the classes with a problem.
  */
 export function ClassStatsStrip({
   classCount,
@@ -50,7 +50,7 @@ export function ClassStatsStrip({
               px={0}
               onClick={() =>
                 void navigate({
-                  to: '/project/$projectId/dataset',
+                  to: '/project/$projectId/data',
                   params: { projectId },
                   search: { page: 1, perPage: 20, classId: 'unassigned' },
                 })

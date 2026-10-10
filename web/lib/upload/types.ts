@@ -1,4 +1,4 @@
-/** Shared shapes for the Upload page's file staging pipeline. */
+/** Shared shapes for the add-data panel's file staging pipeline. */
 
 import type { SplitType } from '../../store/types'
 
