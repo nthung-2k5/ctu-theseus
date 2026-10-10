@@ -1,4 +1,4 @@
-import { Button, SegmentedControl, Tooltip } from '@mantine/core'
+import { Button, SegmentedControl, Text } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { CreateRunPanel, type RunPrefill } from '@public/components/training/CreateRunPanel'
@@ -65,9 +65,9 @@ export function NewTrainingPage() {
   })
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div className="flex flex-col gap-3 p-3 max-w-6xl">
       <PageHeader
-        title="New training run"
+        title={mode === 'sweep' ? 'New sweep' : 'New training run'}
         description={project.name}
         actions={
           <>
@@ -75,27 +75,8 @@ export function NewTrainingPage() {
               value={mode}
               onChange={(v) => navigate({ search: (prev) => ({ ...prev, mode: v as 'run' | 'sweep' }), replace: true })}
               data={[
-                {
-                  value: 'run',
-                  label: (
-                    <Tooltip label="Train one model with the settings you choose." multiline w={220} withArrow>
-                      <span style={{ display: 'block' }}>Run</span>
-                    </Tooltip>
-                  ),
-                },
-                {
-                  value: 'sweep',
-                  label: (
-                    <Tooltip
-                      label="Train several models, each with different settings, and compare them to find what works best."
-                      multiline
-                      w={240}
-                      withArrow
-                    >
-                      <span style={{ display: 'block' }}>Sweep</span>
-                    </Tooltip>
-                  ),
-                },
+                { value: 'run', label: 'Run' },
+                { value: 'sweep', label: 'Sweep' },
               ]}
             />
             <Button variant="default" leftSection={<ArrowLeftIcon size={14} />} onClick={goBack}>
@@ -104,6 +85,12 @@ export function NewTrainingPage() {
           </>
         }
       />
+
+      <Text size="sm" c="dimmed">
+        {mode === 'sweep'
+          ? 'A sweep trains several models, each with different settings, and compares them to find what works best.'
+          : 'A run trains one model with the settings you choose.'}
+      </Text>
 
       {mode === 'sweep' ? (
         <CreateSweepPanel
