@@ -10,7 +10,7 @@ from datetime import datetime
 from pydantic import Field, field_validator
 
 from theseus.augmentation.config import AugmentationConfig
-from theseus.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType
+from theseus.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType, TrainingStatus
 from theseus.preprocessing.config import PreprocessingConfig
 from theseus.schemas.common import ApiModel
 
@@ -82,6 +82,12 @@ class ProjectSummary(ApiModel):
     task: ProjectTask
     created_at: datetime
     draft_dataset: DraftDatasetOut | None = None
+    # What a project card shows without opening the project: how much data, how much training, and how it last went.
+    item_count: int = 0
+    run_count: int = 0
+    last_run_status: TrainingStatus | None = None
+    # The newest of the project's creation and its latest run.
+    last_activity_at: datetime | None = None
 
 
 class ProjectRow(ApiModel):

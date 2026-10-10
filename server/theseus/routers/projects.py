@@ -39,6 +39,38 @@ async def list_projects(user_id: UserId, session: SessionDep) -> ProjectListResp
             .order_by(Project.created_at.desc(), Project.id.desc())
         )
     ).all()
+    ids = [p.id for p, _ in rows]
+    # Two grouped queries for the whole list, never one per project.
+    item_counts = dict(
+        (
+            await session.execute(
+                sa.select(DatasetVersion.dataset_id, sa.func.count())
+                .join(DatasetVersionItem, DatasetVersionItem.version_id == DatasetVersion.id)
+                .where(DatasetVersion.dataset_id.in_(ids), DatasetVersion.version_tag.is_(None))
+                .group_by(DatasetVersion.dataset_id)
+            )
+        ).all()
+    )
+    run_counts = dict(
+        (
+            await session.execute(
+                sa.select(TrainingRun.project_id, sa.func.count())
+                .where(TrainingRun.project_id.in_(ids))
+                .group_by(TrainingRun.project_id)
+            )
+        ).all()
+    )
+    latest_runs = {
+        project_id: (status, created_at)
+        for project_id, status, created_at in (
+            await session.execute(
+                sa.select(TrainingRun.project_id, TrainingRun.status, TrainingRun.created_at)
+                .distinct(TrainingRun.project_id)
+                .where(TrainingRun.project_id.in_(ids))
+                .order_by(TrainingRun.project_id, TrainingRun.created_at.desc())
+            )
+        ).all()
+    }
     return ProjectListResponse(
         projects=[
             ProjectSummary(
@@ -48,6 +80,10 @@ async def list_projects(user_id: UserId, session: SessionDep) -> ProjectListResp
                 task=p.task,
                 created_at=p.created_at,
                 draft_dataset=DraftDatasetOut(modality=modality) if modality else None,
+                item_count=item_counts.get(p.id, 0),
+                run_count=run_counts.get(p.id, 0),
+                last_run_status=latest_runs[p.id][0] if p.id in latest_runs else None,
+                last_activity_at=max(p.created_at, latest_runs[p.id][1]) if p.id in latest_runs else p.created_at,
             )
             for p, modality in rows
         ]

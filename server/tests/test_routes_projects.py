@@ -66,6 +66,38 @@ async def test_list_returns_only_my_projects_newest_first_with_modality(client, 
     assert [p["draftDataset"]["modality"] for p in listed] == ["tabular", "text"]
 
 
+async def test_list_summarises_data_and_training_for_each_project(client, new_user, db):
+    c = await new_user()
+    quiet = await make_project(c, "text_classification", "quiet")
+    busy = await make_project(c, "text_classification", "busy")
+    async with db() as s:
+        draft_id = (
+            await s.execute(
+                sa.select(DatasetVersion.id).where(
+                    DatasetVersion.dataset_id == uuid.UUID(busy["id"]), DatasetVersion.version_tag.is_(None)
+                )
+            )
+        ).scalar_one()
+        for status in ("succeeded", "running"):
+            s.add(
+                TrainingRun(
+                    project_id=uuid.UUID(busy["id"]),
+                    dataset_version_id=draft_id,
+                    name=status,
+                    status=status,
+                    hyperparameters={},
+                )
+            )
+        await s.commit()
+
+    by_id = {p["id"]: p for p in (await c.get("/api/projects")).json()["projects"]}
+    assert (by_id[quiet["id"]]["itemCount"], by_id[quiet["id"]]["runCount"]) == (0, 0)
+    assert by_id[quiet["id"]]["lastRunStatus"] is None
+    assert by_id[busy["id"]]["runCount"] == 2
+    assert by_id[busy["id"]]["lastRunStatus"] in ("running", "succeeded")
+    assert by_id[busy["id"]]["lastActivityAt"] >= by_id[busy["id"]]["createdAt"]
+
+
 async def test_update_renames_and_can_clear_the_description(client, new_user):
     c = await new_user()
     p = await make_project(c)
