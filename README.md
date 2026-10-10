@@ -266,8 +266,8 @@ configured with: either one a backend ships (still `builtin` in the API) or an *
 owner. What a run produces is a **fine-tuned model**. Only the labels, the web route (`/imported-models`) and
 the web component names changed: API fields, DB columns and the `builtin`/`custom` identifiers did not.
 
-A user can fine-tune a model the platform did not ship: a public **Hugging Face Hub** reference, or
-**uploaded weights**. An imported model (`custom_models`) is **global** (no owner: an admin adds it for
+A user can fine-tune a model the platform did not ship: a **Hugging Face Hub** reference (public, or
+private/gated through the user's own saved token, see below), or **uploaded weights**. An imported model (`custom_models`) is **global** (no owner: an admin adds it for
 everyone) or **private** to its owner, and lists the tasks it is offered for. It is addressed as
 `custom:{uuid}` in the hyperparameter the backend names for its model choice (`encoderId` for Ludwig),
 so it shares the picker with the built-ins. `services/model_catalog.py` decides who sees what; someone
@@ -283,8 +283,19 @@ it `ready`. A model that is not acceptable fails immediately with a message the 
 What is refused, because the files came from a user or a Hub author (`services/custom_models.py`):
 pickle-based weights and any code (`.bin`, `.pt`, `.pkl`, `.py`, ...; use `.safetensors`), symlinks,
 paths that climb out of the folder, models that need `trust_remote_code` (`auto_map`), private or gated
-Hub repos, and anything over `MAX_CUSTOM_MODEL_BYTES` (default 5 GiB, the S3 single-PUT limit), before
+Hub repos for a model nobody owns (a shared one), and anything over `MAX_CUSTOM_MODEL_BYTES` (default 5 GiB, the S3 single-PUT limit), before
 and after decompression.
+
+**Private and gated Hub models.** In Settings > Integrations a user saves a Hugging Face access token
+(`PUT /api/integrations/huggingface`). It is checked with Hugging Face, stored encrypted in
+`user_integrations` (Fernet, `services/secrets.py`; the key is `THESEUS_SECRETS_KEY`, else derived from
+`JWT_SECRET`) and never returned by the API: only the account name and the token's last four characters are.
+It is used only to look up and download models **that same user** imported (`/api/models/inspect`, the
+validation job and `ensure_run_custom_model` each resolve the owner's token). A shared (global) model has
+no owner, so it is always fetched anonymously and only a public repository passes. With no token the Hub is
+asked with `token=False`, so a token configured on the server (`HF_TOKEN`, a cached login) is never used on
+anyone's behalf. If the token is later removed, a private model keeps working until its files have to be
+fetched again, which then fails with a message asking the user to reconnect.
 
 A trainer backend reads a custom model from a local directory whose path is written into the compiled
 config, so the path is deterministic (model id + pinned revision or checksum) and

@@ -75,6 +75,11 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   item filter, class stats, merges and the health report. A class belongs to one box, so the bulk
   "classify" action refuses a detection project, and the upload route takes per-file `boxes`, never
   `classId`, for one.
+- **A run's headline score is not accuracy.** `services/evaluation_score.py` picks it from the evaluation report's
+  `overall` block (accuracy for a classifier, mAP50 for a detector, R² for a regressor) and ships it as
+  `evaluation.score` (`metric`, `label`, `value`, `higherIsBetter`) on every run summary. The runs list, the "best
+  run" marker, the overview and the comparison read that via `web/lib/runScore.ts`; don't hard-code `accuracy` in a
+  new place. A backend that reports a new kind of metric adds a row to `_SCORES` there.
 - **Class list correctness for exports.** Any code touching model export must source the label
   index order from the trained model itself — for Ludwig, `training_set_metadata.json`'s
   `idx2str` (written into `theseus-training/{runId}/results/**/model/`), for YOLO the `names.json`
@@ -130,6 +135,11 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   checksum) is immutable after creation, and `training_runs.custom_model_id` is `ON DELETE RESTRICT`: a model a
   run used is archived, not deleted. A backend opts in via `custom_model_kinds`, `validate_custom_model` and the
   `custom` argument of `compile` (passed only when set, so a backend that predates it still compiles).
+  A private or gated Hugging Face repo is fetched with its **owner's** saved token only
+  (`services/integrations.huggingface_token_for(row.owner_user_id)`), never anyone else's and never a global
+  model's. Every Hub call goes through `custom_models._hub_token`, which turns "no token" into `False`: passing
+  `None` would let `huggingface_hub` fall back to `HF_TOKEN` or a cached login on the server. Tokens are only
+  stored through `services/secrets.encrypt` and never returned by an API.
 - **Job handlers must stay fast and idempotent.** `theseus/jobs/dispatcher.py` claims work off the
   domain tables themselves (`training_runs`, `model_exports` — see
   `README.md`'s "Jobs" section) with a guarded compare-and-swap
