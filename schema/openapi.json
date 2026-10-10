@@ -2824,7 +2824,7 @@
           "models"
         ],
         "summary": "Inspect Model",
-        "description": "Check a model before importing it, creating nothing: a Hugging Face repository by id (pin, size,\nweights, config.json) or a config.json read out of an uploaded zip. Also used by the admin form.",
+        "description": "Check a model before importing it, creating nothing: a Hugging Face repository by id (pin, size,\nweights, config.json) or a config.json read out of an uploaded zip. A private or gated repository is\nlooked up with the caller's own saved Hugging Face token, unless the model is being made for everyone.",
         "operationId": "inspect_model",
         "requestBody": {
           "content": {
@@ -3150,6 +3150,80 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/integrations/huggingface": {
+      "get": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Get Huggingface",
+        "operationId": "get_huggingface",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuggingFaceStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Connect Huggingface",
+        "description": "Check the token with Hugging Face, then save it encrypted (replacing any earlier one).",
+        "operationId": "connect_huggingface",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectHuggingFaceBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuggingFaceStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "integrations"
+        ],
+        "summary": "Disconnect Huggingface",
+        "description": "Forget the saved token. A private model already imported works until its files must be fetched again.",
+        "operationId": "disconnect_huggingface",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           }
         }
       }
@@ -5532,6 +5606,21 @@
         ],
         "title": "ClassifyResponse"
       },
+      "ConnectHuggingFaceBody": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 8,
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "ConnectHuggingFaceBody"
+      },
       "CreateAnnotationBody": {
         "properties": {
           "annotatorId": {
@@ -6162,6 +6251,11 @@
             "type": "boolean",
             "title": "Archived"
           },
+          "private": {
+            "type": "boolean",
+            "title": "Private",
+            "default": false
+          },
           "scope": {
             "type": "string",
             "enum": [
@@ -6630,6 +6724,16 @@
               }
             ],
             "title": "Macrof1"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -6639,7 +6743,7 @@
           "macroF1"
         ],
         "title": "EvaluationBrief",
-        "description": "Denormalized accuracy / macro-F1, so lists and comparisons need no per-run round trip."
+        "description": "Denormalized accuracy / macro-F1 and the headline score, so lists need no per-run round trip."
       },
       "EvaluationErrorRow": {
         "properties": {
@@ -6845,6 +6949,35 @@
           "evaluation"
         ],
         "title": "EvaluationResponse"
+      },
+      "EvaluationScore": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "higherIsBetter": {
+            "type": "boolean",
+            "title": "Higherisbetter"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "label",
+          "value",
+          "higherIsBetter"
+        ],
+        "title": "EvaluationScore",
+        "description": "A run's headline metric: accuracy for a classifier, mAP50 for a detector, R-squared for a regressor."
       },
       "ExportAccepted": {
         "properties": {
@@ -7095,6 +7228,54 @@
         ],
         "title": "HealthClassCount"
       },
+      "HuggingFaceStatus": {
+        "properties": {
+          "connected": {
+            "type": "boolean",
+            "title": "Connected"
+          },
+          "accountName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accountname"
+          },
+          "tokenHint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokenhint"
+          },
+          "connectedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connectedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connected"
+        ],
+        "title": "HuggingFaceStatus",
+        "description": "Whether the caller has saved a Hugging Face token. The token itself is never sent back."
+      },
       "InspectModelBody": {
         "properties": {
           "sourceRef": {
@@ -7121,6 +7302,11 @@
               }
             ],
             "title": "Config"
+          },
+          "shared": {
+            "type": "boolean",
+            "title": "Shared",
+            "default": false
           }
         },
         "type": "object",
@@ -7215,6 +7401,11 @@
             },
             "type": "array",
             "title": "Warnings"
+          },
+          "private": {
+            "type": "boolean",
+            "title": "Private",
+            "default": false
           }
         },
         "type": "object",
@@ -8719,6 +8910,46 @@
                 "type": "null"
               }
             ]
+          },
+          "itemCount": {
+            "type": "integer",
+            "title": "Itemcount",
+            "default": 0
+          },
+          "runCount": {
+            "type": "integer",
+            "title": "Runcount",
+            "default": 0
+          },
+          "lastRunStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "queued",
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "canceled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastrunstatus"
+          },
+          "lastActivityAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastactivityat"
           }
         },
         "type": "object",
