@@ -1,7 +1,7 @@
 /**
  * RunComparisonPanel – compare a handful of runs: an overlay of one metric across runs, and a table
- * of status, accuracy/macro-F1 (denormalized onto the run summary from its evaluation report) and
- * the hyperparameters each run started with. Hyperparameters and per-epoch metrics aren't in the
+ * of status, the task's headline score and macro-F1 (denormalized onto the run summary from its evaluation
+ * report) and the hyperparameters each run started with. Hyperparameters and per-epoch metrics aren't in the
  * run list response, so each selected run fetches its own detail.
  */
 
@@ -23,10 +23,12 @@ function ComparisonRow({
   isCurrent,
   modelKeys,
   labelOf,
+  showMacroF1,
 }: {
   run: TrainingRunSummary
   color: string
   isCurrent: boolean
+  showMacroF1: boolean
   /** Hyperparameter keys that hold the model choice; shown as the model's name rather than as a knob. */
   modelKeys: ReadonlySet<string>
   /** Display name for a hyperparameter key. */
@@ -50,8 +52,8 @@ function ComparisonRow({
       <Table.Td>
         <StatusBadge value={run.status} colorMap={STATUS_COLORS} />
       </Table.Td>
-      <Table.Td className="tnum">{best?.accuracy != null ? best.accuracy.toFixed(3) : '—'}</Table.Td>
-      <Table.Td className="tnum">{best?.macroF1 != null ? best.macroF1.toFixed(3) : '—'}</Table.Td>
+      <Table.Td className="tnum">{best?.score ? best.score.value.toFixed(3) : '—'}</Table.Td>
+      {showMacroF1 && <Table.Td className="tnum">{best?.macroF1 != null ? best.macroF1.toFixed(3) : '—'}</Table.Td>}
       <Table.Td>
         <Text size="xs" c="dimmed" maw={320}>
           {hyperparameters
@@ -112,6 +114,10 @@ export function RunComparisonPanel({
     })
     return Array.from(byEpoch.values()).sort((a, b) => a.epoch - b.epoch)
   }, [details, selected, activeMetric, split])
+
+  // The runs of one project share a task, so they share a headline score; fall back to a neutral name if none has one.
+  const scoreLabel = selected.find((r) => r.evaluation?.score)?.evaluation?.score?.label ?? 'Score'
+  const showMacroF1 = selected.some((r) => r.evaluation?.macroF1 != null)
 
   const colorFor = (id: string) => CHART_COLORS[Math.max(0, selectedIds.indexOf(id)) % CHART_COLORS.length]
 
@@ -184,8 +190,8 @@ export function RunComparisonPanel({
                 <Table.Tr>
                   <Table.Th>Run</Table.Th>
                   <Table.Th>Status</Table.Th>
-                  <Table.Th>Accuracy</Table.Th>
-                  <Table.Th>Macro F1</Table.Th>
+                  <Table.Th>{scoreLabel}</Table.Th>
+                  {showMacroF1 && <Table.Th>Macro F1</Table.Th>}
                   <Table.Th>Hyperparameters</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -196,6 +202,7 @@ export function RunComparisonPanel({
                     run={run}
                     color={colorFor(run.id)}
                     isCurrent={run.id === currentRunId}
+                    showMacroF1={showMacroF1}
                     modelKeys={modelKeys}
                     labelOf={labelOf}
                   />

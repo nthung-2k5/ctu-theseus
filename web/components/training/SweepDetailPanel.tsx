@@ -1,9 +1,9 @@
 /**
  * SweepDetailPanel – trial leaderboard for one sweep, plus a
- * hyperparameter-vs-accuracy scatter for whichever swept knob is numeric.
+ * hyperparameter-vs-score scatter for whichever swept knob is numeric.
  * Every trial is an ordinary training run (see server/lib/sweep.ts), so
- * this is the Phase 1 evaluation data (accuracy/macroF1, already
- * denormalized onto the run) filtered down to one sweep's runs — no
+ * this is the Phase 1 evaluation data (the task's headline score and macroF1,
+ * already denormalized onto the run) filtered down to one sweep's runs — no
  * separate metrics pipeline for sweeps.
  */
 
@@ -27,10 +27,9 @@ const SWEEP_STATUS_COLORS: Record<string, string> = {
   canceled: 'gray',
 }
 
-function trialHeadlineMetric(trial: SweepTrial): number | null {
-  if (trial.evaluation?.status !== 'success') return null
-  return trial.evaluation.accuracy ?? trial.evaluation.macroF1 ?? null
-}
+/** The trial's headline score (accuracy, mAP50, R²...), as the server picked it for the task. */
+const trialScore = (trial: SweepTrial) =>
+  trial.evaluation?.status === 'success' ? (trial.evaluation.score ?? null) : null
 
 export function SweepDetailPanel({
   projectId,
@@ -69,15 +68,21 @@ export function SweepDetailPanel({
   const numericKnobs = Object.keys(searchSpace).filter((key) => !modelKeys.has(key))
   const effectiveKnob = scatterKnob && numericKnobs.includes(scatterKnob) ? scatterKnob : (numericKnobs[0] ?? null)
 
+  // Every trial trains the same task, so they share one metric; the first scored trial names it.
+  const headline = trials.map(trialScore).find((score) => score != null) ?? null
+  const scoreLabel = headline?.label ?? 'Score'
+  const higherIsBetter = headline?.higherIsBetter ?? true
+
   const bestTrialId = useMemo(() => {
-    let best: { id: string; metric: number } | null = null
+    let best: { id: string; value: number } | null = null
     for (const trial of trials) {
-      const metric = trialHeadlineMetric(trial)
-      if (metric === null) continue
-      if (!best || metric > best.metric) best = { id: trial.id, metric }
+      const score = trialScore(trial)
+      if (score === null) continue
+      const value = higherIsBetter ? score.value : -score.value
+      if (!best || value > best.value) best = { id: trial.id, value }
     }
     return best?.id
-  }, [trials])
+  }, [trials, higherIsBetter])
 
   const scatterData = useMemo(() => {
     if (!effectiveKnob) return []
@@ -86,9 +91,9 @@ export function SweepDetailPanel({
     for (const trial of trials) {
       const hyperparameters = trial.hyperparameters as Record<string, unknown> | null
       const x = hyperparameters?.[knob]
-      const y = trialHeadlineMetric(trial)
-      if (typeof x !== 'number' || y === null) continue
-      points.push({ [knob]: x, accuracy: y })
+      const y = trialScore(trial)?.value
+      if (typeof x !== 'number' || y === undefined) continue
+      points.push({ [knob]: x, score: y })
     }
     return [{ color: 'blue.6', name: 'Trials', data: points }]
   }, [trials, effectiveKnob])
@@ -131,7 +136,7 @@ export function SweepDetailPanel({
                 <div>
                   <Group justify="space-between" mb="xs">
                     <Text size="sm" fw={600}>
-                      Accuracy vs. {effectiveKnob ? labelOf(effectiveKnob) : ''}
+                      {scoreLabel} vs. {effectiveKnob ? labelOf(effectiveKnob) : ''}
                     </Text>
                     {numericKnobs.length > 1 && (
                       <Select
@@ -148,7 +153,7 @@ export function SweepDetailPanel({
                     <ScatterChart
                       h={220}
                       data={scatterData}
-                      dataKey={{ x: effectiveKnob, y: 'accuracy' }}
+                      dataKey={{ x: effectiveKnob, y: 'score' }}
                       xAxisLabel={labelOf(effectiveKnob)}
                       withLegend={false}
                     />
@@ -162,7 +167,7 @@ export function SweepDetailPanel({
                     <Table.Tr>
                       <Table.Th>Trial</Table.Th>
                       <Table.Th>Status</Table.Th>
-                      <Table.Th>Accuracy</Table.Th>
+                      <Table.Th>{scoreLabel}</Table.Th>
                       <Table.Th>Macro F1</Table.Th>
                       <Table.Th>Hyperparameters</Table.Th>
                     </Table.Tr>
@@ -185,9 +190,7 @@ export function SweepDetailPanel({
                           <Table.Td>
                             <StatusBadge value={trial.status} colorMap={STATUS_COLORS} size="sm" />
                           </Table.Td>
-                          <Table.Td>
-                            {trial.evaluation?.accuracy != null ? trial.evaluation.accuracy.toFixed(3) : '—'}
-                          </Table.Td>
+                          <Table.Td>{trialScore(trial) ? trialScore(trial)?.value.toFixed(3) : '—'}</Table.Td>
                           <Table.Td>
                             {trial.evaluation?.macroF1 != null ? trial.evaluation.macroF1.toFixed(3) : '—'}
                           </Table.Td>
