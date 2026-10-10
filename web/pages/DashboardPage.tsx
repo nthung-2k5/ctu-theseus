@@ -1,7 +1,8 @@
 import { Badge, Button, Group, Paper, SimpleGrid, Skeleton, Stack, Text } from '@mantine/core'
 import { PlusIcon } from '@phosphor-icons/react'
 import { openCreateProjectModal } from '@public/components/CreateProjectModal'
-import { LinkCard, PageHeader, QueryBoundary } from '@public/components/ui'
+import { STATUS_COLORS } from '@public/components/training/constants'
+import { LinkCard, PageHeader, QueryBoundary, StatusBadge } from '@public/components/ui'
 import type { ProjectTask } from '@public/lib/api/enums'
 import { formatDate } from '@public/lib/format'
 import { MODALITY_META } from '@public/lib/modality'
@@ -78,8 +79,15 @@ export function DashboardPage() {
                 <Text size="xs" c="dimmed" lineClamp={2} mih={32}>
                   {project.description || 'No description'}
                 </Text>
-                <Text size="xs" c="dimmed" className="tnum" mt="sm">
-                  Created {formatDate(project.createdAt)}
+                <Group justify="space-between" mt="sm" wrap="nowrap" gap="xs">
+                  <Text size="xs" c="dimmed" className="tnum">
+                    {(project.itemCount ?? 0).toLocaleString()} item{project.itemCount === 1 ? '' : 's'} ·{' '}
+                    {project.runCount ?? 0} run{project.runCount === 1 ? '' : 's'}
+                  </Text>
+                  {project.lastRunStatus && <StatusBadge value={project.lastRunStatus} colorMap={STATUS_COLORS} />}
+                </Group>
+                <Text size="xs" c="dimmed" className="tnum" mt={2}>
+                  Active {formatDate(project.lastActivityAt ?? project.createdAt)}
                 </Text>
               </LinkCard>
             )
