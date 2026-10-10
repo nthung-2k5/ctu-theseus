@@ -5,6 +5,7 @@ import {
   Group,
   Loader,
   MultiSelect,
+  Paper,
   SegmentedControl,
   Text,
   TextInput,
@@ -29,11 +30,12 @@ import {
   LinkButton,
   PageHeader,
   QueryBoundary,
-  SectionLabel,
   StatusBadge,
 } from '@public/components/ui'
 import { deleteRun as deleteRunRequest, getListRunsQueryKey } from '@public/lib/api/generated/training/training'
+import { formatDate } from '@public/lib/format'
 import { projectDetailQueryOptions, useProjectSweeps, useTrainingRuns } from '@public/lib/queries'
+import { bestRun, goodness, headlineScore, scoreOf } from '@public/lib/runScore'
 import type { SweepSummary, TrainingRunSummary } from '@public/store/types'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
@@ -61,9 +63,20 @@ export function TrainingPage() {
   const hasReadySnapshot = project.dataset?.versions?.some((v) => v.status === 'ready') ?? false
   const versionTag = (id: string) => project.dataset?.versions?.find((v) => v.id === id)?.versionTag ?? id.slice(0, 8)
 
-  const [search, setSearch] = useState('')
-  const [statuses, setStatuses] = useState<string[]>([])
-  const [sort, setSort] = useState<'newest' | 'best'>('newest')
+  // The filters live in the URL, like the data page's, so a filtered list survives a reload and can be shared.
+  const { q = '', status, sort = 'newest', show = 'runs' } = routeApi.useSearch()
+  const statuses = useMemo(() => (status ? status.split(',').filter(Boolean) : []), [status])
+  const setFilter = (patch: { q?: string; status?: string[]; sort?: 'newest' | 'best'; show?: 'runs' | 'sweeps' }) =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        ...('q' in patch ? { q: patch.q || undefined } : {}),
+        ...('status' in patch ? { status: patch.status?.length ? patch.status.join(',') : undefined } : {}),
+        ...('sort' in patch ? { sort: patch.sort === 'newest' ? undefined : patch.sort } : {}),
+        ...('show' in patch ? { show: patch.show === 'runs' ? undefined : patch.show } : {}),
+      }),
+      replace: true,
+    })
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set())
 
   const toggleCompare = (runId: string) =>
@@ -74,26 +87,23 @@ export function TrainingPage() {
       return next
     })
 
-  // The run with the highest accuracy across every successful evaluation in the project.
-  const bestRunId = runs.reduce<{ id: string; accuracy: number } | null>((best, run) => {
-    const accuracy = run.evaluation?.status === 'success' ? run.evaluation.accuracy : null
-    if (accuracy == null) return best
-    return !best || accuracy > best.accuracy ? { id: run.id, accuracy } : best
-  }, null)?.id
+  // Every run of a project trains the same task, so they share one headline score (accuracy, mAP50, R²...).
+  const headline = headlineScore(runs)
+  const scoreLabel = headline?.label ?? 'Score'
+  const higherIsBetter = headline?.higherIsBetter ?? true
+  const bestRunId = bestRun(runs)?.id
 
   const visible = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const accuracyOf = (r: TrainingRunSummary) =>
-      r.evaluation?.status === 'success' ? (r.evaluation.accuracy ?? -1) : -1
+    const needle = q.trim().toLowerCase()
     return runs
-      .filter((r) => (q ? r.name.toLowerCase().includes(q) || r.id.startsWith(q) : true))
+      .filter((r) => (needle ? r.name.toLowerCase().includes(needle) || r.id.startsWith(needle) : true))
       .filter((r) => (statuses.length > 0 ? statuses.includes(r.status) : true))
       .sort((a, b) =>
         sort === 'best'
-          ? accuracyOf(b) - accuracyOf(a)
+          ? goodness(b, higherIsBetter) - goodness(a, higherIsBetter)
           : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       )
-  }, [runs, search, statuses, sort])
+  }, [runs, q, statuses, sort, higherIsBetter])
 
   const deleteRun = useMutation({
     mutationFn: async (runId: string) => deleteRunRequest(runId),
@@ -121,15 +131,12 @@ export function TrainingPage() {
   const openRun = (runId: string) =>
     navigate({ to: '/project/$projectId/training/$runId', params: { projectId, runId } })
 
-  const compare = () => {
-    const [first, ...rest] = [...compareIds]
-    if (!first) return
+  const compare = () =>
     void navigate({
-      to: '/project/$projectId/training/$runId/compare',
-      params: { projectId, runId: first },
-      search: { with: rest.join(',') || undefined },
+      to: '/project/$projectId/training/compare',
+      params: { projectId },
+      search: { runs: [...compareIds].join(',') },
     })
-  }
 
   const runColumns: DataTableColumn<TrainingRunSummary>[] = [
     {
@@ -156,7 +163,7 @@ export function TrainingPage() {
               {run.name}
             </Text>
             {run.id === bestRunId && (
-              <Tooltip label="Highest accuracy in this project">
+              <Tooltip label={`Best ${scoreLabel} in this project`}>
                 <TrophyIcon size={14} weight="fill" color="var(--mantine-color-yellow-6)" />
               </Tooltip>
             )}
@@ -189,16 +196,17 @@ export function TrainingPage() {
       ),
     },
     {
-      key: 'accuracy',
-      header: 'Accuracy',
+      key: 'score',
+      header: scoreLabel,
       fit: true,
-      render: (run) => (
-        <Text size="sm" className="tnum" c={run.evaluation?.accuracy != null ? undefined : 'dimmed'}>
-          {run.evaluation?.status === 'success' && run.evaluation.accuracy != null
-            ? run.evaluation.accuracy.toFixed(3)
-            : '—'}
-        </Text>
-      ),
+      render: (run) => {
+        const score = scoreOf(run)
+        return (
+          <Text size="sm" className="tnum" c={score ? undefined : 'dimmed'}>
+            {score ? score.value.toFixed(3) : '—'}
+          </Text>
+        )
+      },
     },
     {
       key: 'createdAt',
@@ -206,7 +214,7 @@ export function TrainingPage() {
       fit: true,
       render: (run) => (
         <Text size="xs" c="dimmed" className="tnum">
-          {new Date(run.createdAt).toLocaleDateString()}
+          {formatDate(run.createdAt)}
         </Text>
       ),
     },
@@ -226,7 +234,7 @@ export function TrainingPage() {
             Evaluate
           </LinkButton>
           <LinkButton
-            to="/project/$projectId/playground/$runId"
+            to="/project/$projectId/training/$runId/try"
             params={{ projectId, runId: run.id }}
             size="compact-xs"
             variant="light"
@@ -295,7 +303,7 @@ export function TrainingPage() {
       fit: true,
       render: (sweep) => (
         <Text size="xs" c="dimmed" className="tnum">
-          {new Date(sweep.createdAt).toLocaleDateString()}
+          {formatDate(sweep.createdAt)}
         </Text>
       ),
     },
@@ -308,16 +316,6 @@ export function TrainingPage() {
         description="Training runs and sweeps: monitor them live, then evaluate, test or export the result."
         actions={
           <>
-            {compareIds.size > 0 && (
-              <Button
-                variant="light"
-                leftSection={<ScalesIcon size={14} />}
-                disabled={compareIds.size < 2}
-                onClick={compare}
-              >
-                Compare ({compareIds.size})
-              </Button>
-            )}
             <LinkButton
               to="/project/$projectId/training/new"
               params={{ projectId }}
@@ -341,88 +339,127 @@ export function TrainingPage() {
         }
       />
 
-      {runs.length > 0 && (
-        <Group gap="xs" wrap="wrap">
-          <TextInput
-            size="xs"
-            placeholder="Search runs…"
-            leftSection={<MagnifyingGlassIcon size={14} />}
-            value={search}
-            onChange={(e) => setSearch(e.currentTarget.value)}
-            style={{ flexGrow: 1, minWidth: 200, maxWidth: 320 }}
-          />
-          <MultiSelect
-            size="xs"
-            placeholder={statuses.length === 0 ? 'All statuses' : undefined}
-            data={STATUSES}
-            value={statuses}
-            onChange={setStatuses}
-            clearable
-            w={220}
-          />
+      <Group gap="xs" wrap="wrap">
+        {sweeps.length > 0 && (
           <SegmentedControl
-            ml="auto"
-            value={sort}
-            onChange={(v) => setSort(v as 'newest' | 'best')}
+            value={show}
+            onChange={(v) => setFilter({ show: v as 'runs' | 'sweeps' })}
             data={[
-              { value: 'newest', label: 'Newest' },
-              { value: 'best', label: 'Best accuracy' },
+              { value: 'runs', label: `Runs (${runs.length})` },
+              { value: 'sweeps', label: `Sweeps (${sweeps.length})` },
             ]}
           />
-        </Group>
+        )}
+        {show === 'runs' && runs.length > 0 && (
+          <>
+            <TextInput
+              size="xs"
+              placeholder="Search runs…"
+              leftSection={<MagnifyingGlassIcon size={14} />}
+              value={q}
+              onChange={(e) => setFilter({ q: e.currentTarget.value })}
+              style={{ flexGrow: 1, minWidth: 200, maxWidth: 320 }}
+            />
+            <MultiSelect
+              size="xs"
+              placeholder={statuses.length === 0 ? 'All statuses' : undefined}
+              data={STATUSES}
+              value={statuses}
+              onChange={(v) => setFilter({ status: v })}
+              clearable
+              w={220}
+            />
+            <SegmentedControl
+              ml="auto"
+              value={sort}
+              onChange={(v) => setFilter({ sort: v as 'newest' | 'best' })}
+              data={[
+                { value: 'newest', label: 'Newest' },
+                { value: 'best', label: `Best ${scoreLabel}` },
+              ]}
+            />
+          </>
+        )}
+      </Group>
+
+      {show === 'sweeps' && sweeps.length > 0 ? (
+        <DataTable
+          columns={sweepColumns}
+          data={sweeps}
+          getRowKey={(sweep) => sweep.id}
+          onRowClick={(sweep) =>
+            navigate({
+              to: '/project/$projectId/training/sweeps/$sweepId',
+              params: { projectId, sweepId: sweep.id },
+            })
+          }
+        />
+      ) : (
+        <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
+          {runs.length === 0 ? (
+            <EmptyState
+              icon={BrainIcon}
+              title="No runs yet"
+              description={
+                hasReadySnapshot ? 'Create your first training run.' : 'Build a snapshot first, then train on it.'
+              }
+              action={
+                hasReadySnapshot ? (
+                  <LinkButton
+                    to="/project/$projectId/training/new"
+                    params={{ projectId }}
+                    search={{ mode: 'run' }}
+                    leftSection={<PlusIcon size={14} />}
+                  >
+                    New run
+                  </LinkButton>
+                ) : (
+                  <LinkButton to="/project/$projectId/snapshots/new" params={{ projectId }} variant="default">
+                    Build a snapshot
+                  </LinkButton>
+                )
+              }
+            />
+          ) : (
+            <DataTable
+              columns={runColumns}
+              data={visible}
+              getRowKey={(run) => run.id}
+              onRowClick={(run) => openRun(run.id)}
+              emptyMessage="No runs match the filters"
+            />
+          )}
+        </QueryBoundary>
       )}
 
-      <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
-        {runs.length === 0 ? (
-          <EmptyState
-            icon={BrainIcon}
-            title="No runs yet"
-            description={
-              hasReadySnapshot ? 'Create your first training run.' : 'Build a snapshot first, then train on it.'
-            }
-            action={
-              hasReadySnapshot ? (
-                <LinkButton
-                  to="/project/$projectId/training/new"
-                  params={{ projectId }}
-                  search={{ mode: 'run' }}
-                  leftSection={<PlusIcon size={14} />}
-                >
-                  New run
-                </LinkButton>
-              ) : (
-                <LinkButton to="/project/$projectId/snapshots/new" params={{ projectId }} variant="default">
-                  Build a snapshot
-                </LinkButton>
-              )
-            }
-          />
-        ) : (
-          <DataTable
-            columns={runColumns}
-            data={visible}
-            getRowKey={(run) => run.id}
-            onRowClick={(run) => openRun(run.id)}
-            emptyMessage="No runs match the filters"
-          />
-        )}
-      </QueryBoundary>
-
-      {sweeps.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <SectionLabel>Sweeps</SectionLabel>
-          <DataTable
-            columns={sweepColumns}
-            data={sweeps}
-            getRowKey={(sweep) => sweep.id}
-            onRowClick={(sweep) =>
-              navigate({
-                to: '/project/$projectId/training/sweeps/$sweepId',
-                params: { projectId, sweepId: sweep.id },
-              })
-            }
-          />
-        </div>
+      {compareIds.size > 0 && (
+        <Paper
+          p="xs"
+          shadow="md"
+          style={{ position: 'sticky', bottom: 12, zIndex: 10 }}
+          role="region"
+          aria-label="Selected runs"
+        >
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="sm" className="tnum">
+              {compareIds.size} run{compareIds.size === 1 ? '' : 's'} selected
+              {compareIds.size < 2 && (
+                <Text span c="dimmed">
+                  {' '}
+                  — pick one more to compare
+                </Text>
+              )}
+            </Text>
+            <Group gap="xs" wrap="nowrap">
+              <Button variant="subtle" color="gray" onClick={() => setCompareIds(new Set())}>
+                Clear
+              </Button>
+              <Button leftSection={<ScalesIcon size={14} />} disabled={compareIds.size < 2} onClick={compare}>
+                Compare
+              </Button>
+            </Group>
+          </Group>
+        </Paper>
       )}
     </div>
   )
