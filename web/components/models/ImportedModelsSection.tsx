@@ -6,7 +6,7 @@
  * Failed, with the reason) without a reload.
  */
 
-import { Badge, Button, Group, Modal, Progress, Select, Stack, Switch, Text, TextInput } from '@mantine/core'
+import { Badge, Button, Group, Modal, Progress, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
@@ -14,6 +14,7 @@ import {
   ArrowClockwiseIcon,
   CloudArrowUpIcon,
   CubeIcon,
+  LockSimpleIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   TrashIcon,
@@ -159,9 +160,18 @@ export function ImportedModelsSection({ api }: { api: ModelsApi }) {
       header: 'Imported model',
       render: (m) => (
         <div style={{ minWidth: 0 }}>
-          <Text size="sm" fw={600}>
-            {m.name}
-          </Text>
+          <Group gap={6} wrap="nowrap">
+            <Text size="sm" fw={600}>
+              {m.name}
+            </Text>
+            {m.private && (
+              <Tooltip label="Private or gated on Hugging Face: fetched with its owner's saved token">
+                <Badge size="xs" variant="outline" color="gray" leftSection={<LockSimpleIcon size={10} />}>
+                  Private
+                </Badge>
+              </Tooltip>
+            )}
+          </Group>
           <Text size="xs" c="dimmed">
             {m.sourceKind === 'hub' ? (m.sourceRef ?? 'Hub') : 'uploaded'}
             {m.revision ? ` @ ${m.revision.slice(0, 7)}` : ''}

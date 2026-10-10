@@ -40,14 +40,17 @@ import {
   CheckCircleIcon,
   CloudArrowDownIcon,
   FileZipIcon,
+  LockSimpleIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react'
 import { apiErrorMessage } from '@public/lib/api/client'
+import { getGetHuggingfaceQueryOptions } from '@public/lib/api/generated/integrations/integrations'
 import type { CustomModelKindOut, InspectModelResponse } from '@public/lib/api/generated/models'
 import { getListCustomModelKindsQueryOptions, inspectModel } from '@public/lib/api/generated/models/models'
 import { formatBytes, IMPORTED_MODELS_KEY, type ModelsApi, taskLabel } from '@public/lib/importedModels'
 import { readZipConfig } from '@public/lib/modelZip'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ModelFileDropzone } from './ModelFileDropzone'
 import { useModelUpload } from './useModelUpload'
@@ -103,7 +106,6 @@ export function ImportedModelForm({
   const { upload, progress } = useModelUpload(api)
 
   const [step, setStep] = useState(0)
-  const [source, setSource] = useState<Source>('upload')
   const [file, setFile] = useState<File | null>(null)
   const [hubId, setHubId] = useState('')
   const [inspection, setInspection] = useState<InspectModelResponse | null>(null)
@@ -113,6 +115,16 @@ export function ImportedModelForm({
   const [byName, setByName] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+
+  // A model an admin makes is shared with everyone, so it can only come from a public repository; anyone else's
+  // lookups use their own saved Hugging Face token, if they have connected one.
+  const isShared = api.audience === 'admin'
+  const [source, setSource] = useState<Source>('upload')
+  const { data: hf } = useQuery({
+    ...getGetHuggingfaceQueryOptions(),
+    enabled: opened && source === 'hub' && !isShared,
+  })
+  const hfConnected = hf?.connected === true
 
   const busy = progress !== null
   const fromSource = kinds.filter((k) => k.sourceKinds.includes(source))
@@ -149,7 +161,7 @@ export function ImportedModelForm({
 
   const check = useMutation({
     mutationFn: async (): Promise<InspectModelResponse> => {
-      if (source === 'hub') return inspectModel({ sourceRef: hubId.trim() })
+      if (source === 'hub') return inspectModel({ sourceRef: hubId.trim(), shared: isShared })
       const config = file ? await readZipConfig(file) : null
       if (config) return inspectModel({ config })
       return { ...EMPTY_INSPECTION, warnings: [NO_CONFIG_WARNING] }
@@ -248,7 +260,11 @@ export function ImportedModelForm({
                 selected={source === 'hub'}
                 icon={<CloudArrowDownIcon size={26} />}
                 title="Hugging Face Hub"
-                description="A public repository. Its current version is pinned when it is imported."
+                description={
+                  isShared
+                    ? 'A public repository. Its current version is pinned when it is imported.'
+                    : 'A public repository, or a private or gated one your Hugging Face account can read. Its current version is pinned when it is imported.'
+                }
                 onClick={() => chooseSource('hub')}
               />
             </SimpleGrid>
@@ -263,6 +279,21 @@ export function ImportedModelForm({
                 value={hubId}
                 onChange={(e) => setHubId(e.currentTarget.value)}
                 onKeyDown={(e) => e.key === 'Enter' && startCheck()}
+                description={
+                  isShared ? (
+                    'Models shared with everyone can only come from public repositories.'
+                  ) : hfConnected ? (
+                    `Connected as ${hf?.accountName ?? 'your Hugging Face account'}: private and gated repositories you can read will work.`
+                  ) : (
+                    <>
+                      Private or gated repository?{' '}
+                      <Anchor component={Link} to="/settings" target="_blank" size="xs">
+                        Connect your Hugging Face account
+                      </Anchor>{' '}
+                      first.
+                    </>
+                  )
+                }
               />
             )}
 
@@ -298,6 +329,11 @@ export function ImportedModelForm({
                       {describeInspection(inspection, source === 'upload' ? file?.size : undefined)}
                     </Text>
                   </div>
+                  {inspection.private && (
+                    <Badge color="gray" variant="light" leftSection={<LockSimpleIcon size={12} />}>
+                      Private
+                    </Badge>
+                  )}
                   {blocked ? (
                     <Badge color="red" variant="light">
                       Cannot import
@@ -320,6 +356,15 @@ export function ImportedModelForm({
                     {message}
                   </Alert>
                 ))}
+                {blocked && source === 'hub' && !isShared && !hfConnected && (
+                  <Text size="sm" c="dimmed">
+                    If this repository is private or gated,{' '}
+                    <Anchor component={Link} to="/settings" target="_blank" size="sm">
+                      connect your Hugging Face account
+                    </Anchor>{' '}
+                    and check it again.
+                  </Text>
+                )}
                 {blocked && source === 'hub' && byNameKind && (
                   <Text size="sm" c="dimmed">
                     Is this the name of a model in a library rather than a Hub repository?{' '}
