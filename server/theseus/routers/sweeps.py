@@ -12,7 +12,6 @@ from theseus.db.models import DatasetVersion, RunEvaluation, Sweep, TrainingRun
 from theseus.deps import ProjectDep, SessionDep, SweepDep
 from theseus.schemas.training import (
     CreateSweepBody,
-    EvaluationBrief,
     RunRow,
     SweepCreatedResponse,
     SweepDetailResponse,
@@ -22,6 +21,7 @@ from theseus.schemas.training import (
     SweepTrial,
 )
 from theseus.services import training as training_service
+from theseus.services.evaluation_score import evaluation_brief
 from theseus.services.training import QueueError, queue_sweep, reconcile_sweep_status
 
 router = APIRouter(tags=["sweeps"])
@@ -107,10 +107,7 @@ async def get_sweep(sweep: SweepDep, session: SessionDep) -> SweepDetailResponse
     trials = []
     for run, evaluation in rows:
         trial = SweepTrial.model_validate(run)
-        if evaluation is not None:
-            trial.evaluation = EvaluationBrief(
-                status=evaluation.status, accuracy=evaluation.accuracy, macro_f1=evaluation.macro_f1
-            )
+        trial.evaluation = evaluation_brief(evaluation)
         trials.append(trial)
     return SweepDetailResponse(sweep=SweepRow.model_validate(sweep), trials=trials)
 

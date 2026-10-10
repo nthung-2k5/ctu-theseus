@@ -52,12 +52,22 @@ class TrainingBackendListResponse(ApiModel):
     backends: list[TrainingBackendOut]
 
 
+class EvaluationScore(ApiModel):
+    """A run's headline metric: accuracy for a classifier, mAP50 for a detector, R-squared for a regressor."""
+
+    metric: str
+    label: str
+    value: float
+    higher_is_better: bool
+
+
 class EvaluationBrief(ApiModel):
-    """Denormalized accuracy / macro-F1, so lists and comparisons need no per-run round trip."""
+    """Denormalized accuracy / macro-F1 and the headline score, so lists need no per-run round trip."""
 
     status: EvaluationStatus
     accuracy: float | None
     macro_f1: float | None
+    score: EvaluationScore | None = None
 
 
 class RunSummary(ApiModel):

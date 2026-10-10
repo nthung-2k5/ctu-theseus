@@ -29,7 +29,6 @@ from theseus.events.stream import stream_run_events
 from theseus.jobs import abort
 from theseus.schemas.training import (
     ErrorItem,
-    EvaluationBrief,
     EvaluationErrorRow,
     EvaluationErrorsResponse,
     EvaluationOut,
@@ -51,18 +50,13 @@ from theseus.schemas.training import (
 )
 from theseus.services import model_catalog, storage
 from theseus.services.cleanup import cleanup_run_storage
+from theseus.services.evaluation_score import evaluation_brief
 from theseus.services.task_registry import get_task_descriptor
 from theseus.services.training import QueueError, queue_training
 
 router = APIRouter(tags=["training"])
 
 ERRORS_PER_PAGE = 50
-
-
-def _brief(evaluation: RunEvaluation | None) -> EvaluationBrief | None:
-    if evaluation is None:
-        return None
-    return EvaluationBrief(status=evaluation.status, accuracy=evaluation.accuracy, macro_f1=evaluation.macro_f1)
 
 
 def _backend_out(info) -> TrainingBackendOut:
@@ -117,7 +111,7 @@ async def list_runs(project: ProjectDep, session: SessionDep) -> RunListResponse
     runs = []
     for run, evaluation in rows:
         item = RunSummary.model_validate(run)
-        item.evaluation = _brief(evaluation)
+        item.evaluation = evaluation_brief(evaluation)
         runs.append(item)
     return RunListResponse(runs=runs)
 
