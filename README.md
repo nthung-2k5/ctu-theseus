@@ -243,8 +243,12 @@ already re-queued. Templates ship as package data under `omnitrain/export/templa
 
 ### Administration
 
-`users.role` is `user` or `admin`. There is no admin UI to create the first one: list emails in
-`OMNITRAIN_ADMIN_EMAILS` (comma separated) and an account with that email becomes an admin when it
+`users.role` is `user` or `admin`. On startup the server makes sure an admin exists
+(`services/bootstrap_admin.py`): if the database has none, it creates `OMNITRAIN_ADMIN_EMAIL` (default
+`admin@omnitrain.local`) with `OMNITRAIN_ADMIN_PASSWORD`. In development an unset password falls back to
+`admin12345` and logs a warning; in production nothing is created without a password. It only acts when no
+admin exists at all, so it never resets a password or resurrects a deleted account. Separately, list emails
+in `OMNITRAIN_ADMIN_EMAILS` (comma separated) and an account with that email becomes an admin when it
 registers or signs in. That only ever **promotes**; removing an email does not demote anyone (do that
 from Administration > Users). Every `/api/admin/**` route sits behind `require_admin`, which reads the
 role from the database on each request rather than trusting the JWT, so a promotion, demotion or

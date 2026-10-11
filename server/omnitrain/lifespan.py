@@ -17,7 +17,7 @@ from omnitrain.db.base import dispose_engine
 from omnitrain.events import EventWriter, get_event_bus, set_event_writer
 from omnitrain.jobs.reapers import reaper_loop
 from omnitrain.jobs.recovery import recover_on_startup
-from omnitrain.services import plugin_settings, storage
+from omnitrain.services import bootstrap_admin, plugin_settings, storage
 from omnitrain.settings import get_settings
 from omnitrain.telemetry import init_telemetry
 
@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Admin enable/disable switches must be in place before the first request can consult them.
     await plugin_settings.load()
+    await bootstrap_admin.ensure_admin()
 
     # 2. Settle whatever a previous process left in flight, BEFORE anything new is claimed.
     await recover_on_startup()

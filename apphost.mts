@@ -136,6 +136,10 @@ const api = await builder
   .withEnvironment('ALLOWED_ORIGINS', process.env.ALLOWED_ORIGINS ?? '')
   // Comma-separated emails promoted to admin when they register or sign in: how the first admin comes to exist.
   .withEnvironment('OMNITRAIN_ADMIN_EMAILS', process.env.OMNITRAIN_ADMIN_EMAILS ?? '')
+  // The administrator created on startup when the database has none. An empty password means the server's
+  // development default (it logs a warning saying so).
+  .withEnvironment('OMNITRAIN_ADMIN_EMAIL', process.env.OMNITRAIN_ADMIN_EMAIL || 'admin@omnitrain.local')
+  .withEnvironment('OMNITRAIN_ADMIN_PASSWORD', process.env.OMNITRAIN_ADMIN_PASSWORD ?? '')
   // Encrypts users' saved Hugging Face tokens. Empty means "derive it from JWT_SECRET" (see services/secrets.py).
   .withEnvironment('OMNITRAIN_SECRETS_KEY', process.env.OMNITRAIN_SECRETS_KEY ?? '')
   .waitFor(db)

@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     # the only way the first admin comes to exist; promotion never demotes, so removing an email
     # here does not strip an existing admin (do that from the admin users page).
     admin_emails: str = Field(default="", validation_alias="OMNITRAIN_ADMIN_EMAILS")
+    # The administrator startup creates when the database has none (services/bootstrap_admin.py). Without a
+    # password, development falls back to `dev_admin_password`; production seeds nothing.
+    admin_email: str = Field(default="admin@omnitrain.local", validation_alias="OMNITRAIN_ADMIN_EMAIL")
+    admin_password: str = Field(default="", validation_alias="OMNITRAIN_ADMIN_PASSWORD")
+    dev_admin_password: str = "admin12345"
 
     temp_dir: Path = Field(default=Path("/tmp/omnitrain"), validation_alias="TEMP_DIR")
     inference_model_cache_size: int = Field(default=2, validation_alias="INFERENCE_MODEL_CACHE_SIZE")
