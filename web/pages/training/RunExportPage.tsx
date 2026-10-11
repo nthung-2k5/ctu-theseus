@@ -1,10 +1,9 @@
-import { ActionIcon, Code, CopyButton, Paper, SimpleGrid, Stack, Tabs, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Code, CopyButton, Paper, Stack, Tabs, Text, Tooltip } from '@mantine/core'
 import { CheckIcon, CopyIcon, ExportIcon } from '@phosphor-icons/react'
 import { useRunContext } from '@public/components/training/RunContext'
 import { RunExportPanel } from '@public/components/training/RunExportPanel'
-import { CopyField, EmptyState, SectionLabel } from '@public/components/ui'
-import { formatDateTime } from '@public/lib/format'
-import { getInferenceInputSpec, getTaskDescriptor } from '@public/lib/tasks'
+import { EmptyState, SectionLabel } from '@public/components/ui'
+import { getInferenceInputSpec } from '@public/lib/tasks'
 import { MONO_STACK } from '@public/theme'
 import { predictSnippets } from './snippets'
 
@@ -47,33 +46,10 @@ export function RunExportPage() {
       />
     )
 
-  const descriptor = getTaskDescriptor(project.task)
-  const snapshot = project.dataset?.versions?.find((v) => v.id === run.datasetVersionId)
-  const evaluation = run.evaluation?.status === 'success' ? run.evaluation : null
-  const score = evaluation?.score ?? null
   const snippets = predictSnippets(run.id, getInferenceInputSpec(project.task), window.location.origin)
 
   return (
     <div className="flex flex-col gap-3">
-      <Paper p="md">
-        <Stack gap="xs">
-          <SectionLabel>Model card</SectionLabel>
-          <SimpleGrid cols={{ base: 2, md: 5 }} spacing="sm">
-            <Fact label="Task" value={descriptor.label} />
-            <Fact label="Snapshot" value={snapshot?.versionTag ?? run.datasetVersionId.slice(0, 8)} />
-            <Fact label={score?.label ?? 'Score'} value={score ? score.value.toFixed(3) : '—'} />
-            {evaluation?.macroF1 != null && <Fact label="Macro F1" value={evaluation.macroF1.toFixed(3)} />}
-            <Fact label="Trained" value={run.completedAt ? formatDateTime(run.completedAt) : '—'} />
-          </SimpleGrid>
-          <div>
-            <Text size="xs" c="dimmed">
-              Run id
-            </Text>
-            <CopyField value={run.id} truncate={false} />
-          </div>
-        </Stack>
-      </Paper>
-
       <div>
         <SectionLabel mb={6}>Formats</SectionLabel>
         <RunExportPanel run={run} />
@@ -100,19 +76,6 @@ export function RunExportPage() {
           </Tabs>
         </Stack>
       </Paper>
-    </div>
-  )
-}
-
-function Fact({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      <Text size="sm" fw={500} className="tnum">
-        {value}
-      </Text>
     </div>
   )
 }

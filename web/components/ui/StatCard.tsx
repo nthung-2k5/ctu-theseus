@@ -26,7 +26,14 @@ export function StatCard({
     <Paper p="sm">
       <Group gap="xs" wrap="nowrap" align="flex-start">
         {TheIcon && (
-          <ThemeIcon size="md" variant="light" color={color}>
+          // The stock light tint (15% alpha in dark mode, shade 0 in light) nearly vanishes on the card, so
+          // build a stronger one from the colour's filled shade.
+          <ThemeIcon
+            size="md"
+            variant="light"
+            color={color}
+            style={{ '--ti-bg': `color-mix(in srgb, var(--mantine-color-${color}-filled) 28%, transparent)` }}
+          >
             <TheIcon size={16} />
           </ThemeIcon>
         )}
