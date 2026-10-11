@@ -23,7 +23,6 @@ export function DashboardPage() {
     <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title="Projects"
-        description="Each project is one task on one modality."
         actions={
           <Button leftSection={<PlusIcon size={15} />} onClick={openCreateProjectModal}>
             New project

@@ -16,7 +16,7 @@ import { DatasetHealthPanel } from '@public/components/dataset/DatasetHealthPane
 import { type ItemEditing, ItemsByModality } from '@public/components/dataset/ItemsByModality'
 import { type ItemLabeled, ItemsFilterBar } from '@public/components/dataset/ItemsFilterBar'
 import { ItemsFooter } from '@public/components/dataset/ItemsFooter'
-import { SplitProgressBar, splitCounts } from '@public/components/dataset/VersionBrowsing'
+import { SplitProgressBar } from '@public/components/dataset/VersionBrowsing'
 import { EmptyState, LinkButton, PageHeader } from '@public/components/ui'
 import { oneItem, useItemMutations } from '@public/hooks/useItemMutations'
 import { useItemSelection } from '@public/hooks/useItemSelection'
@@ -142,18 +142,12 @@ export function DataPage() {
       : undefined,
   }
 
-  const draftSplitCounts = dataset?.draft ? splitCounts(dataset.draft) : null
   const isEmptyDraft = (dataset?.draft?.itemCount ?? 0) === 0
 
   return (
     <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title="Data"
-        description={
-          draftSplitCounts
-            ? `${dataset?.draft?.itemCount ?? 0} items · train ${draftSplitCounts.train} · validation ${draftSplitCounts.validation} · test ${draftSplitCounts.test}`
-            : undefined
-        }
         actions={
           dataset?.draft && (
             <>

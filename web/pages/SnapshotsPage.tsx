@@ -62,7 +62,6 @@ export function SnapshotsPage() {
     <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title="Snapshots"
-        description={`Immutable dataset snapshots for "${project.name}"`}
         actions={
           <LinkButton
             to="/project/$projectId/snapshots/new"

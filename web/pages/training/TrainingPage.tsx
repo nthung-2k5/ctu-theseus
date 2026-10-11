@@ -313,7 +313,6 @@ export function TrainingPage() {
     <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title="Training"
-        description="Training runs and sweeps: monitor them live, then evaluate, test or export the result."
         actions={
           <>
             <LinkButton

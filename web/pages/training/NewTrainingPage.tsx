@@ -1,4 +1,4 @@
-import { Button, SegmentedControl, Text } from '@mantine/core'
+import { Button, SegmentedControl } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon } from '@phosphor-icons/react'
 import { CreateRunPanel, type RunPrefill } from '@public/components/training/CreateRunPanel'
@@ -65,10 +65,9 @@ export function NewTrainingPage() {
   })
 
   return (
-    <div className="flex flex-col gap-3 p-3 max-w-6xl">
+    <div className="flex flex-col gap-3 p-3">
       <PageHeader
         title={mode === 'sweep' ? 'New sweep' : 'New training run'}
-        description={project.name}
         actions={
           <>
             <SegmentedControl
@@ -85,12 +84,6 @@ export function NewTrainingPage() {
           </>
         }
       />
-
-      <Text size="sm" c="dimmed">
-        {mode === 'sweep'
-          ? 'A sweep trains several models, each with different settings, and compares them to find what works best.'
-          : 'A run trains one model with the settings you choose.'}
-      </Text>
 
       {mode === 'sweep' ? (
         <CreateSweepPanel

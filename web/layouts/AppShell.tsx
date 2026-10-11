@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Avatar,
-  Badge,
   Box,
   Group,
   Image,
@@ -55,33 +54,18 @@ interface ProjectNavItem {
   /** Overview must match exactly; everything else matches by prefix. */
   exact?: boolean
   disabled?: (project: ProjectDetail) => boolean
-  count?: (project: ProjectDetail) => number
 }
 
-/**
- * The project's flow, top to bottom. Counts are plain grey on purpose: colour in this app means status or a
- * dataset split, so a coloured count would read as one of those.
- */
+/** The project's flow, top to bottom. */
 const PROJECT_NAV_ITEMS: ProjectNavItem[] = [
   { label: 'Overview', icon: SquaresFourIcon, to: '/project/$projectId', exact: true },
-  {
-    label: 'Data',
-    icon: DatabaseIcon,
-    to: '/project/$projectId/data',
-    count: (project) => project.dataset?.draft?.itemCount ?? 0,
-  },
-  {
-    label: 'Snapshots',
-    icon: ArchiveIcon,
-    to: '/project/$projectId/snapshots',
-    count: (project) => project.dataset?.versions?.length ?? project.versionCount ?? 0,
-  },
+  { label: 'Data', icon: DatabaseIcon, to: '/project/$projectId/data' },
+  { label: 'Snapshots', icon: ArchiveIcon, to: '/project/$projectId/snapshots' },
   {
     label: 'Training',
     icon: BrainIcon,
     to: '/project/$projectId/training',
     disabled: (project) => !hasReadyVersion(project),
-    count: (project) => project.runCount ?? 0,
   },
 ]
 
@@ -267,7 +251,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </SectionLabel>
                 {PROJECT_NAV_ITEMS.map((item) => {
                   const resolvedPath = item.to.replace('$projectId', activeProject.id)
-                  const count = item.count?.(activeProject)
                   const isActive = item.exact
                     ? location.pathname === resolvedPath || location.pathname === `${resolvedPath}/`
                     : location.pathname === resolvedPath || location.pathname.startsWith(`${resolvedPath}/`)
@@ -277,13 +260,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                       key={item.to}
                       label={item.label}
                       leftSection={<item.icon size={18} />}
-                      rightSection={
-                        count !== undefined ? (
-                          <Badge size="xs" variant="light" color="gray">
-                            {count}
-                          </Badge>
-                        ) : null
-                      }
                       active={isActive}
                       onClick={() => navigate({ to: item.to, params: { projectId: activeProject.id } })}
                       variant="light"
