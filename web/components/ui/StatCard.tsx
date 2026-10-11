@@ -1,5 +1,6 @@
 import { Group, Paper, Text, ThemeIcon } from '@mantine/core'
 import type { Icon } from '@phosphor-icons/react'
+import { strongIconTint } from '@public/lib/iconTint'
 import type { ReactNode } from 'react'
 import { SectionLabel } from './SectionLabel'
 
@@ -26,14 +27,7 @@ export function StatCard({
     <Paper p="sm">
       <Group gap="xs" wrap="nowrap" align="flex-start">
         {TheIcon && (
-          // The stock light tint (15% alpha in dark mode, shade 0 in light) nearly vanishes on the card, so
-          // build a stronger one from the colour's filled shade.
-          <ThemeIcon
-            size="md"
-            variant="light"
-            color={color}
-            style={{ '--ti-bg': `color-mix(in srgb, var(--mantine-color-${color}-filled) 28%, transparent)` }}
-          >
+          <ThemeIcon size="md" variant="light" color={color} style={strongIconTint(color)}>
             <TheIcon size={16} />
           </ThemeIcon>
         )}
