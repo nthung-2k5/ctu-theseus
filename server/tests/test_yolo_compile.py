@@ -2,10 +2,10 @@ import pytest
 from pydantic import ValidationError
 from pydantic.alias_generators import to_camel
 
-from theseus.backends.base import ConfigError
-from theseus.backends.yolo import YoloBackend
-from theseus.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
-from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.backends.base import ConfigError
+from omnitrain.backends.yolo import YoloBackend
+from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
+from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 VISION = SnapshotContext(
     columns=[
@@ -131,7 +131,7 @@ class TestBackend:
         import sys
 
         code = (
-            "import sys; from theseus.backends.yolo import YoloBackend; "
+            "import sys; from omnitrain.backends.yolo import YoloBackend; "
             "YoloBackend.available(); assert 'ultralytics' not in sys.modules, 'imported ultralytics'"
         )
         subprocess.run([sys.executable, "-c", code], check=True)

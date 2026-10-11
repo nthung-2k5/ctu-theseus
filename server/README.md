@@ -1,6 +1,6 @@
 # server
 
-The CTU Theseus backend: a single FastAPI service that serves the REST API, owns the Postgres
+The CTU OmniTrain backend: a single FastAPI service that serves the REST API, owns the Postgres
 database, runs the durable job queue, and runs [Ludwig](https://ludwig.ai) for AutoML
 training / export / inference. (It used to be only the Ludwig worker behind a separate Bun
 gateway, joined by NATS. That gateway and NATS are gone.)
@@ -20,11 +20,11 @@ uv sync
 uv run python main.py      # applies Alembic migrations, then serves on $PORT (default 8000)
 ```
 
-Environment (Aspire injects all of these; `theseus/settings.py` is the reference):
+Environment (Aspire injects all of these; `omnitrain/settings.py` is the reference):
 
 | Variable | Purpose |
 |---|---|
-| `CTU_THESEUS_DB_URI` | Postgres connection string (`postgres://` is converted to `postgresql+asyncpg://`) |
+| `CTU_OMNITRAIN_DB_URI` | Postgres connection string (`postgres://` is converted to `postgresql+asyncpg://`) |
 | `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` | object store |
 | `S3_PUBLIC_ENDPOINT` | where the *browser* reaches the object store, used only to sign download URLs; defaults to `S3_ENDPOINT`. Needed when the API runs in a container (Aspire), where `S3_ENDPOINT` is a container-network hostname a browser cannot resolve |
 | `JWT_SECRET` | signs access tokens |
@@ -32,7 +32,7 @@ Environment (Aspire injects all of these; `theseus/settings.py` is the reference
 | `ENVIRONMENT` | `production` requires the values above explicitly and makes cookies Secure |
 | `COOKIE_SECURE`, `PORT`, `TEMP_DIR`, `INFERENCE_*`, `JOB_*` | tuning |
 
-**Run exactly one process.** No `--reload`, no `--workers`, no gunicorn: `theseus.lifespan`
+**Run exactly one process.** No `--reload`, no `--workers`, no gunicorn: `omnitrain.lifespan`
 refuses to start otherwise. Event fanout, the GPU lanes, the model cache, the rate limiter and the
 abort registry all live in process memory.
 
@@ -43,7 +43,7 @@ main.py                 migrations, then uvicorn
 alembic.ini, migrations/  Alembic (async env); 0001_baseline is the whole schema
 scripts/export_schema.py  writes/checks ../schema/openapi.json and ../schema/task_registry.json
 
-theseus/
+omnitrain/
   app.py                create_app(): side-effect free (no DB, S3 or torch import), so the schema
                         export script and tests can import it
   lifespan.py           startup: single-process check, event writer, log handler, recovery,
@@ -76,7 +76,7 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
   `label_classes` Postgres table (it has no idea what index order a run assigned each class). For
   Ludwig this is `training_set_metadata.json`'s `idx2str` array, written under
   `theseus-training/{runId}/results/**/model/` and read by `LudwigLoadedModel` (live inference)
-  and `backends/ludwig/manifest.py` (export bundle assembly, via `theseus/export/metadata.py`).
+  and `backends/ludwig/manifest.py` (export bundle assembly, via `omnitrain/export/metadata.py`).
   Every `TrainerBackend.load()` must honor this the same way.
 - **Only one thing inserts into `run_events`.** `events/writer.py` is the single writer, because a
   `BIGSERIAL` is not commit-ordered. Emitters (the training thread, request handlers, reapers)
@@ -99,7 +99,7 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
   only freed when its thread really finishes. Loaded models are cached in-process by
   `services/model_cache.py` (LRU, `INFERENCE_MODEL_CACHE_SIZE`), and `POST /api/inference/{runId}/warm`
   preloads one.
-- **Templates are package data** (`theseus/export/templates/`), read from the installed package,
+- **Templates are package data** (`omnitrain/export/templates/`), read from the installed package,
   and must be present in the Docker image (the Dockerfile copies the whole project).
 - **Postgres generic plans.** After a prepared statement has run five times, Postgres may switch to
   a generic plan in which a bind parameter in an `ON CONFLICT ... WHERE` cannot match a partial
@@ -107,9 +107,9 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
 
 ## Writing a trainer backend
 
-A trainer backend is a package under `theseus/backends/` with one `TrainerBackend` subclass
-(`theseus/backends/base.py`); `backends/ludwig/` is the reference implementation. Restart the
-process and it shows up everywhere: `theseus.backends.registry.trainable_backends(task)` (which
+A trainer backend is a package under `omnitrain/backends/` with one `TrainerBackend` subclass
+(`omnitrain/backends/base.py`); `backends/ludwig/` is the reference implementation. Restart the
+process and it shows up everywhere: `omnitrain.backends.registry.trainable_backends(task)` (which
 tasks it can train), `GET /api/projects/{id}/training-backends` (its models and hyperparameters,
 for the create-run/sweep UI), and every run trained with it (`training_runs.backend`) flows
 through the rest of the pipeline — `jobs/train.py`, `services/model_cache.py`,

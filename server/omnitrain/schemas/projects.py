@@ -1,0 +1,210 @@
+"""Request/response models for projects, dataset versions and label classes.
+
+Shapes mirror what the web app consumed from the Elysia gateway (web/store/types.ts), so the
+frontend migration is a type swap rather than a behavior change.
+"""
+
+import uuid
+from datetime import datetime
+
+from pydantic import Field, field_validator
+
+from omnitrain.augmentation.config import AugmentationConfig
+from omnitrain.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType, TrainingStatus
+from omnitrain.preprocessing.config import PreprocessingConfig
+from omnitrain.schemas.common import ApiModel
+
+HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
+
+
+class LabelClassOut(ApiModel):
+    class_id: uuid.UUID
+    dataset_id: uuid.UUID
+    name: str
+    description: str | None
+    ui_color_hex: str | None
+    is_active: bool
+    created_at: datetime | None
+
+
+class SplitCounts(ApiModel):
+    train: int = 0
+    validation: int = 0
+    test: int = 0
+
+
+class DatasetSplit(ApiModel):
+    split_type: SplitType
+    item_count: int
+
+
+class VersionOut(ApiModel):
+    id: uuid.UUID
+    dataset_id: uuid.UUID
+    version_tag: str | None
+    status: DatasetVersionStatus
+    # Live membership total, derived from the split counts (the column is only written at snapshot time).
+    item_count: int | None
+    class_count: int | None
+    failed_message: str | None
+    parquet_key: str | None
+    # What the snapshot was built with (None: no preprocessing), and how many items it replaced.
+    preprocessing_config: PreprocessingConfig | None
+    preprocessed_count: int
+    # What the snapshot was built with (None: no augmentation), and how many augmented copies it holds.
+    augmentation_config: AugmentationConfig | None
+    augmented_count: int
+    built_at: datetime | None
+    created_at: datetime
+    split_counts: SplitCounts | None = None
+    # GET /versions/{id} returns computed `splits` instead.
+    splits: list[DatasetSplit] | None = None
+
+
+class DatasetOut(ApiModel):
+    project_id: uuid.UUID
+    modality: DatasetModality
+    created_at: datetime
+    updated_at: datetime
+    draft: VersionOut | None
+    versions: list[VersionOut]
+    classes: list[LabelClassOut]
+
+
+class DraftDatasetOut(ApiModel):
+    modality: DatasetModality
+
+
+class ProjectSummary(ApiModel):
+    id: uuid.UUID
+    name: str
+    description: str | None
+    task: ProjectTask
+    created_at: datetime
+    draft_dataset: DraftDatasetOut | None = None
+    # What a project card shows without opening the project: how much data, how much training, and how it last went.
+    item_count: int = 0
+    run_count: int = 0
+    last_run_status: TrainingStatus | None = None
+    # The newest of the project's creation and its latest run.
+    last_activity_at: datetime | None = None
+
+
+class ProjectRow(ApiModel):
+    id: uuid.UUID
+    name: str
+    description: str | None
+    task: ProjectTask
+    user_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectDetail(ProjectRow):
+    run_count: int
+    version_count: int
+    dataset: DatasetOut | None
+
+
+class ProjectListResponse(ApiModel):
+    projects: list[ProjectSummary]
+
+
+class ProjectResponse(ApiModel):
+    project: ProjectRow
+
+
+class ProjectDetailResponse(ApiModel):
+    project: ProjectDetail
+
+
+class CreateProjectBody(ApiModel):
+    name: str = Field(min_length=1)
+    description: str | None = None
+    task: ProjectTask
+
+
+class UpdateProjectBody(ApiModel):
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+
+
+class ClassListResponse(ApiModel):
+    classes: list[LabelClassOut]
+
+
+class ClassResponse(ApiModel):
+    # `class` is a Python keyword, so the attribute is class_ and only the wire name is "class".
+    class_: LabelClassOut = Field(alias="class")
+
+
+class CreateClassBody(ApiModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = None
+    ui_color_hex: str | None = Field(default=None, pattern=HEX_COLOR)
+
+
+class UpdateClassBody(ApiModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = None
+    ui_color_hex: str | None = Field(default=None, pattern=HEX_COLOR)
+
+
+MAX_CLASSES = 200
+
+
+class SaveClassEntry(ApiModel):
+    """One class in a batch save. An entry without `class_id` is created (or revives a deleted class)."""
+
+    class_id: uuid.UUID | None = None
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = None
+    # Omitted: an existing class keeps its colour and a new one gets the next palette colour.
+    ui_color_hex: str | None = Field(default=None, pattern=HEX_COLOR)
+
+    @field_validator("name")
+    @classmethod
+    def _collapse_whitespace(cls, value: str) -> str:
+        collapsed = " ".join(value.split())
+        if not collapsed:
+            raise ValueError("Class name must not be blank")
+        return collapsed
+
+
+class ClassMerge(ApiModel):
+    """Move every item labelled `from_class_id` to `into_class_id` as part of a save.
+
+    The source must be an active class that this save removes; the target must be a class the save keeps.
+    """
+
+    from_class_id: uuid.UUID
+    into_class_id: uuid.UUID
+
+
+class SaveClassesBody(ApiModel):
+    """The whole desired class list. Active classes missing from it are deleted."""
+
+    classes: list[SaveClassEntry] = Field(max_length=MAX_CLASSES)
+    # Relabel a removed class's items instead of leaving them unlabelled. Applied in the save's transaction.
+    merges: list[ClassMerge] = Field(default_factory=list, max_length=MAX_CLASSES)
+
+
+class ClassStat(ApiModel):
+    """How many draft items carry one class, in total and per split."""
+
+    class_id: uuid.UUID
+    total: int
+    train: int
+    validation: int
+    test: int
+
+
+class ClassStatsResponse(ApiModel):
+    # False for a task whose labels are not one `classification` annotation per item (token classification keeps
+    # tag spans), where per-class item counts can't be derived: `stats` is then empty and the totals are zero.
+    counted: bool
+    stats: list[ClassStat]  # every active class, in creation order, empty ones included (with zeros)
+    total: int  # draft items
+    unassigned: int  # draft items with no classification
+    retired: int  # draft items labelled with a class that has since been removed
+    min_items_per_class: int  # below this a class can't be stratified into splits

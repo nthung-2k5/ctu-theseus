@@ -1,0 +1,281 @@
+"""Request/response models for training runs, evaluation and sweeps."""
+
+import uuid
+from datetime import datetime
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
+
+from omnitrain.db.enums import (
+    DatasetModality,
+    DatasetVersionStatus,
+    EvaluationSplit,
+    EvaluationStatus,
+    SplitType,
+    SweepStatus,
+    SweepStrategy,
+    TrainingStatus,
+)
+from omnitrain.schemas.common import ApiModel, ParamSpec
+
+
+class ModelChoiceOut(ApiModel):
+    id: str
+    label: str
+    description: str
+    pretrained: bool
+    # builtin | global (an admin's custom model) | private (the caller's own custom model)
+    source: Literal["builtin", "global", "private"] = "builtin"
+    # The custom-model kind; None for a built-in.
+    kind: str | None = None
+
+
+class TrainingBackendOut(ApiModel):
+    id: str
+    label: str
+    description: str
+    available: bool
+    unavailable_reason: str | None = None
+    # Every task this backend supports, whether or not it's currently available — for a task
+    # picker with no project/task in scope yet (project creation).
+    supported_tasks: list[str]
+    # Selectable models/architectures for the task in scope; empty when listed with no task.
+    models: list[ModelChoiceOut]
+    # The hyperparameters key a selected model id goes under (varies per backend: Ludwig keeps
+    # "encoderId" rather than the generic "modelId"). A create-run/create-sweep form must read
+    # this rather than assume a fixed key name.
+    model_param_name: str
+    params: list[ParamSpec]
+
+
+class TrainingBackendListResponse(ApiModel):
+    backends: list[TrainingBackendOut]
+
+
+class EvaluationScore(ApiModel):
+    """A run's headline metric: accuracy for a classifier, mAP50 for a detector, R-squared for a regressor."""
+
+    metric: str
+    label: str
+    value: float
+    higher_is_better: bool
+
+
+class EvaluationBrief(ApiModel):
+    """Denormalized accuracy / macro-F1 and the headline score, so lists need no per-run round trip."""
+
+    status: EvaluationStatus
+    accuracy: float | None
+    macro_f1: float | None
+    score: EvaluationScore | None = None
+
+
+class RunSummary(ApiModel):
+    id: uuid.UUID
+    name: str
+    status: TrainingStatus
+    failed_message: str | None
+    completed_at: datetime | None
+    started_at: datetime | None
+    created_at: datetime
+    dataset_version_id: uuid.UUID
+    evaluation: EvaluationBrief | None = None
+
+
+class RunListResponse(ApiModel):
+    runs: list[RunSummary]
+
+
+class RunRow(ApiModel):
+    id: uuid.UUID
+    name: str
+    status: TrainingStatus
+    project_id: uuid.UUID
+    dataset_version_id: uuid.UUID
+    sweep_id: uuid.UUID | None
+    trial_index: int | None
+    hyperparameters: Any
+    best_epoch: int | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    failed_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RunCreatedResponse(ApiModel):
+    run: RunRow
+
+
+class MetricRow(ApiModel):
+    training_run_id: uuid.UUID
+    epoch: int
+    split: SplitType
+    metric_name: str
+    metric_value: float
+    created_at: datetime
+
+
+class RunVersionDataset(ApiModel):
+    project_id: uuid.UUID
+    modality: DatasetModality
+
+
+class RunVersion(ApiModel):
+    id: uuid.UUID
+    dataset_id: uuid.UUID
+    version_tag: str | None
+    status: DatasetVersionStatus
+    item_count: int | None
+    class_count: int | None
+    failed_message: str | None
+    parquet_key: str | None
+    built_at: datetime | None
+    created_at: datetime
+    dataset: RunVersionDataset
+
+
+class RunDetail(ApiModel):
+    id: uuid.UUID
+    name: str
+    status: TrainingStatus
+    # The trainer backend plugin id this run trained with.
+    backend: str
+    hyperparameters: Any
+    # Set when the run trained on a bring-your-own model.
+    custom_model_id: uuid.UUID | None = None
+    # A person-readable name for the model the run used: a custom model's name (even one since archived), or
+    # the built-in model's label. None when the run named no model (the backend's default was used).
+    model_label: str | None = None
+    failed_message: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    created_at: datetime
+    dataset_version: RunVersion
+    metrics: list[MetricRow]
+
+
+class RunDetailResponse(ApiModel):
+    run: RunDetail
+
+
+class TrainBody(ApiModel):
+    name: str = Field(min_length=1, max_length=255)
+    dataset_version_id: uuid.UUID
+    # A trainer backend plugin id (omnitrain/backends/); defaults to the project task's sole or
+    # first available backend when omitted.
+    backend: str | None = None
+    # Raw camelCase hyperparameters, validated server-side against the chosen backend's own
+    # Hyperparameters model (see services/training.py) rather than one fixed schema here — a
+    # different backend accepts different knobs.
+    hyperparameters: dict[str, Any] | None = None
+
+
+class RunStatusResponse(ApiModel):
+    status: TrainingStatus
+    epochs_total: int | None
+    latest_metrics: list[MetricRow]
+
+
+class EvaluationOut(ApiModel):
+    run_id: uuid.UUID
+    status: EvaluationStatus
+    split: EvaluationSplit | None
+    report_key: str | None
+    predictions_key: str | None
+    report: Any | None
+    accuracy: float | None
+    macro_f1: float | None
+    failed_message: str | None
+    evaluated_at: datetime
+
+
+class EvaluationResponse(ApiModel):
+    evaluation: EvaluationOut
+
+
+class ErrorItem(ApiModel):
+    id: uuid.UUID
+    text: str | None
+    download_url: str | None
+
+
+class EvaluationErrorRow(ApiModel):
+    item_id: str
+    actual: str
+    predicted: str
+    confidence: float | None = None
+    item: ErrorItem | None
+
+
+class EvaluationErrorsResponse(ApiModel):
+    errors: list[EvaluationErrorRow]
+    total: int
+    page: int
+    per_page: int
+
+
+# -- Sweeps ----------------------------------------------------------------------------------
+
+
+class CreateSweepBody(ApiModel):
+    name: str = Field(min_length=1, max_length=255)
+    dataset_version_id: uuid.UUID
+    backend: str | None = None
+    # One candidate-value list per sweepable hyperparameter of the chosen backend (camelCase
+    # keys, as stored and expanded — see services/sweep.py). Backend-agnostic, so this is a plain
+    # dict rather than one fixed schema; each backend's own Hyperparameters model validates a
+    # trial's picks when it is compiled.
+    search_space: dict[str, Annotated[list[Any], Field(min_length=1)]]
+    strategy: SweepStrategy
+    max_trials: int = Field(ge=1, le=50)
+
+
+class SweepRow(ApiModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    dataset_version_id: uuid.UUID
+    name: str
+    search_space: Any
+    strategy: SweepStrategy
+    max_trials: int
+    status: SweepStatus
+    created_at: datetime
+    updated_at: datetime
+
+
+class SweepCreatedResponse(ApiModel):
+    sweep: SweepRow
+    trials: list[RunRow]
+
+
+class SweepSummary(ApiModel):
+    id: uuid.UUID
+    name: str
+    strategy: SweepStrategy
+    max_trials: int
+    status: SweepStatus
+    created_at: datetime
+    trial_count: int
+    completed_trial_count: int
+
+
+class SweepListResponse(ApiModel):
+    sweeps: list[SweepSummary]
+
+
+class SweepTrial(ApiModel):
+    id: uuid.UUID
+    name: str
+    status: TrainingStatus
+    hyperparameters: Any
+    trial_index: int | None
+    failed_message: str | None
+    created_at: datetime
+    completed_at: datetime | None
+    evaluation: EvaluationBrief | None = None
+
+
+class SweepDetailResponse(ApiModel):
+    sweep: SweepRow
+    trials: list[SweepTrial]

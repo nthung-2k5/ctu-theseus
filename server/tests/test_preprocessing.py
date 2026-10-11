@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from theseus.augmentation.media import AudioClip
-from theseus.preprocessing.base import NoParams, Preprocessing
-from theseus.preprocessing.config import PreprocessingConfig, PreprocessingOpConfig
-from theseus.preprocessing.pipeline import build_plan, ops_for_split, preprocess
-from theseus.preprocessing.registry import (
+from omnitrain.augmentation.media import AudioClip
+from omnitrain.preprocessing.base import NoParams, Preprocessing
+from omnitrain.preprocessing.config import PreprocessingConfig, PreprocessingOpConfig
+from omnitrain.preprocessing.pipeline import build_plan, ops_for_split, preprocess
+from omnitrain.preprocessing.registry import (
     PreprocessingConfigError,
     describe,
     get_preprocessing,
@@ -16,7 +16,7 @@ from theseus.preprocessing.registry import (
     param_specs,
     validate_config,
 )
-from theseus.services.task_registry import get_task_descriptor
+from omnitrain.services.task_registry import get_task_descriptor
 
 IMAGE_TASK = get_task_descriptor("image_classification")
 TEXT_TASK = get_task_descriptor("text_classification")
@@ -76,7 +76,7 @@ def test_ops_are_offered_only_for_label_preserving_tasks_of_their_own_modality()
 
 
 def test_a_new_op_class_is_picked_up_with_no_other_change():
-    from theseus.preprocessing.base import _registry
+    from omnitrain.preprocessing.base import _registry
 
     class Shout(Preprocessing):
         id = "test_only_shout"

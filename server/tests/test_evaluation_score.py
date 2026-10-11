@@ -2,8 +2,8 @@
 
 import uuid
 
-from theseus.db.models import RunEvaluation
-from theseus.services.evaluation_score import evaluation_brief, primary_score
+from omnitrain.db.models import RunEvaluation
+from omnitrain.services.evaluation_score import evaluation_brief, primary_score
 
 
 def _evaluation(status="success", accuracy=None, report=None) -> RunEvaluation:

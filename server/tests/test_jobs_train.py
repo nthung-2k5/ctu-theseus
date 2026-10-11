@@ -14,15 +14,15 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from theseus.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
-from theseus.backends.base import _registry as backend_registry
-from theseus.db.models import RunEvaluation, RunEvent, TrainingMetric, TrainingRun
-from theseus.events import InProcessRunEventBus, set_event_writer
-from theseus.events.writer import EventWriter
-from theseus.jobs import abort
-from theseus.jobs import train as train_job
-from theseus.services import storage
-from theseus.settings import get_settings
+from omnitrain.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
+from omnitrain.backends.base import _registry as backend_registry
+from omnitrain.db.models import RunEvaluation, RunEvent, TrainingMetric, TrainingRun
+from omnitrain.events import InProcessRunEventBus, set_event_writer
+from omnitrain.events.writer import EventWriter
+from omnitrain.jobs import abort
+from omnitrain.jobs import train as train_job
+from omnitrain.services import storage
+from omnitrain.settings import get_settings
 
 
 class FakeLoadedModel(LoadedModel):

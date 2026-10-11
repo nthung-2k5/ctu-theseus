@@ -14,8 +14,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from theseus.constants import SPLIT_COLUMN_NAME
-from theseus.jobs.export import _shape_input_value
+from omnitrain.constants import SPLIT_COLUMN_NAME
+from omnitrain.jobs.export import _shape_input_value
 
 
 def _select_sample(df: pd.DataFrame) -> pd.DataFrame:

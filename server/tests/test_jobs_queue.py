@@ -3,8 +3,8 @@ from datetime import timedelta
 
 import sqlalchemy as sa
 
-from theseus.db.models import ModelExport, TrainingRun
-from theseus.jobs import queue
+from omnitrain.db.models import ModelExport, TrainingRun
+from omnitrain.jobs import queue
 
 
 async def get(db, model, id_):

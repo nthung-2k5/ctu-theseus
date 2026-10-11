@@ -25,8 +25,8 @@ def _split(uri: str) -> tuple[str, str]:
 
 @pytest.fixture(scope="session")
 def database_url() -> str:
-    import theseus.db.models  # noqa: F401
-    from theseus.db.base import Base
+    import omnitrain.db.models  # noqa: F401
+    from omnitrain.db.base import Base
 
     admin, name = _split(TEST_DB_URI)
     sa_url = "postgresql+asyncpg://" + TEST_DB_URI.split("://", 1)[1]
@@ -70,8 +70,8 @@ async def _kill_stray_connections() -> None:
 
 @pytest.fixture
 async def db(database_url, monkeypatch):
-    """A clean database per test, wired into theseus.db.base so app code uses it."""
-    from theseus.db import base
+    """A clean database per test, wired into omnitrain.db.base so app code uses it."""
+    from omnitrain.db import base
 
     await _kill_stray_connections()
     engine = create_async_engine(database_url, poolclass=NullPool)
@@ -82,7 +82,7 @@ async def db(database_url, monkeypatch):
         await conn.execute(sa.text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     yield base._sessionmaker
     # Admin plugin switches are process-local state; a test that flipped one must not leak it.
-    from theseus.services import plugin_settings
+    from omnitrain.services import plugin_settings
 
     plugin_settings.reset()
     await engine.dispose()
@@ -92,9 +92,9 @@ async def db(database_url, monkeypatch):
 @pytest.fixture
 async def app(db):
     """The real app with a started event writer (routes that cancel or emit need one)."""
-    from theseus.app import create_app
-    from theseus.events import InProcessRunEventBus, set_event_bus, set_event_writer
-    from theseus.events.writer import EventWriter
+    from omnitrain.app import create_app
+    from omnitrain.events import InProcessRunEventBus, set_event_bus, set_event_writer
+    from omnitrain.events.writer import EventWriter
 
     bus = InProcessRunEventBus()
     set_event_bus(bus)
@@ -144,7 +144,7 @@ def make_run(db):
     """Create a project + snapshot + training run, returning the run id."""
     import uuid
 
-    from theseus.db.models import Dataset, DatasetVersion, Project, TrainingRun, User
+    from omnitrain.db.models import Dataset, DatasetVersion, Project, TrainingRun, User
 
     async def _make(status: str = "queued", task: str = "image_classification", **run_fields):
         async with db() as s:
@@ -178,7 +178,7 @@ def make_run(db):
 @pytest.fixture
 def make_export(db, make_run):
     """Create an export row (and its run), returning (export_id, run_id)."""
-    from theseus.db.models import ModelExport, TrainingRun
+    from omnitrain.db.models import ModelExport, TrainingRun
 
     async def _make(status: str = "pending", fmt: str = "onnx", run_id=None, **fields):
         import sqlalchemy as sa
@@ -186,7 +186,7 @@ def make_export(db, make_run):
         rid = run_id or await make_run(status="succeeded")
         async with db() as s:
             user_id = (await s.execute(sa.select(TrainingRun.project_id).where(TrainingRun.id == rid))).scalar_one()
-            from theseus.db.models import Project
+            from omnitrain.db.models import Project
 
             owner = (await s.execute(sa.select(Project.user_id).where(Project.id == user_id))).scalar_one()
             e = ModelExport(run_id=rid, user_id=owner, format=fmt, status=status, **fields)

@@ -7,12 +7,12 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from theseus.augmentation import media
-from theseus.augmentation.base import Augmentation, NoParams
-from theseus.augmentation.config import AugmentationConfig, AugmentationOpConfig
-from theseus.augmentation.media import AudioClip
-from theseus.augmentation.pipeline import augment, build_plan, seed_for
-from theseus.augmentation.registry import (
+from omnitrain.augmentation import media
+from omnitrain.augmentation.base import Augmentation, NoParams
+from omnitrain.augmentation.config import AugmentationConfig, AugmentationOpConfig
+from omnitrain.augmentation.media import AudioClip
+from omnitrain.augmentation.pipeline import augment, build_plan, seed_for
+from omnitrain.augmentation.registry import (
     AugmentationConfigError,
     describe,
     get_augmentation,
@@ -20,7 +20,7 @@ from theseus.augmentation.registry import (
     param_specs,
     validate_config,
 )
-from theseus.services.task_registry import get_task_descriptor
+from omnitrain.services.task_registry import get_task_descriptor
 
 IMAGE_TASK = get_task_descriptor("image_classification")
 TEXT_TASK = get_task_descriptor("text_classification")
@@ -79,7 +79,7 @@ def test_ops_are_offered_only_for_label_preserving_tasks_of_their_own_modality()
 
 
 def test_a_new_op_class_is_picked_up_with_no_other_change():
-    from theseus.augmentation.base import _registry
+    from omnitrain.augmentation.base import _registry
 
     class Shout(Augmentation):
         id = "test_only_shout"

@@ -4,7 +4,7 @@ Revision ID: 0004
 Revises: 0003
 
 Ludwig was the only training framework, wired directly into jobs/services. Trainer backends are
-now a plugin system (theseus/backends/), so `training_runs`/`sweeps` need a `backend` column (free
+now a plugin system (omnitrain/backends/), so `training_runs`/`sweeps` need a `backend` column (free
 text, a plugin id, like exports.format) and `training_runs.ludwig_config` is renamed to `config`:
 it's the compiled config from whichever backend the run names, opaque outside that backend.
 """

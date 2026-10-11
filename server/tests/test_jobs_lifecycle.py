@@ -7,12 +7,12 @@ from datetime import timedelta
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import DatasetVersion, ModelExport, RunEvent, TrainingRun
-from theseus.events import InProcessRunEventBus, set_event_writer
-from theseus.events.writer import EventWriter
-from theseus.jobs import abort, queue, reapers
-from theseus.jobs.dispatcher import Dispatcher, Lane
-from theseus.jobs.recovery import recover_on_startup
+from omnitrain.db.models import DatasetVersion, ModelExport, RunEvent, TrainingRun
+from omnitrain.events import InProcessRunEventBus, set_event_writer
+from omnitrain.events.writer import EventWriter
+from omnitrain.jobs import abort, queue, reapers
+from omnitrain.jobs.dispatcher import Dispatcher, Lane
+from omnitrain.jobs.recovery import recover_on_startup
 
 
 @pytest.fixture

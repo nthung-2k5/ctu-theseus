@@ -17,20 +17,23 @@ const db = await builder
   .addPostgres('database')
   // uuidv7() is a Postgres-side column default (the schema relies on it), so this needs Postgres 18.
   .withImageTag('18')
+  // The volume and database names below predate the OmniTrain rename and are kept: they identify data that already
+  // exists on disk. Renaming either would start an empty database next to the old one.
   .withDataVolume({
     name: 'ctu-theseus-database',
     isReadOnly: false,
   })
   .withPgAdmin()
-  .addDatabase('ctu-theseus-db')
+  // The resource name sets the env var Aspire injects (CTU_OMNITRAIN_DB_URI); databaseName is the real Postgres database.
+  .addDatabase('ctu-omnitrain-db', { databaseName: 'ctu-theseus-db' })
 
 const s3AccessKey = await builder.addParameter('s3-access-key', {
   secret: true,
-  value: process.env.S3_ACCESS_KEY ?? 'ctu-theseus',
+  value: process.env.S3_ACCESS_KEY ?? 'ctu-omnitrain',
 })
 const s3SecretKey = await builder.addParameter('s3-secret-key', {
   secret: true,
-  value: process.env.S3_SECRET_KEY ?? 'ctu-theseus-secret',
+  value: process.env.S3_SECRET_KEY ?? 'ctu-omnitrain-secret',
 })
 
 // The browser loads images and downloads straight from S3 through presigned URLs, and can only reach the
@@ -46,6 +49,7 @@ const rustfs = await builder
     secretKey: s3SecretKey,
     port: s3HostPort,
   })
+  // Pre-rename volume name, kept so the buckets' existing objects stay attached (see constants.json bucket names).
   .withDataVolume({
     name: 'ctu-theseus-rustfs',
     isReadOnly: false,
@@ -92,10 +96,10 @@ const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/Commun
 //     env: 'PORT',
 //   })
 //   .withBindMount('./schema', '/schema', { isReadOnly: true })
-//   ... (same health check, withReference(db), S3_* / JWT_SECRET / ALLOWED_ORIGINS / THESEUS_ADMIN_EMAILS env and waitFor as below)
+//   ... (same health check, withReference(db), S3_* / JWT_SECRET / ALLOWED_ORIGINS / OMNITRAIN_ADMIN_EMAILS env and waitFor as below)
 
 // The whole backend: the REST API, the job queue and Ludwig training/export/inference run in this one
-// process (a hard requirement, see theseus.lifespan.assert_single_process). It now runs on the host through
+// process (a hard requirement, see omnitrain.lifespan.assert_single_process). It now runs on the host through
 // Aspire's Python support (`uv sync` from server/pyproject.toml, then `main.py`), so it uses the host's
 // Python and GPU directly. Postgres and S3 stay in containers; Aspire hands the host process their
 // localhost addresses.
@@ -113,7 +117,7 @@ const api = await builder
     endpointName: 'http',
   })
   .withReference(db)
-  // server/theseus/telemetry.py uses the OTLP/HTTP exporters. The dashboard's default OTLP endpoint is gRPC-only
+  // server/omnitrain/telemetry.py uses the OTLP/HTTP exporters. The dashboard's default OTLP endpoint is gRPC-only
   // (it negotiates h2 over TLS), so HTTP clients fail the handshake with "tlsv1 alert no application protocol".
   // This needs ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL set in aspire.config.json.
   .withOtlpExporter({ protocol: OtlpProtocol.HttpProtobuf })
@@ -121,8 +125,8 @@ const api = await builder
   // the same one the browser uses; S3_PUBLIC_ENDPOINT is kept explicit all the same.
   .withEnvironment('S3_ENDPOINT', s3Endpoint)
   .withEnvironment('S3_PUBLIC_ENDPOINT', `http://localhost:${s3HostPort}`)
-  // The default (/tmp/theseus) would resolve to <current drive>:\tmp\theseus on Windows.
-  .withEnvironment('TEMP_DIR', join(tmpdir(), 'theseus'))
+  // The default (/tmp/omnitrain) would resolve to <current drive>:\tmp\omnitrain on Windows.
+  .withEnvironment('TEMP_DIR', join(tmpdir(), 'omnitrain'))
   // Windows consoles default to cp1252, which crashes torch's ONNX exporter when it prints its status emoji.
   .withEnvironment('PYTHONUTF8', '1')
   .withEnvironment('S3_ACCESS_KEY', s3AccessKey)
@@ -131,9 +135,9 @@ const api = await builder
   // Only needed if the browser reaches the app through a host the proxy doesn't forward (see verify_origin).
   .withEnvironment('ALLOWED_ORIGINS', process.env.ALLOWED_ORIGINS ?? '')
   // Comma-separated emails promoted to admin when they register or sign in: how the first admin comes to exist.
-  .withEnvironment('THESEUS_ADMIN_EMAILS', process.env.THESEUS_ADMIN_EMAILS ?? '')
+  .withEnvironment('OMNITRAIN_ADMIN_EMAILS', process.env.OMNITRAIN_ADMIN_EMAILS ?? '')
   // Encrypts users' saved Hugging Face tokens. Empty means "derive it from JWT_SECRET" (see services/secrets.py).
-  .withEnvironment('THESEUS_SECRETS_KEY', process.env.THESEUS_SECRETS_KEY ?? '')
+  .withEnvironment('OMNITRAIN_SECRETS_KEY', process.env.OMNITRAIN_SECRETS_KEY ?? '')
   .waitFor(db)
   .waitFor(rustfs)
 

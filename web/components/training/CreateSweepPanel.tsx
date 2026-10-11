@@ -3,7 +3,7 @@
  *
  * Mirrors CreateRunPanel's backend-driven knob list (GET /projects/:id/training-backends is still
  * the single source of truth for what's tunable), but each knob here takes a LIST of candidate
- * values instead of one — see server/theseus/services/sweep.py for how that list is expanded
+ * values instead of one — see server/omnitrain/services/sweep.py for how that list is expanded
  * into trials. A `bool`-typed knob has no sweepable candidate list (there's nothing to gain from
  * running a run per pydantic-declared boolean when the model choice/batch size are usually the
  * more interesting axes) and is left out of this form; every `int`/`float`/`choice` knob is.

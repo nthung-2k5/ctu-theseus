@@ -3,8 +3,8 @@ from typing import get_args
 
 import pytest
 
-from theseus.db.enums import ProjectTask
-from theseus.services.task_registry import (
+from omnitrain.db.enums import ProjectTask
+from omnitrain.services.task_registry import (
     TASK_REGISTRY,
     get_inference_input_spec,
     get_inference_output_kind,
@@ -82,8 +82,8 @@ class TestInferenceOutputKind:
 def test_descriptors_are_immutable_data_no_backend_can_corrupt():
     # Compiling deep-copies feature dicts, so the shared registry must be unchanged afterwards.
     before = get_task_descriptor("image_classification").model_dump()
-    from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
-    from theseus.services.task_registry import SnapshotContext
+    from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
+    from omnitrain.services.task_registry import SnapshotContext
 
     compile_ludwig_config(
         get_task_descriptor("image_classification"),
@@ -125,7 +125,7 @@ class TestObjectDetection:
         assert get_inference_input_spec("object_detection")["kind"] == "file"
 
     def test_class_annotation_type_says_which_rows_carry_the_class(self):
-        from theseus.services.task_registry import class_annotation_type
+        from omnitrain.services.task_registry import class_annotation_type
 
         assert class_annotation_type("image_classification") == "classification"
         assert class_annotation_type("object_detection") == "bounding_box"

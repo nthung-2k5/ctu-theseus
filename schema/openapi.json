@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CTU Theseus API",
+    "title": "CTU OmniTrain API",
     "version": "1.0.0"
   },
   "paths": {
@@ -8380,7 +8380,7 @@
           "default"
         ],
         "title": "ParamSpec",
-        "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `theseus.params`."
+        "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `omnitrain.params`."
       },
       "PluginEntry": {
         "properties": {

@@ -3,8 +3,8 @@ import os
 import pandas as pd
 import pytest
 
-from theseus.backends.yolo import data
-from theseus.jobs import abort
+from omnitrain.backends.yolo import data
+from omnitrain.jobs import abort
 
 
 def row(item_id, label, split, uri=None):

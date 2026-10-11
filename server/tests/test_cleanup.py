@@ -2,8 +2,8 @@ import uuid
 
 import pytest
 
-from theseus.db.models import Dataset, DatasetItem, DatasetVersion, Project, TrainingRun, User
-from theseus.services import cleanup, storage
+from omnitrain.db.models import Dataset, DatasetItem, DatasetVersion, Project, TrainingRun, User
+from omnitrain.services import cleanup, storage
 
 
 @pytest.fixture

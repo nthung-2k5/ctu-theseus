@@ -1,6 +1,6 @@
 import pandas as pd
 
-from theseus.backends.ludwig.model import build_inference_output, parse_prediction_row
+from omnitrain.backends.ludwig.model import build_inference_output, parse_prediction_row
 
 
 def test_category_with_idx2str_list():

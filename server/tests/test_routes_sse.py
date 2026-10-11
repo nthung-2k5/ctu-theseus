@@ -16,8 +16,8 @@ import sqlalchemy as sa
 import uvicorn
 from conftest import TEST_DB_URI, _split
 
-from theseus.db.models import DatasetVersion, TrainingRun
-from theseus.events import get_event_bus, get_event_writer
+from omnitrain.db.models import DatasetVersion, TrainingRun
+from omnitrain.events import get_event_bus, get_event_writer
 
 
 @pytest.fixture

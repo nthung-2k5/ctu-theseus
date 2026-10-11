@@ -14,12 +14,12 @@ pytest.importorskip("ludwig")
 
 from PIL import Image  # noqa: E402
 
-from theseus import constants as C  # noqa: E402
-from theseus.backends.base import CustomModelRef  # noqa: E402
-from theseus.backends.ludwig import model as ludwig_model  # noqa: E402  (registers the encoder)
-from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config  # noqa: E402
-from theseus.services.storage import find_model_dir  # noqa: E402
-from theseus.services.task_registry import SnapshotContext, get_task_descriptor  # noqa: E402
+from omnitrain import constants as C  # noqa: E402
+from omnitrain.backends.base import CustomModelRef  # noqa: E402
+from omnitrain.backends.ludwig import model as ludwig_model  # noqa: E402  (registers the encoder)
+from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config  # noqa: E402
+from omnitrain.services.storage import find_model_dir  # noqa: E402
+from omnitrain.services.task_registry import SnapshotContext, get_task_descriptor  # noqa: E402
 
 
 def tiny_backbone(kind: str, root):

@@ -11,9 +11,9 @@ import pytest
 import sqlalchemy as sa
 from PIL import Image
 
-from theseus.augmentation import media
-from theseus.augmentation.media import AudioClip
-from theseus.db.models import (
+from omnitrain.augmentation import media
+from omnitrain.augmentation.media import AudioClip
+from omnitrain.db.models import (
     Annotation,
     AudioFeatures,
     Dataset,
@@ -27,10 +27,10 @@ from theseus.db.models import (
     User,
     VisionFeatures,
 )
-from theseus.services import augmentation as aug_service
-from theseus.services import snapshot as snap
-from theseus.services import storage
-from theseus.services.derived_items import delete_derived_items
+from omnitrain.services import augmentation as aug_service
+from omnitrain.services import snapshot as snap
+from omnitrain.services import storage
+from omnitrain.services.derived_items import delete_derived_items
 
 BUCKET = "theseus-datasets"
 TEXT = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from theseus.services.evaluate import pick_eval_split
+from omnitrain.services.evaluate import pick_eval_split
 
 SPLIT_COL = "split"
 

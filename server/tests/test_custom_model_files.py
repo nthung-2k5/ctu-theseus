@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from theseus.backends.base import ConfigError, CustomModelRef
-from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
-from theseus.backends.ludwig.custom import validate_custom_model
-from theseus.services import custom_models as cm
-from theseus.services.task_registry import SnapshotContext, get_task_descriptor
+from omnitrain.backends.base import ConfigError, CustomModelRef
+from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
+from omnitrain.backends.ludwig.custom import validate_custom_model
+from omnitrain.services import custom_models as cm
+from omnitrain.services.task_registry import SnapshotContext, get_task_descriptor
 
 MB = 2**20
 
@@ -287,7 +287,7 @@ class TestHfVision:
     image = get_task_descriptor("image_classification")
 
     def test_it_is_offered_for_image_classification_only(self):
-        from theseus.backends.ludwig.tasks import custom_kinds_for
+        from omnitrain.backends.ludwig.tasks import custom_kinds_for
 
         assert "hf_vision" in {k.id for k in custom_kinds_for("image_classification")}
         for task in ("image_captioning", "text_classification", "text_generation", "tabular_classification"):

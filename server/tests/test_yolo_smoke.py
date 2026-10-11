@@ -17,12 +17,12 @@ import pandas as pd
 import pytest
 from PIL import Image
 
-from theseus.backends.base import TrainContext
-from theseus.backends.yolo import YoloBackend, data, runtime
-from theseus.backends.yolo import train as train_mod
-from theseus.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
-from theseus.backends.yolo.model import YoloLoadedModel
-from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.backends.base import TrainContext
+from omnitrain.backends.yolo import YoloBackend, data, runtime
+from omnitrain.backends.yolo import train as train_mod
+from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
+from omnitrain.backends.yolo.model import YoloLoadedModel
+from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 pytestmark = pytest.mark.skipif(not os.environ.get("YOLO_SMOKE"), reason="set YOLO_SMOKE=1 to train for real")
 
@@ -162,9 +162,9 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     import json
     import types
 
-    import theseus.export
+    import omnitrain.export
 
-    client_path = Path(theseus.export.__file__).parent / "templates" / "python" / "theseus_client.py"
+    client_path = Path(omnitrain.export.__file__).parent / "templates" / "python" / "omnitrain_client.py"
     # Compiled from source, not imported: an import would leave a __pycache__ inside the templates directory.
     client_module = types.ModuleType("generated_client")
     client_module.__file__ = str(client_path)  # the template locates model.onnx next to itself
@@ -193,7 +193,7 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     def worst_difference(manifest_for_client: dict) -> float:
         """Largest per-class gap between the generated client and Ultralytics on the wide image."""
         (tmp_path / "preprocessing.json").write_text(json.dumps(manifest_for_client))
-        client = client_module.TheseusClient(model_path=path, preprocessing_path=tmp_path / "preprocessing.json")
+        client = client_module.OmniTrainClient(model_path=path, preprocessing_path=tmp_path / "preprocessing.json")
         # Unrounded: the client's own rounding to 4 decimals would hide small differences.
         pixels = client._preprocess_image(wide)
         logits = client.session.run(None, {client.session.get_inputs()[0].name: pixels})[0].reshape(-1)

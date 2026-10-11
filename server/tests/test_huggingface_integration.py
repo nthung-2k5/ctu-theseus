@@ -10,11 +10,11 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
 
-from theseus.db.models import CustomModel, UserIntegration
-from theseus.jobs import validate_model
-from theseus.services import custom_models as cm
-from theseus.services import integrations, run_models, secrets
-from theseus.settings import get_settings
+from omnitrain.db.models import CustomModel, UserIntegration
+from omnitrain.jobs import validate_model
+from omnitrain.services import custom_models as cm
+from omnitrain.services import integrations, run_models, secrets
+from omnitrain.settings import get_settings
 
 TOKEN = "hf_abcdefghijklmnopqrstuvwxyz0123"
 
@@ -346,7 +346,7 @@ async def test_a_revoked_token_fails_the_refetch_with_a_message_not_a_server_err
 
 
 async def _project_and_version(session, user_id):
-    from theseus.db.models import Dataset, DatasetVersion, Project
+    from omnitrain.db.models import Dataset, DatasetVersion, Project
 
     project = Project(user_id=user_id, name="p", task="text_classification")
     session.add(project)
@@ -360,7 +360,7 @@ async def _project_and_version(session, user_id):
 
 
 def _run(project_id, version_id, custom_model_id):
-    from theseus.db.models import TrainingRun
+    from omnitrain.db.models import TrainingRun
 
     return TrainingRun(
         project_id=project_id,

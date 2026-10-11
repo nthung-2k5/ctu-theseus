@@ -1,4 +1,4 @@
-# CTU Theseus
+# CTU OmniTrain
 
 An AutoML platform for training, evaluating, and exporting models (Ludwig, and Ultralytics YOLO for
 image classification and object detection) without writing config by hand. A user creates a **project** bound to one of a fixed set of **tasks** (e.g. image
@@ -93,11 +93,11 @@ lifespan, so a slow migration cannot fail the health check.
 
 ### Task registry
 
-`server/theseus/services/task_registry.py` is the single source of truth every other piece
+`server/omnitrain/services/task_registry.py` is the single source of truth every other piece
 derives from: it declares, per task, which modality it belongs to, what shape a dataset item takes
 (`itemSpec.payload`: `file` / `inline_text` / `record`), what annotation type it needs, the snapshot
 columns, and the inference input/output kinds. It says nothing about how a task is *trained*: that is a
-trainer backend's job (`server/theseus/backends/`, one package per framework). The frontend's task
+trainer backend's job (`server/omnitrain/backends/`, one package per framework). The frontend's task
 picker, the per-modality upload/labeling UI and snapshot column derivation are all driven off this one
 descriptor per task, so adding a new task's data side means adding one registry entry, not touching five
 files. The frontend reads it from the generated `schema/task_registry.json` (`web/lib/tasks.ts`), with
@@ -111,14 +111,18 @@ the inference input/output kinds already evaluated.
 re-upload and nothing at training time needs the image's size. An image with nothing in it carries a
 single marker row (`bounding_box`, no class, `{"background": true}`): a detector must learn what *not* to
 fire on, and that is different from an image nobody has labelled yet, which a trainer leaves out. The
-rules live in `server/theseus/services/boxes.py`; the snapshot's `boxes` column is a JSON list of
+rules live in `server/omnitrain/services/boxes.py`; the snapshot's `boxes` column is a JSON list of
 `{label, x, y, w, h}` per image (`null` while unlabelled). A class belongs to one box, so the bulk "assign
 class" action does not apply; boxes are drawn on the image in the item drawer, or imported with their
 labels from a YOLO-format archive (Upload → Import YOLO dataset).
 
 ### S3 key layout
 
-Three buckets (`server/theseus/services/storage.py`), content-addressed where it matters:
+Three buckets (`server/omnitrain/services/storage.py`), content-addressed where it matters. They keep their
+pre-rename `theseus-*` names: every snapshot parquet stores absolute `s3://theseus-datasets/...` image URIs, so
+renaming a bucket means copying its objects *and* rewriting those files. The same goes for the `_theseus_item_id`
+snapshot column, the Docker volumes `ctu-theseus-database` / `ctu-theseus-rustfs` and the Postgres database
+`ctu-theseus-db`.
 
 ```
 theseus-datasets/
@@ -177,10 +181,10 @@ originals (`source_item_id IS NULL`), and deleting the snapshot deletes them
 (`services/derived_items.delete_derived_items`). Augmented copies are seeded from (snapshot, item, copy
 index), so a rebuild reproduces them.
 
-**Adding a preprocessing op:** create a module in `server/theseus/preprocessing/ops/` with a
+**Adding a preprocessing op:** create a module in `server/omnitrain/preprocessing/ops/` with a
 subclass of `Preprocessing` that sets `id`, `label`, `modality`, a pydantic `Params` model and
 implements `apply(sample, params, state)` (no rng: it must be deterministic). **Adding an
-augmentation:** the same shape in `server/theseus/augmentation/ops/`, subclassing `Augmentation`
+augmentation:** the same shape in `server/omnitrain/augmentation/ops/`, subclassing `Augmentation`
 and implementing `apply(sample, params, rng, state)`. Either way, restart the backend:
 `GET /api/projects/{id}/preprocessing` or `/augmentations` returns it for projects whose task it
 supports (by default label-preserving classification and regression tasks of its modality) and the
@@ -190,7 +194,7 @@ snapshot dialog renders its parameters, with no frontend change.
 
 "Download the ONNX file," "give me code I can drop into my own project," and "give me something end
 users can just open" are different products with different constraints, so each is its own **export
-format**: one Python class in `server/theseus/export/formats/`. The web app has a single
+format**: one Python class in `server/omnitrain/export/formats/`. The web app has a single
 "Export format" combobox filled from `GET /api/export-formats`.
 
 | Group | Formats (ids) | Contents |
@@ -211,7 +215,7 @@ reference code to integrate, not a standalone scaffold. The apps are the excepti
 `pubspec.yaml` (Flutter) and the PWA's `index.html`/manifest are the app's actual required entry
 points, not incidental build tooling, so those do ship.
 
-**Adding a format:** create a module in `theseus/export/formats/` with a subclass of `ExportFormat`
+**Adding a format:** create a module in `omnitrain/export/formats/` with a subclass of `ExportFormat`
 that sets `id`, `label`, `group` and `artifact` (a key of `ARTIFACT_FILENAMES` in `backends/base.py`; the
 conversion itself is `TrainerBackend.convert`) and implements `assemble(ctx)`. Restart the backend. The
 format shows up in `GET /api/export-formats` and in the web combobox; there is no enum, migration or
@@ -230,17 +234,17 @@ golden sample (`expected.json`) plus a verify path (a script for devkit langs, a
 self-check screen/button for the PWA/Flutter apps) so a consumer can confirm the reimplementation
 actually matches the platform's own inference output before trusting it.
 
-Export is two-phase (`server/theseus/jobs/export.py`, `theseus/export/`): the export lane
+Export is two-phase (`server/omnitrain/jobs/export.py`, `omnitrain/export/`): the export lane
 converts the model (`pending → converting`), then a guarded `converting → assembling` transition
 hands off to bundle assembly, which zips (reproducibly: fixed timestamps, model stored
 uncompressed), uploads, and records `ready` or `failed` with a checksum. Both final transitions
 are compare-and-swap on status, so a stale result never overwrites a row that startup recovery has
-already re-queued. Templates ship as package data under `theseus/export/templates/`.
+already re-queued. Templates ship as package data under `omnitrain/export/templates/`.
 
 ### Administration
 
 `users.role` is `user` or `admin`. There is no admin UI to create the first one: list emails in
-`THESEUS_ADMIN_EMAILS` (comma separated) and an account with that email becomes an admin when it
+`OMNITRAIN_ADMIN_EMAILS` (comma separated) and an account with that email becomes an admin when it
 registers or signs in. That only ever **promotes**; removing an email does not demote anyone (do that
 from Administration > Users). Every `/api/admin/**` route sits behind `require_admin`, which reads the
 role from the database on each request rather than trusting the JWT, so a promotion, demotion or
@@ -288,7 +292,7 @@ and after decompression.
 
 **Private and gated Hub models.** In Settings > Integrations a user saves a Hugging Face access token
 (`PUT /api/integrations/huggingface`). It is checked with Hugging Face, stored encrypted in
-`user_integrations` (Fernet, `services/secrets.py`; the key is `THESEUS_SECRETS_KEY`, else derived from
+`user_integrations` (Fernet, `services/secrets.py`; the key is `OMNITRAIN_SECRETS_KEY`, else derived from
 `JWT_SECRET`) and never returned by the API: only the account name and the token's last four characters are.
 It is used only to look up and download models **that same user** imported (`/api/models/inspect`, the
 validation job and `ensure_run_custom_model` each resolve the owner's token). A shared (global) model has
@@ -371,14 +375,14 @@ the container (`./schema` is bind-mounted read-only there).
 apphost.mts               Aspire AppHost, the only place resources are provisioned
 schema/                   constants.json (shared), openapi.json + task_registry.json (generated)
 server/               The backend (FastAPI + Ludwig); see server/README.md
-  theseus/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
+  omnitrain/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
                           inference, export, api_keys, api_v1, models, admin/)
-  theseus/services/       task_registry (source of truth), ludwig_config, snapshot, sweep,
+  omnitrain/services/       task_registry (source of truth), ludwig_config, snapshot, sweep,
                           plugin_settings, model_catalog, custom_models, ...
-  theseus/jobs/           queue, dispatcher, lanes, train/export/validate_model, recovery, reapers
-  theseus/events/         run-event writer, in-process bus, SSE stream
-  theseus/export/         devkit/app bundle assembly + templates
-  theseus/db/, migrations/  SQLAlchemy models + Alembic
+  omnitrain/jobs/           queue, dispatcher, lanes, train/export/validate_model, recovery, reapers
+  omnitrain/events/         run-event writer, in-process bus, SSE stream
+  omnitrain/export/         devkit/app bundle assembly + templates
+  omnitrain/db/, migrations/  SQLAlchemy models + Alembic
 web/                      React SPA
   lib/api/                axios client + Orval output (generated/ is gitignored)
   lib/queries.ts          query-option/invalidation facade over the generated client

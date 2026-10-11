@@ -1,6 +1,6 @@
 import pandas as pd
 
-from theseus.services.predict import build_batch_result_frame
+from omnitrain.services.predict import build_batch_result_frame
 
 
 def test_batch_result_frame_concatenates_inputs_and_predictions_columns():

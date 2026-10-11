@@ -5,7 +5,7 @@
  * distributions. Scoped to the draft (what a snapshot cut right now would
  * actually contain), not the full historical pool.
  *
- * See server/theseus/routers/datasets.py's GET /projects/{id}/dataset/health.
+ * See server/omnitrain/routers/datasets.py's GET /projects/{id}/dataset/health.
  */
 
 import { Alert, Badge, Group, Progress, SimpleGrid, Skeleton, Stack, Text, Title } from '@mantine/core'

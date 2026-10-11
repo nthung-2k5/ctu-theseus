@@ -1,7 +1,7 @@
 import pytest
 
-from theseus.backends.yolo import YoloBackend
-from theseus.backends.yolo.manifest import METADATA_FILENAME, build_preprocessing_manifest
+from omnitrain.backends.yolo import YoloBackend
+from omnitrain.backends.yolo.manifest import METADATA_FILENAME, build_preprocessing_manifest
 
 META = {
     "schemaVersion": 1,

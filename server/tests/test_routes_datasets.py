@@ -10,9 +10,9 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import Annotation, DatasetItem, DatasetVersion, TextFeatures, VisionFeatures
-from theseus.routers import datasets as datasets_router
-from theseus.services import storage
+from omnitrain.db.models import Annotation, DatasetItem, DatasetVersion, TextFeatures, VisionFeatures
+from omnitrain.routers import datasets as datasets_router
+from omnitrain.services import storage
 
 
 @pytest.fixture(autouse=True)

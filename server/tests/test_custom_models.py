@@ -9,16 +9,16 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-from theseus.backends.registry import get_backend
-from theseus.db.models import CustomModel, DatasetVersion, TrainingRun
-from theseus.jobs import queue, validate_model
-from theseus.jobs.recovery import recover_on_startup
-from theseus.services import custom_models as cm
-from theseus.services import run_models, storage
-from theseus.services import training as training_service
-from theseus.services.task_registry import SnapshotContext, get_task_descriptor
-from theseus.services.training import QueueError, queue_training
-from theseus.settings import get_settings
+from omnitrain.backends.registry import get_backend
+from omnitrain.db.models import CustomModel, DatasetVersion, TrainingRun
+from omnitrain.jobs import queue, validate_model
+from omnitrain.jobs.recovery import recover_on_startup
+from omnitrain.services import custom_models as cm
+from omnitrain.services import run_models, storage
+from omnitrain.services import training as training_service
+from omnitrain.services.task_registry import SnapshotContext, get_task_descriptor
+from omnitrain.services.training import QueueError, queue_training
+from omnitrain.settings import get_settings
 
 ADMIN_EMAIL = "boss@example.com"
 TEXT = "text_classification"
@@ -45,7 +45,7 @@ def temp_dir(tmp_path, monkeypatch):
 
 @pytest.fixture
 async def admin(monkeypatch, new_user):
-    monkeypatch.setenv("THESEUS_ADMIN_EMAILS", ADMIN_EMAIL)
+    monkeypatch.setenv("OMNITRAIN_ADMIN_EMAILS", ADMIN_EMAIL)
     get_settings.cache_clear()
     yield await new_user(ADMIN_EMAIL)
     get_settings.cache_clear()
@@ -743,7 +743,7 @@ async def test_startup_requeues_an_interrupted_validation_or_fails_it_once_out_o
 
 
 async def test_the_dispatcher_has_a_validate_lane():
-    from theseus.jobs.dispatcher import build_default_lanes
+    from omnitrain.jobs.dispatcher import build_default_lanes
 
     lanes = {lane.name: lane for lane in build_default_lanes()}
     assert (
@@ -772,7 +772,7 @@ async def test_a_run_on_a_custom_model_gets_its_files_back_before_loading(db, ma
 
 
 async def test_the_backend_contract_defaults_offer_no_custom_models():
-    from theseus.backends.base import TrainerBackend
+    from omnitrain.backends.base import TrainerBackend
 
     assert TrainerBackend.custom_model_kinds.__func__(TrainerBackend, get_task_descriptor(TEXT)) == []
     assert get_backend("ludwig").custom_model_kinds(get_task_descriptor("tabular_classification")) == []

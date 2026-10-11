@@ -7,11 +7,11 @@ import pytest
 import sqlalchemy as sa
 import yaml
 
-from theseus.db.models import DatasetVersion, RunEvaluation, RunEvent, Sweep, TrainingMetric, TrainingRun
-from theseus.events import get_event_writer
-from theseus.services import snapshot as snap
-from theseus.services import storage
-from theseus.services.task_registry import get_task_descriptor
+from omnitrain.db.models import DatasetVersion, RunEvaluation, RunEvent, Sweep, TrainingMetric, TrainingRun
+from omnitrain.events import get_event_writer
+from omnitrain.services import snapshot as snap
+from omnitrain.services import storage
+from omnitrain.services.task_registry import get_task_descriptor
 
 
 @pytest.fixture(autouse=True)
@@ -225,7 +225,7 @@ async def test_run_routes_are_owner_only(client, new_user, db, fake_s3):
 
 
 async def test_cancelling_a_queued_run_ends_it_immediately_and_it_is_never_claimed(client, new_user, db, fake_s3):
-    from theseus.jobs import queue
+    from omnitrain.jobs import queue
 
     c = await new_user()
     p = await project(c)
@@ -308,7 +308,7 @@ async def test_evaluation_is_404_until_it_exists_then_returned_whole(client, new
 async def test_evaluation_errors_are_paginated_filtered_by_actual_class_and_joined_to_items(
     client, new_user, db, fake_s3
 ):
-    from theseus.db.models import DatasetItem, LabelClass, TextFeatures
+    from omnitrain.db.models import DatasetItem, LabelClass, TextFeatures
 
     c = await new_user()
     p = await project(c, "text_classification")

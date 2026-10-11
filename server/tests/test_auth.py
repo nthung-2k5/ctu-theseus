@@ -3,11 +3,11 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus.auth import rate_limit
-from theseus.auth.api_keys import KEY_PREFIX, generate_api_key, hash_api_key
-from theseus.auth.jwt import InvalidToken, create_access_token, decode_access_token
-from theseus.db.models import Project, RefreshToken, User
-from theseus.lifespan import assert_single_process
+from omnitrain.auth import rate_limit
+from omnitrain.auth.api_keys import KEY_PREFIX, generate_api_key, hash_api_key
+from omnitrain.auth.jwt import InvalidToken, create_access_token, decode_access_token
+from omnitrain.db.models import Project, RefreshToken, User
+from omnitrain.lifespan import assert_single_process
 
 CREDS = {"name": "Ada", "email": "Ada@Example.com", "password": "correct horse battery"}
 
@@ -61,7 +61,7 @@ def test_single_process_assertion_allows_default_and_one_worker():
 
 
 def test_operation_ids_are_unique():
-    from theseus.app import create_app
+    from omnitrain.app import create_app
 
     ids = [op["operationId"] for path in create_app().openapi()["paths"].values() for op in path.values()]
     assert len(ids) == len(set(ids))
@@ -159,8 +159,8 @@ async def test_cross_origin_writes_are_blocked_but_same_origin_and_no_origin_pas
 async def test_ownership_dependency_404s_and_403s(client, db):
     from fastapi import APIRouter
 
-    from theseus.app import create_app
-    from theseus.deps import ProjectDep
+    from omnitrain.app import create_app
+    from omnitrain.deps import ProjectDep
 
     probe = APIRouter()
 

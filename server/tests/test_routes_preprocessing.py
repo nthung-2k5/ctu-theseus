@@ -5,8 +5,8 @@ import asyncio
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import DatasetItem, DatasetVersionItem, TextFeatures
-from theseus.services import storage
+from omnitrain.db.models import DatasetItem, DatasetVersionItem, TextFeatures
+from omnitrain.services import storage
 
 TEXT = "Hello World"
 

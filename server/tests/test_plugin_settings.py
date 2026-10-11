@@ -5,16 +5,16 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus.backends.registry import get_backend, trainable_backends
-from theseus.db.models import DatasetVersion, PluginSetting, TrainingRun
-from theseus.export.registry import find_export_format, list_export_formats
-from theseus.preprocessing.config import PreprocessingConfig
-from theseus.preprocessing.registry import PreprocessingConfigError, list_preprocessing, validate_config
-from theseus.services import plugin_settings as ps
-from theseus.services import storage
-from theseus.services.task_registry import get_task_descriptor
-from theseus.services.training import QueueError, _check_builtin_model, queue_training
-from theseus.settings import get_settings
+from omnitrain.backends.registry import get_backend, trainable_backends
+from omnitrain.db.models import DatasetVersion, PluginSetting, TrainingRun
+from omnitrain.export.registry import find_export_format, list_export_formats
+from omnitrain.preprocessing.config import PreprocessingConfig
+from omnitrain.preprocessing.registry import PreprocessingConfigError, list_preprocessing, validate_config
+from omnitrain.services import plugin_settings as ps
+from omnitrain.services import storage
+from omnitrain.services.task_registry import get_task_descriptor
+from omnitrain.services.training import QueueError, _check_builtin_model, queue_training
+from omnitrain.settings import get_settings
 
 ADMIN_EMAIL = "boss@example.com"
 TASK = "image_classification"
@@ -22,7 +22,7 @@ TASK = "image_classification"
 
 @pytest.fixture
 async def admin(monkeypatch, new_user):
-    monkeypatch.setenv("THESEUS_ADMIN_EMAILS", ADMIN_EMAIL)
+    monkeypatch.setenv("OMNITRAIN_ADMIN_EMAILS", ADMIN_EMAIL)
     get_settings.cache_clear()
     c = await new_user(ADMIN_EMAIL)
     yield c

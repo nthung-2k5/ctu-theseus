@@ -11,17 +11,17 @@ import pandas as pd
 import pytest
 import yaml
 
-from theseus.backends.base import ConfigError, TrainContext
-from theseus.backends.yolo import YoloBackend, data, runtime
-from theseus.backends.yolo import train as train_mod
-from theseus.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
-from theseus.backends.yolo.evaluate import EVALUATION_CONFIDENCE
-from theseus.backends.yolo.evaluate import evaluate as evaluate_detection
-from theseus.backends.yolo.manifest import build_preprocessing_manifest
-from theseus.backends.yolo.model import DETECT_CONFIDENCE, YoloLoadedModel
-from theseus.export.registry import list_export_formats
-from theseus.jobs import abort
-from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.backends.base import ConfigError, TrainContext
+from omnitrain.backends.yolo import YoloBackend, data, runtime
+from omnitrain.backends.yolo import train as train_mod
+from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
+from omnitrain.backends.yolo.evaluate import EVALUATION_CONFIDENCE
+from omnitrain.backends.yolo.evaluate import evaluate as evaluate_detection
+from omnitrain.backends.yolo.manifest import build_preprocessing_manifest
+from omnitrain.backends.yolo.model import DETECT_CONFIDENCE, YoloLoadedModel
+from omnitrain.export.registry import list_export_formats
+from omnitrain.jobs import abort
+from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 TASK = get_task_descriptor("object_detection")
 CLASSES = ["cat", "dog"]
@@ -623,7 +623,7 @@ class TestManifestAndExport:
         assert {"pwa_app", "flutter_app"} <= set(ids)
 
     def test_the_golden_sample_is_skipped_for_a_detector(self, monkeypatch):
-        from theseus.jobs import export as export_job
+        from omnitrain.jobs import export as export_job
 
         class Detector:
             output = SimpleNamespace(kind="detections")

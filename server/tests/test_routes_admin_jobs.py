@@ -5,16 +5,16 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import CustomModel, ModelExport, TrainingRun
-from theseus.jobs.dispatcher import Dispatcher, Lane, set_dispatcher
-from theseus.settings import get_settings
+from omnitrain.db.models import CustomModel, ModelExport, TrainingRun
+from omnitrain.jobs.dispatcher import Dispatcher, Lane, set_dispatcher
+from omnitrain.settings import get_settings
 
 ADMIN_EMAIL = "boss@example.com"
 
 
 @pytest.fixture
 async def admin(monkeypatch, new_user):
-    monkeypatch.setenv("THESEUS_ADMIN_EMAILS", ADMIN_EMAIL)
+    monkeypatch.setenv("OMNITRAIN_ADMIN_EMAILS", ADMIN_EMAIL)
     get_settings.cache_clear()
     yield await new_user(ADMIN_EMAIL)
     get_settings.cache_clear()
@@ -169,7 +169,7 @@ async def test_system_overview_reports_lane_load_when_a_dispatcher_runs(admin):
     async def noop(_):  # never called: the dispatcher is not started
         return None
 
-    from theseus.jobs import queue
+    from omnitrain.jobs import queue
 
     lane = Lane("train", queue.TRAIN, 1, noop)
     lane.running.add(uuid.uuid4())

@@ -1,7 +1,7 @@
 /**
  * Read-only view of the backend's task registry.
  *
- * The registry's source of truth is `server/theseus/services/task_registry.py`; the backend dumps it
+ * The registry's source of truth is `server/omnitrain/services/task_registry.py`; the backend dumps it
  * to `schema/task_registry.json` (drift-checked in CI), with the inference input/output kinds already
  * evaluated. This file only types that JSON and re-exposes the helpers the UI used to import from the
  * gateway.

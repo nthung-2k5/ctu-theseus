@@ -66,7 +66,7 @@ export function SettingsPage() {
 
       <SettingsSection
         title="Integrations"
-        description="Connect outside services so Theseus can fetch things on your behalf."
+        description="Connect outside services so OmniTrain can fetch things on your behalf."
       >
         <HuggingFaceIntegration />
       </SettingsSection>

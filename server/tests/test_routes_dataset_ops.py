@@ -8,10 +8,10 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus import constants as C
-from theseus.db.models import Annotation, DatasetItem, DatasetVersion, DatasetVersionItem
-from theseus.services import datasets as svc
-from theseus.services import storage
+from omnitrain import constants as C
+from omnitrain.db.models import Annotation, DatasetItem, DatasetVersion, DatasetVersionItem
+from omnitrain.services import datasets as svc
+from omnitrain.services import storage
 
 
 @pytest.fixture(autouse=True)
@@ -253,7 +253,7 @@ async def test_a_selection_is_exactly_one_of_ids_or_filter(client, new_user):
 
 
 async def test_a_filter_matching_too_many_items_is_refused_not_truncated(client, new_user, monkeypatch):
-    from theseus.services import item_filter
+    from omnitrain.services import item_filter
 
     monkeypatch.setattr(item_filter, "MAX_FILTER_BULK", 3)
     c = await new_user()

@@ -10,13 +10,13 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from theseus import constants as C
-from theseus.backends.base import TrainContext
-from theseus.backends.yolo import data, runtime
-from theseus.backends.yolo import train as train_mod
-from theseus.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
-from theseus.jobs import abort
-from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain import constants as C
+from omnitrain.backends.base import TrainContext
+from omnitrain.backends.yolo import data, runtime
+from omnitrain.backends.yolo import train as train_mod
+from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
+from omnitrain.jobs import abort
+from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 CLASSES = ["cat", "dog", "bird"]
 

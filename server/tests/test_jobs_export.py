@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import ModelExport
-from theseus.jobs import export as export_job
-from theseus.services import storage
+from omnitrain.db.models import ModelExport
+from omnitrain.jobs import export as export_job
+from omnitrain.services import storage
 
 # -- Export ----------------------------------------------------------------------------------
 

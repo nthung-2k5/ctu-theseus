@@ -3,9 +3,9 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from pydantic import ValidationError
 
-from theseus.db.base import Base
-from theseus.services import storage
-from theseus.settings import Settings, get_settings
+from omnitrain.db.base import Base
+from omnitrain.services import storage
+from omnitrain.settings import Settings, get_settings
 
 
 def test_pool_key_shards_by_hash_prefix():
@@ -20,19 +20,19 @@ def test_key_layout_matches_documented_layout():
 
 
 def test_async_database_url_adds_asyncpg_driver():
-    s = Settings(CTU_THESEUS_DB_URI="postgres://u:p@h:5432/d")
+    s = Settings(CTU_OMNITRAIN_DB_URI="postgres://u:p@h:5432/d")
     assert s.async_database_url == "postgresql+asyncpg://u:p@h:5432/d"
 
 
 def test_production_requires_explicit_config(monkeypatch):
-    for name in ("CTU_THESEUS_DB_URI", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "JWT_SECRET"):
+    for name in ("CTU_OMNITRAIN_DB_URI", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "JWT_SECRET"):
         monkeypatch.delenv(name, raising=False)
     with pytest.raises(ValidationError, match="JWT_SECRET"):
         Settings(_env_file=None, ENVIRONMENT="production")
 
 
 def test_metadata_has_every_table_and_load_bearing_constraints():
-    import theseus.db.models  # noqa: F401
+    import omnitrain.db.models  # noqa: F401
 
     tables = Base.metadata.tables
     assert {"users", "refresh_tokens", "run_events", "training_runs", "exports"} <= set(tables)

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ctu-theseus",
+      "name": "ctu-omnitrain",
       "dependencies": {
         "vscode-jsonrpc": "8.2.1",
       },

@@ -6,7 +6,7 @@ import pyarrow.parquet as pq
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import (
+from omnitrain.db.models import (
     Annotation,
     Dataset,
     DatasetItem,
@@ -18,9 +18,9 @@ from theseus.db.models import (
     TextFeatures,
     User,
 )
-from theseus.services import snapshot as snap
-from theseus.services import storage
-from theseus.services.task_registry import ColumnSpec, get_task_descriptor
+from omnitrain.services import snapshot as snap
+from omnitrain.services import storage
+from omnitrain.services.task_registry import ColumnSpec, get_task_descriptor
 
 CLASS_ID = uuid.uuid4()
 ITEM_ID = uuid.uuid4()

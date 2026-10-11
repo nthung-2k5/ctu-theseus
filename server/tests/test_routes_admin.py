@@ -2,14 +2,14 @@
 
 import pytest
 
-from theseus.settings import get_settings
+from omnitrain.settings import get_settings
 
 ADMIN_EMAIL = "boss@example.com"
 
 
 @pytest.fixture
 def admin_emails(monkeypatch):
-    monkeypatch.setenv("THESEUS_ADMIN_EMAILS", f" {ADMIN_EMAIL.upper()} , other@example.com")
+    monkeypatch.setenv("OMNITRAIN_ADMIN_EMAILS", f" {ADMIN_EMAIL.upper()} , other@example.com")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -37,7 +37,7 @@ async def test_bootstrap_email_is_promoted_on_login(new_user, client, monkeypatc
         await client.post("/api/auth/login", json={"email": ADMIN_EMAIL, "password": "correct horse battery"})
     ).json()["user"]["role"] == "user"
 
-    monkeypatch.setenv("THESEUS_ADMIN_EMAILS", ADMIN_EMAIL)
+    monkeypatch.setenv("OMNITRAIN_ADMIN_EMAILS", ADMIN_EMAIL)
     get_settings.cache_clear()
     try:
         r = await client.post("/api/auth/login", json={"email": ADMIN_EMAIL, "password": "correct horse battery"})

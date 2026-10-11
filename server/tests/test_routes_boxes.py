@@ -343,7 +343,7 @@ async def test_auto_split_works_with_several_boxes_per_item(client, new_user):
 
 @pytest.fixture
 def fake_s3(monkeypatch):
-    from theseus.services import storage
+    from omnitrain.services import storage
 
     store: dict = {}
     monkeypatch.setattr(storage, "upload_bytes", lambda b, k, data, content_type=None: store.__setitem__((b, k), data))

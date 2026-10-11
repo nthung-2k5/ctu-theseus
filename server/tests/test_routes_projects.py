@@ -8,8 +8,8 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import ApiKey, DatasetVersion, Project, TrainingRun
-from theseus.services import storage
+from omnitrain.db.models import ApiKey, DatasetVersion, Project, TrainingRun
+from omnitrain.services import storage
 
 
 @pytest.fixture(autouse=True)

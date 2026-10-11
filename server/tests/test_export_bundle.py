@@ -9,18 +9,18 @@ import zipfile
 import pytest
 import sqlalchemy as sa
 
-from theseus.backends.ludwig.manifest import build_preprocessing_manifest as build_manifest
-from theseus.db.models import LabelClass, ModelExport, TrainingRun
-from theseus.export import bundle as B
-from theseus.export.formats.base import ExportFormat, _registry
-from theseus.export.formats.csharp_devkit import CSharpDevkit
-from theseus.export.formats.pwa_app import PwaApp
-from theseus.export.formats.python_devkit import PythonDevkit
-from theseus.export.metadata import extract_preprocessing
-from theseus.export.readme import ReadmeVars, app_readme, devkit_readme, model_readme
-from theseus.export.registry import get_export_format, list_export_formats
-from theseus.jobs import export as export_job
-from theseus.services import storage
+from omnitrain.backends.ludwig.manifest import build_preprocessing_manifest as build_manifest
+from omnitrain.db.models import LabelClass, ModelExport, TrainingRun
+from omnitrain.export import bundle as B
+from omnitrain.export.formats.base import ExportFormat, _registry
+from omnitrain.export.formats.csharp_devkit import CSharpDevkit
+from omnitrain.export.formats.pwa_app import PwaApp
+from omnitrain.export.formats.python_devkit import PythonDevkit
+from omnitrain.export.metadata import extract_preprocessing
+from omnitrain.export.readme import ReadmeVars, app_readme, devkit_readme, model_readme
+from omnitrain.export.registry import get_export_format, list_export_formats
+from omnitrain.jobs import export as export_job
+from omnitrain.services import storage
 
 CLASSES = ["dog", "cat"]  # Ludwig order: deliberately NOT alphabetical
 PRE = {
@@ -50,7 +50,7 @@ def test_render_substitutes_known_vars_and_blanks_unknown_ones():
 @pytest.mark.parametrize(
     ("name", "expected"),
     [("My Model 2", "my_model_2"), ("  --Cats & Dogs!!  ", "cats_dogs"), ("123 run", "app_123_run"),
-     ("!!!", "theseus_app"), ("", "theseus_app"), ("Über", "ber")],
+     ("!!!", "omnitrain_app"), ("", "omnitrain_app"), ("Über", "ber")],
 )  # fmt: skip
 def test_dart_package_names_are_valid_lowercase_snake_case(name, expected):
     assert B.dart_package_name(name) == expected
@@ -103,10 +103,10 @@ def test_labels_txt_is_written_in_ludwig_index_order_and_only_for_classification
 @pytest.mark.parametrize(
     ("fmt", "client_files", "verify"),
     [
-        ("python_devkit", {"theseus_client.py", "example.py"}, "verify.py"),
+        ("python_devkit", {"omnitrain_client.py", "example.py"}, "verify.py"),
         ("typescript_devkit", {"client.ts", "example.ts"}, "verify.ts"),
-        ("csharp_devkit", {"TheseusClient.cs", "Program.cs"}, None),
-        ("java_devkit", {"TheseusClient.java", "Main.java"}, None),
+        ("csharp_devkit", {"OmniTrainClient.cs", "Program.cs"}, None),
+        ("java_devkit", {"OmniTrainClient.java", "Main.java"}, None),
     ],
 )
 def test_devkits_ship_source_only_with_verify_where_supported(fmt, client_files, verify):
@@ -135,7 +135,7 @@ def test_pwa_places_everything_at_the_root_and_renders_its_templates():
 def test_flutter_puts_model_files_under_assets_and_uses_a_valid_package_name():
     out = files("flutter_app", name="Cats vs Dogs")
     assert {"assets/model.onnx", "assets/preprocessing.json", "assets/labels.txt", "assets/expected.json",
-            "assets/sample/input.png", "pubspec.yaml", "lib/main.dart", "lib/theseus_client.dart",
+            "assets/sample/input.png", "pubspec.yaml", "lib/main.dart", "lib/omnitrain_client.dart",
             "README.md"} == set(out)  # fmt: skip
     assert "model.onnx" not in out  # only reachable if declared as a pubspec asset
     pubspec = out["pubspec.yaml"].data.decode()
@@ -161,7 +161,7 @@ def test_an_unknown_format_is_a_clear_error():
 def test_every_shipped_template_exists_and_is_valid_utf8():
     for path in sorted(p for p in B.TEMPLATES.rglob("*") if p.is_file()):
         assert path.read_text(encoding="utf-8")  # non-empty, decodable
-    assert len(list(B.TEMPLATES.rglob("*.py"))) == 3 and (B.TEMPLATES / "flutter/lib/theseus_client.dart").exists()
+    assert len(list(B.TEMPLATES.rglob("*.py"))) == 3 and (B.TEMPLATES / "flutter/lib/omnitrain_client.dart").exists()
 
 
 def test_readme_reflects_the_format_and_whether_a_verify_path_exists():
@@ -381,7 +381,7 @@ async def test_build_bundle_produces_a_verified_devkit_zip_and_marks_the_export_
     with zipfile.ZipFile(io.BytesIO(zipped)) as zf:
         assert set(zf.namelist()) == {
             "model.onnx", "preprocessing.json", "labels.txt", "expected.json", "sample/input.png",
-            "theseus_client.py", "example.py", "verify.py", "README.md",
+            "omnitrain_client.py", "example.py", "verify.py", "README.md",
         }  # fmt: skip
         assert zf.read("model.onnx") == b"ONNX-BYTES" and zf.read("sample/input.png") == b"the-real-sample"
         assert zf.read("labels.txt") == b"dog\ncat"  # Ludwig index order, from the metadata file

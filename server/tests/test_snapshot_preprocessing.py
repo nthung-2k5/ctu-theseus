@@ -12,7 +12,7 @@ import pytest
 import sqlalchemy as sa
 from PIL import Image
 
-from theseus.db.models import (
+from omnitrain.db.models import (
     Annotation,
     Dataset,
     DatasetItem,
@@ -25,9 +25,9 @@ from theseus.db.models import (
     User,
     VisionFeatures,
 )
-from theseus.services import snapshot as snap
-from theseus.services import storage
-from theseus.services.derived_items import delete_derived_items
+from omnitrain.services import snapshot as snap
+from omnitrain.services import storage
+from omnitrain.services.derived_items import delete_derived_items
 
 BUCKET = "theseus-datasets"
 

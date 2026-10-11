@@ -1,0 +1,111 @@
+"""S3 teardown for project / version / run deletes.
+
+Ported from server/lib/cleanup.ts. Cleanup is best-effort by design: a failed object delete is
+logged and skipped, never allowed to block deleting the database row the user asked for.
+
+Callers delete the S3 objects BEFORE the database rows (the object keys live in those rows).
+"""
+
+import asyncio
+import logging
+import uuid
+from collections.abc import Callable, Iterable
+from typing import Any
+
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from omnitrain import constants as C
+from omnitrain.db.models import DatasetItem, DatasetVersion, TrainingRun
+from omnitrain.services import storage
+
+logger = logging.getLogger(__name__)
+
+
+def _best_effort(fn: Callable[..., Any], *args: Any) -> None:
+    try:
+        fn(*args)
+    except Exception:
+        logger.warning("S3 cleanup step failed: %s%s", fn.__name__, args, exc_info=True)
+
+
+async def _run(steps: Iterable[tuple[Callable[..., Any], tuple[Any, ...]]]) -> None:
+    loop = asyncio.get_running_loop()
+    await asyncio.gather(*(loop.run_in_executor(None, _best_effort, fn, *args) for fn, args in steps))
+
+
+def _thumbnail_steps(source_prefix: str) -> list[tuple[Callable[..., Any], tuple]]:
+    # One step per cached size, so a failed delete of one size can't stop the others.
+    return [(storage.delete_prefix, (C.BUCKET_DATASETS, p)) for p in storage.thumbnail_prefixes(source_prefix)]
+
+
+def _version_steps(version_id: uuid.UUID | str, version_tag: str | None) -> list[tuple[Callable[..., Any], tuple]]:
+    # The draft (no version tag) has no parquet or manifest; only real snapshots do.
+    if version_tag is None:
+        return []
+    v = str(version_id)
+    return [
+        (storage.delete_file, (C.BUCKET_DATASETS, storage.snapshot_parquet_key(v))),
+        (storage.delete_file, (C.BUCKET_DATASETS, storage.snapshot_manifest_key(v))),
+        (storage.delete_prefix, (C.BUCKET_DATASETS, storage.preprocessed_prefix(v))),
+        (storage.delete_prefix, (C.BUCKET_DATASETS, storage.augmented_prefix(v))),
+        *_thumbnail_steps(f"snapshots/{v}/"),
+    ]
+
+
+def _run_steps(run_id: uuid.UUID | str) -> list[tuple[Callable[..., Any], tuple]]:
+    r = str(run_id)
+    return [
+        (storage.delete_file, (C.BUCKET_TRAINING, storage.training_config_key(r))),
+        (storage.delete_prefix, (C.BUCKET_TRAINING, storage.training_results_prefix(r))),
+        # Runs made before run logs were removed still have {runId}/logs/train.log in S3.
+        (storage.delete_prefix, (C.BUCKET_TRAINING, f"{r}/logs/")),
+        (storage.delete_prefix, (C.BUCKET_TRAINING, storage.evaluation_prefix(r))),
+        # Covers model.{format}, expected.json and bundles/*.zip in one sweep.
+        (storage.delete_prefix, (C.BUCKET_MODELS, f"{r}/")),
+    ]
+
+
+async def cleanup_version_storage(version_id: uuid.UUID | str, version_tag: str | None) -> None:
+    """Delete one snapshot version S3 objects (parquet, manifest, preprocessed and augmented copies).
+
+    A no-op for the draft."""
+    await _run(_version_steps(version_id, version_tag))
+
+
+async def cleanup_run_storage(run_id: uuid.UUID | str) -> None:
+    """Delete one training run S3 objects: config, results, evaluation and exports."""
+    await _run(_run_steps(run_id))
+
+
+async def cleanup_project_storage(session: AsyncSession, project_id: uuid.UUID) -> None:
+    """Delete every S3 object belonging to a project: pool files, snapshots, training artifacts, exports."""
+    storage_urls = (
+        (
+            await session.execute(
+                sa.select(DatasetItem.storage_url).where(
+                    DatasetItem.dataset_id == project_id, DatasetItem.storage_url.is_not(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    versions = (
+        await session.execute(
+            sa.select(DatasetVersion.id, DatasetVersion.version_tag).where(DatasetVersion.dataset_id == project_id)
+        )
+    ).all()
+    runs = (
+        (await session.execute(sa.select(TrainingRun.id).where(TrainingRun.project_id == project_id))).scalars().all()
+    )
+    steps: list[tuple[Callable[..., Any], tuple]] = []
+    if storage_urls:
+        steps.append((storage.delete_files, (C.BUCKET_DATASETS, list(storage_urls))))
+    # By prefix, not per object: it also catches the thumbnails of items that were deleted earlier.
+    steps.extend(_thumbnail_steps(f"pool/{project_id}/"))
+    for version_id, tag in versions:
+        steps.extend(_version_steps(version_id, tag))
+    for run_id in runs:
+        steps.extend(_run_steps(run_id))
+    await _run(steps)

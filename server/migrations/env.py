@@ -1,13 +1,13 @@
-"""Async Alembic environment. The DB URL comes from theseus.settings, never from alembic.ini."""
+"""Async Alembic environment. The DB URL comes from omnitrain.settings, never from alembic.ini."""
 
 import asyncio
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
-import theseus.db.models  # noqa: F401  (registers every table on Base.metadata)
-from theseus.db.base import Base
-from theseus.settings import get_settings
+import omnitrain.db.models  # noqa: F401  (registers every table on Base.metadata)
+from omnitrain.db.base import Base
+from omnitrain.settings import get_settings
 
 config = context.config
 target_metadata = Base.metadata

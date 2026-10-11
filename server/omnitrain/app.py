@@ -1,0 +1,82 @@
+"""FastAPI application factory.
+
+create_app() must stay importable with no side effects (no DB, no S3, no network): the OpenAPI
+export script imports it at build time to dump schema/openapi.json for Orval. Everything that
+touches infrastructure lives in lifespan.py and only runs when the server actually starts.
+"""
+
+from fastapi import APIRouter, Depends, FastAPI
+from fastapi.routing import APIRoute
+
+from omnitrain.augmentation.registry import list_augmentations
+from omnitrain.backends.registry import list_backends
+from omnitrain.deps import verify_origin
+from omnitrain.errors import install_error_handlers
+from omnitrain.export.registry import list_export_formats
+from omnitrain.lifespan import lifespan
+from omnitrain.preprocessing.registry import list_preprocessing
+from omnitrain.routers import (
+    admin,
+    api_keys,
+    api_v1,
+    auth,
+    classes,
+    datasets,
+    export,
+    health,
+    inference,
+    integrations,
+    models,
+    projects,
+    sweeps,
+    training,
+)
+
+
+def _operation_id(route: APIRoute) -> str:
+    """Orval derives hook names from operationId, so use the (unique, stable) handler name."""
+    return route.name
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="CTU OmniTrain API",
+        version="1.0.0",
+        lifespan=lifespan,
+        generate_unique_id_function=_operation_id,
+        dependencies=[Depends(verify_origin)],
+        docs_url="/api/docs",
+        openapi_url="/api/openapi.json",
+    )
+    install_error_handlers(app)
+    # Import every export format, preprocessing, augmentation and trainer backend plugin now, so a
+    # duplicate id or a broken plugin module stops the backend at startup instead of failing the
+    # first request that needs it. Import only: no DB, S3 or network (a backend's own heavy ML
+    # import is lazy, see backends/base.py), so this stays safe for the OpenAPI export script.
+    list_export_formats()
+    list_preprocessing()
+    list_augmentations()
+    list_backends()
+
+    api = APIRouter(prefix="/api")
+    api.include_router(auth.router)
+    api.include_router(projects.router)
+    api.include_router(classes.router)
+    api.include_router(datasets.router)
+    api.include_router(api_keys.router)
+    api.include_router(training.router)
+    api.include_router(sweeps.router)
+    api.include_router(inference.router)
+    api.include_router(export.router)
+    api.include_router(api_v1.router)
+    # Registered last so the generated OpenAPI contract only gains paths: FastAPI lists them in registration
+    # order, and slotting these in earlier would shift every existing path in the checked-in schema.
+    api.include_router(models.router)
+    api.include_router(integrations.router)
+    api.include_router(admin.router)
+    app.include_router(api)
+    app.include_router(health.router)
+    return app
+
+
+app = create_app()

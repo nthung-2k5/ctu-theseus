@@ -1,5 +1,5 @@
 /**
- * Bounding boxes, as the server stores them (see `server/theseus/services/boxes.py`).
+ * Bounding boxes, as the server stores them (see `server/omnitrain/services/boxes.py`).
  *
  * One annotation per box: `labelStructured` is `{x, y, w, h}`, the top-left corner and the size, each a fraction
  * (0..1) of the whole image as it is displayed. An image with no objects carries one marker annotation,

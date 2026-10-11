@@ -6,14 +6,14 @@ import sys
 import pytest
 import sqlalchemy as sa
 
-from theseus import events as events_pkg
-from theseus.app import create_app
-from theseus.db.models import TrainingRun
-from theseus.events import get_event_bus
-from theseus.events.stream import stream_run_events
-from theseus.jobs import abort
-from theseus.jobs.dispatcher import get_dispatcher, nudge
-from theseus.services import storage
+from omnitrain import events as events_pkg
+from omnitrain.app import create_app
+from omnitrain.db.models import TrainingRun
+from omnitrain.events import get_event_bus
+from omnitrain.events.stream import stream_run_events
+from omnitrain.jobs import abort
+from omnitrain.jobs.dispatcher import get_dispatcher, nudge
+from omnitrain.services import storage
 
 
 @pytest.fixture(autouse=True)

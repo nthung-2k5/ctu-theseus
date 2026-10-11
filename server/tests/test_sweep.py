@@ -1,6 +1,6 @@
 import random
 
-from theseus.services.sweep import expand_grid, expand_sweep, sample_random, validate_search_space
+from omnitrain.services.sweep import expand_grid, expand_sweep, sample_random, validate_search_space
 
 
 class TestValidateSearchSpace:

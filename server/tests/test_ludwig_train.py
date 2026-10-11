@@ -9,10 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from theseus.backends.base import TrainContext
-from theseus.backends.ludwig import train as train_mod
-from theseus.backends.ludwig.model import LudwigLoadedModel
-from theseus.jobs import abort
+from omnitrain.backends.base import TrainContext
+from omnitrain.backends.ludwig import train as train_mod
+from omnitrain.backends.ludwig.model import LudwigLoadedModel
+from omnitrain.jobs import abort
 
 
 class Metric:

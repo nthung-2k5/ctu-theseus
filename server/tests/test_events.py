@@ -5,11 +5,11 @@ import threading
 import pytest
 import sqlalchemy as sa
 
-from theseus.db.models import RunEvent, TrainingMetric, TrainingRun
-from theseus.events import bus as bus_module
-from theseus.events.bus import InProcessRunEventBus
-from theseus.events.stream import stream_run_events
-from theseus.events.writer import EventWriter
+from omnitrain.db.models import RunEvent, TrainingMetric, TrainingRun
+from omnitrain.events import bus as bus_module
+from omnitrain.events.bus import InProcessRunEventBus
+from omnitrain.events.stream import stream_run_events
+from omnitrain.events.writer import EventWriter
 
 
 @pytest.fixture

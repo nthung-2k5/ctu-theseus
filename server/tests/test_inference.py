@@ -14,11 +14,11 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from theseus.auth import rate_limit
-from theseus.db.models import DatasetVersion, TrainingRun
-from theseus.routers import inference as inference_router
-from theseus.services import inference as svc
-from theseus.settings import get_settings
+from omnitrain.auth import rate_limit
+from omnitrain.db.models import DatasetVersion, TrainingRun
+from omnitrain.routers import inference as inference_router
+from omnitrain.services import inference as svc
+from omnitrain.settings import get_settings
 
 
 class FakeModel:
@@ -107,7 +107,7 @@ async def test_a_text_request_returns_the_prediction_in_the_response(client, new
 
 
 async def test_nothing_is_stored_for_a_prediction(client, new_user, db, model):
-    from theseus.db.base import Base
+    from omnitrain.db.base import Base
 
     assert "inference_jobs" not in Base.metadata.tables
     c = await new_user()
@@ -396,7 +396,7 @@ async def test_a_revoked_key_stops_working_and_last_used_is_recorded(client, new
 async def test_the_rate_limit_is_per_key_with_retry_after_and_applies_before_the_database(
     client, new_user, db, model, monkeypatch
 ):
-    from theseus import deps
+    from omnitrain import deps
 
     monkeypatch.setattr(deps, "API_KEY_RATE_LIMIT_MAX", 2)
     c = await new_user()

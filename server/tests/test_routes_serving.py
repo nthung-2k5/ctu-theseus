@@ -5,9 +5,9 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from theseus.auth import rate_limit
-from theseus.db.models import DatasetVersion, ModelExport, TrainingRun
-from theseus.services import storage
+from omnitrain.auth import rate_limit
+from omnitrain.db.models import DatasetVersion, ModelExport, TrainingRun
+from omnitrain.services import storage
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +38,7 @@ async def succeeded_run(c, db, task="text_classification", status="succeeded"):
 
 
 async def test_export_formats_are_listed_grouped_and_task_filtered(client, new_user, db):
-    from theseus.export.formats.base import ExportFormat, _registry
+    from omnitrain.export.formats.base import ExportFormat, _registry
 
     def modality_only(fmt_id, modality):
         class OnlyFor(ExportFormat):
@@ -89,7 +89,7 @@ async def test_export_validation_rules(client, new_user, db):
 
 
 async def test_an_export_that_does_not_support_the_projects_task_is_rejected(client, new_user, db):
-    from theseus.export.formats.base import ExportFormat, _registry
+    from omnitrain.export.formats.base import ExportFormat, _registry
 
     class NeverSupported(ExportFormat):
         id = "test_never_supported"

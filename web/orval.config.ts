@@ -1,7 +1,7 @@
 import { defineConfig } from 'orval'
 
 export default defineConfig({
-  theseus: {
+  omnitrain: {
     input: { target: '../schema/openapi.json' },
     output: {
       mode: 'tags-split',

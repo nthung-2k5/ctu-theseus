@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import theseus.export
+import omnitrain.export
 
-CLIENT_PATH = Path(theseus.export.__file__).parent / "templates" / "python" / "theseus_client.py"
+CLIENT_PATH = Path(omnitrain.export.__file__).parent / "templates" / "python" / "omnitrain_client.py"
 
 NORMALIZATION = {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]}
 CROP = {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"}
@@ -24,7 +24,7 @@ CROP = {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"}
 def client_module():
     # Compiled from source rather than imported: an import would write a __pycache__ next to the template, and
     # a .pyc is not UTF-8, which the template-shipping tests (and a devkit bundle) must never see there.
-    module = types.ModuleType("theseus_client_under_test")
+    module = types.ModuleType("omnitrain_client_under_test")
     module.__file__ = str(CLIENT_PATH)
     exec(compile(CLIENT_PATH.read_text(encoding="utf-8"), str(CLIENT_PATH), "exec"), module.__dict__)  # noqa: S102
     return module
@@ -32,7 +32,7 @@ def client_module():
 
 def make_client(module, size, **extra):
     """A client with only the manifest input set: `_preprocess_image` needs nothing else (no ONNX session)."""
-    client = object.__new__(module.TheseusClient)
+    client = object.__new__(module.OmniTrainClient)
     client.input_spec = {
         "type": "image",
         "ludwigPreprocessing": {"height": size, "width": size},

@@ -1,5 +1,5 @@
 [project]
-name = "ctu-theseus-ai"
+name = "ctu-omnitrain-ai"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -89,10 +89,10 @@ explicit = true
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["migrations/versions", "schema", "theseus/export/templates"]
+extend-exclude = ["migrations/versions", "schema", "omnitrain/export/templates"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-"theseus/export/readme.py" = ["E501"] # README prose
+"omnitrain/export/readme.py" = ["E501"] # README prose

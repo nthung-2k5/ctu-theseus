@@ -9,11 +9,11 @@
   "channel": "stable",
   "profiles": {
     "https": {
-      "applicationUrl": "https://ctu-theseus.dev.localhost:17297;http://ctu-theseus.dev.localhost:15235",
+      "applicationUrl": "https://ctu-omnitrain.dev.localhost:17297;http://ctu-omnitrain.dev.localhost:15235",
       "environmentVariables": {
-        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:21157",
-        "ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:23203",
-        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://ctu-theseus.dev.localhost:22218"
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://ctu-omnitrain.dev.localhost:21157",
+        "ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL": "https://ctu-omnitrain.dev.localhost:23203",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://ctu-omnitrain.dev.localhost:22218"
       }
     }
   },

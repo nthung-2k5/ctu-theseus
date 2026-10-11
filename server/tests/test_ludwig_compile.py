@@ -4,10 +4,10 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from theseus.backends.base import ConfigError
-from theseus.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config, serialize_ludwig_config
-from theseus.backends.ludwig.tasks import LUDWIG_TASKS
-from theseus.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.backends.base import ConfigError
+from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config, serialize_ludwig_config
+from omnitrain.backends.ludwig.tasks import LUDWIG_TASKS
+from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 
 def cols(*pairs: tuple[str, str]) -> list[ColumnSpec]:
@@ -194,7 +194,7 @@ class TestBackboneAndHead:
         assert "preprocessing" not in image
 
     def test_max_sequence_length_is_offered_for_text_tasks_only(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         def names(task):
             return {p.name for p in hyperparameter_specs(get_task_descriptor(task))}
@@ -241,7 +241,7 @@ class TestValidationMetricAndOptimizer:
 
 class TestHyperparameterSpecs:
     def test_vision_classification_task_gets_the_full_knob_set(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         names = {p.name for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
         assert names == {
@@ -251,7 +251,7 @@ class TestHyperparameterSpecs:
         }  # fmt: skip
 
     def test_early_stopping_declares_its_off_value_and_no_other_knob_does(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
         assert specs["earlyStopPatience"].disabled_value == -1  # what Ludwig and the stored run config use for "off"
@@ -260,8 +260,8 @@ class TestHyperparameterSpecs:
 
     def test_every_knob_has_a_plain_language_tooltip_text(self):
         """The form shows `description` as a tooltip for people who do not know the ML terms."""
-        from theseus.backends.ludwig.compile import hyperparameter_specs
-        from theseus.backends.ludwig.tasks import LUDWIG_TASKS
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.tasks import LUDWIG_TASKS
 
         for task_id in LUDWIG_TASKS:
             for p in hyperparameter_specs(get_task_descriptor(task_id)):
@@ -269,7 +269,7 @@ class TestHyperparameterSpecs:
                 assert not {"ludwig", "ecd", "llm"} & set(p.description.lower().split()), (task_id, p.name)
 
     def test_every_knob_is_filed_under_a_section_and_sections_appear_in_form_order(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         for task_id in ("image_classification", "tabular_regression", "text_generation"):
             specs = hyperparameter_specs(get_task_descriptor(task_id))
@@ -281,14 +281,14 @@ class TestHyperparameterSpecs:
             assert ("Model details" in sections) == (task_id != "text_generation")  # an LLM has no head to edit
 
     def test_a_section_only_exists_when_the_task_has_knobs_for_it(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         regression = {p.group for p in hyperparameter_specs(get_task_descriptor("tabular_regression"))}
         vision = {p.group for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
         assert "Data" not in regression and "Data" in vision
 
     def test_the_basics_come_before_the_technical_settings_within_a_section(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         specs = hyperparameter_specs(get_task_descriptor("image_classification"))
         by_section: dict[str, list[str]] = {}
@@ -299,7 +299,7 @@ class TestHyperparameterSpecs:
         assert by_section["Model details"][0] == "freezeBackbone"
 
     def test_epoch_and_batch_size_defaults_come_from_the_task_not_a_shared_constant(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         ecd = {p.name: p for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
         llm = {p.name: p for p in hyperparameter_specs(get_task_descriptor("text_generation"))}
@@ -307,20 +307,20 @@ class TestHyperparameterSpecs:
         assert ecd["batchSize"].default == "auto" and llm["batchSize"].default == "1"
 
     def test_regression_task_gets_regression_metrics_and_no_class_weights_or_image_size(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("tabular_regression"))}
         assert specs["validationMetric"].choices == ["loss", "mean_squared_error", "mean_absolute_error", "r2"]
         assert "useClassWeights" not in specs and "imageSize" not in specs
 
     def test_experimental_llm_task_has_no_validation_metric_menu(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("text_generation"))}
         assert "validationMetric" not in specs
 
     def test_unsupported_task_gets_no_specs(self):
-        from theseus.backends.ludwig.compile import hyperparameter_specs
+        from omnitrain.backends.ludwig.compile import hyperparameter_specs
 
         assert hyperparameter_specs(get_task_descriptor("object_detection")) == []
 
