@@ -1,5 +1,4 @@
 import { ImportedModelsSection } from '@public/components/models/ImportedModelsSection'
-import { PageHeader } from '@public/components/ui'
 import { userModelsApi } from '@public/lib/importedModels'
 
 /**
@@ -10,11 +9,7 @@ import { userModelsApi } from '@public/lib/importedModels'
 export function ImportedModelsPage() {
   return (
     <div className="flex flex-col gap-3 p-3">
-      <PageHeader
-        title="Imported models"
-        description="Import a base model and fine-tune it on your data. Only you can use the models listed here."
-      />
-      <ImportedModelsSection api={userModelsApi} />
+      <ImportedModelsSection api={userModelsApi} title="Imported models" />
     </div>
   )
 }

@@ -6,7 +6,20 @@
  * Failed, with the reason) without a reload.
  */
 
-import { Badge, Button, Group, Modal, Progress, Select, Stack, Switch, Text, TextInput, Tooltip } from '@mantine/core'
+import {
+  Badge,
+  Button,
+  Group,
+  Modal,
+  Progress,
+  Select,
+  Stack,
+  Switch,
+  Text,
+  TextInput,
+  Title,
+  Tooltip,
+} from '@mantine/core'
 import { useDebouncedValue, useDisclosure } from '@mantine/hooks'
 import { modals } from '@mantine/modals'
 import { notifications } from '@mantine/notifications'
@@ -87,7 +100,8 @@ function UploadFileModal({
   )
 }
 
-export function ImportedModelsSection({ api }: { api: ModelsApi }) {
+/** `title`, when given, is the page title shown at the left of the toolbar row, on the same line as the import button. */
+export function ImportedModelsSection({ api, title }: { api: ModelsApi; title?: string }) {
   const queryClient = useQueryClient()
   const isAdmin = api.audience === 'admin'
 
@@ -281,6 +295,7 @@ export function ImportedModelsSection({ api }: { api: ModelsApi }) {
     <div className="flex flex-col gap-2">
       <Group justify="space-between">
         <Group gap="xs">
+          {title && <Title order={4}>{title}</Title>}
           {isAdmin && (
             <>
               <TextInput

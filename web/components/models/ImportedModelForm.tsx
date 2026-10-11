@@ -38,11 +38,11 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   CheckCircleIcon,
-  CloudArrowDownIcon,
   FileZipIcon,
   LockSimpleIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react'
+import { HuggingFaceIcon } from '@public/components/icons/HuggingFaceIcon'
 import { apiErrorMessage } from '@public/lib/api/client'
 import { getGetHuggingfaceQueryOptions } from '@public/lib/api/generated/integrations/integrations'
 import type { CustomModelKindOut, InspectModelResponse } from '@public/lib/api/generated/models'
@@ -234,12 +234,13 @@ export function ImportedModelForm({
       opened={opened}
       onClose={busy ? () => undefined : close}
       title={title}
-      fullScreen
+      size={760}
+      centered
       closeOnClickOutside={!busy}
       closeOnEscape={!busy}
       styles={{ title: { fontSize: 'var(--mantine-font-size-xl)', fontWeight: 700 } }}
     >
-      <div className="mx-auto w-full max-w-3xl pb-8">
+      <div className="w-full">
         <Stepper active={step} size="sm" mb="xl" allowNextStepsSelect={false}>
           <Stepper.Step label="Source" description="Where the model is" />
           <Stepper.Step label="Check" description="What it is" />
@@ -258,7 +259,7 @@ export function ImportedModelForm({
               />
               <SourceCard
                 selected={source === 'hub'}
-                icon={<CloudArrowDownIcon size={26} />}
+                icon={<HuggingFaceIcon size={26} />}
                 title="Hugging Face Hub"
                 description={
                   isShared
@@ -319,7 +320,7 @@ export function ImportedModelForm({
               <Stack gap="md">
                 <Group gap="md" wrap="nowrap" align="flex-start">
                   <ThemeIcon size={44} radius="md" variant="light" color={blocked ? 'red' : 'primary'}>
-                    {source === 'upload' ? <FileZipIcon size={24} /> : <CloudArrowDownIcon size={24} />}
+                    {source === 'upload' ? <FileZipIcon size={24} /> : <HuggingFaceIcon size={24} />}
                   </ThemeIcon>
                   <div className="min-w-0 flex-1">
                     <Text fw={700} truncate>
