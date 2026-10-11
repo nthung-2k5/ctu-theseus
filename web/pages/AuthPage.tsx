@@ -16,7 +16,7 @@ import { notifications } from '@mantine/notifications'
 import { ArrowLeftIcon, LockIcon } from '@phosphor-icons/react'
 import { apiErrorMessage } from '@public/lib/api/client'
 import { login, register } from '@public/lib/api/generated/auth/auth'
-import { type SessionUser, sessionQueryOptions } from '@public/lib/auth'
+import { homePath, isAdmin, type SessionUser, sessionQueryOptions } from '@public/lib/auth'
 import { safeRedirect } from '@public/lib/safeRedirect'
 import { NeuralCanvas } from '@public/pages/landing/NeuralCanvas'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -84,7 +84,7 @@ export function AuthPage() {
       })
       // Seed the cache: route guards read it via ensureQueryData, which would otherwise return the stale signed-out `null`.
       queryClient.setQueryData(sessionQueryOptions.queryKey, user)
-      router.history.push(safeRedirect(target))
+      router.history.push(isAdmin(user) ? homePath(user) : safeRedirect(target))
     },
     onError: (e) => setError(apiErrorMessage(e, isRegister ? 'Registration failed' : 'Login failed')),
   })

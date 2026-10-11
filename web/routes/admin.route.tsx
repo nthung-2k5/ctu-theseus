@@ -1,5 +1,5 @@
 import { AdminLayout } from '@public/layouts/AdminLayout'
-import { sessionQueryOptions } from '@public/lib/auth'
+import { isAdmin, sessionQueryOptions } from '@public/lib/auth'
 import { JobsPage } from '@public/pages/admin/JobsPage'
 import { AdminModelsPage } from '@public/pages/admin/ModelsPage'
 import { OverviewPage } from '@public/pages/admin/OverviewPage'
@@ -17,7 +17,7 @@ export const adminRoute = createRoute({
   path: 'admin',
   beforeLoad: async ({ context }) => {
     const session = await context.queryClient.ensureQueryData(sessionQueryOptions)
-    if (session?.role !== 'admin') throw redirect({ to: '/projects' })
+    if (!isAdmin(session)) throw redirect({ to: '/projects' })
   },
   component: AdminLayout,
 })

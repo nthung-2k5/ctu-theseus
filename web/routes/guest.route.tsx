@@ -1,4 +1,4 @@
-import { sessionQueryOptions } from '@public/lib/auth'
+import { homePath, isAdmin, sessionQueryOptions } from '@public/lib/auth'
 import { safeRedirect } from '@public/lib/safeRedirect'
 import { AuthPage } from '@public/pages/AuthPage'
 import { Landing } from '@public/pages/landing/Landing'
@@ -11,7 +11,7 @@ export const landingRoute = createRoute({
   path: '/',
   beforeLoad: async ({ context }) => {
     const session = await context.queryClient.ensureQueryData(sessionQueryOptions)
-    if (session) throw redirect({ to: '/projects' })
+    if (session) throw redirect({ href: homePath(session) })
   },
   component: Landing,
 })
@@ -24,7 +24,8 @@ export const guestRoute = createRoute({
     const session = await context.queryClient.ensureQueryData(sessionQueryOptions)
     if (session) {
       const target = new URLSearchParams(location.searchStr).get('redirect') ?? undefined
-      throw redirect({ href: safeRedirect(target) })
+      // An admin's saved target is ignored: the app shell would only bounce them back to /admin.
+      throw redirect({ href: isAdmin(session) ? homePath(session) : safeRedirect(target) })
     }
   },
 })

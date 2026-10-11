@@ -26,7 +26,6 @@ import {
   GearIcon,
   ListIcon,
   MoonIcon,
-  ShieldCheckIcon,
   SignOutIcon,
   SquaresFourIcon,
   SunIcon,
@@ -34,12 +33,13 @@ import {
 import Logo from '@public/assets/CTU_logo.png'
 import { SectionLabel } from '@public/components/ui'
 import { logout } from '@public/lib/api/generated/auth/auth'
-import { sessionQueryOptions } from '@public/lib/auth'
+import { isAdmin, sessionQueryOptions } from '@public/lib/auth'
 import { projectDetailQueryOptions, useProjects } from '@public/lib/queries'
 import type { ProjectDetail } from '@public/store/types'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useMatch, useNavigate } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
+import { ADMIN_NAV_ITEMS, isAdminNavActive } from './adminNav'
 
 const hasReadyVersion = (project: ProjectDetail) =>
   project.dataset?.versions?.some((v) => v.status === 'ready') ?? false
@@ -117,7 +117,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(true)
   const { data: user } = useQuery(sessionQueryOptions)
   const { colorScheme, setColorScheme } = useMantineColorScheme()
-  const isAdmin = user?.role === 'admin'
+  // An admin's shell is the admin area only: no project switcher, project nav, models or settings.
+  const adminOnly = isAdmin(user ?? null)
   const toggleColorScheme = () => setColorScheme(colorScheme === 'dark' ? 'light' : 'dark')
 
   // AppShell sits above the project route, so it can't read that route's loader — this
@@ -170,7 +171,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <ListIcon size={18} />
             </ActionIcon>
-            <UnstyledButton onClick={() => navigate({ to: '/projects' })} aria-label="CTU OmniTrain home">
+            <UnstyledButton
+              onClick={() => navigate({ to: adminOnly ? '/admin' : '/projects' })}
+              aria-label="CTU OmniTrain home"
+            >
               <Group gap={8} wrap="nowrap">
                 <Image src={Logo} alt="" w={28} h={28} fit="contain" flex="none" />
                 <Text fw={600} size="md" style={{ letterSpacing: 0.3 }}>
@@ -178,7 +182,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </Text>
               </Group>
             </UnstyledButton>
-            <ProjectSwitcher projectId={projectId} />
+            {!adminOnly && <ProjectSwitcher projectId={projectId} />}
           </Group>
 
           <Group gap="xs" wrap="nowrap">
@@ -201,10 +205,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </UnstyledButton>
               </Menu.Target>
               <Menu.Dropdown>
-                <Menu.Item leftSection={<GearIcon size={14} />} onClick={() => navigate({ to: '/settings' })}>
-                  Settings
-                </Menu.Item>
-                <Menu.Divider />
+                {!adminOnly && (
+                  <>
+                    <Menu.Item leftSection={<GearIcon size={14} />} onClick={() => navigate({ to: '/settings' })}>
+                      Settings
+                    </Menu.Item>
+                    <Menu.Divider />
+                  </>
+                )}
                 <Menu.Item leftSection={<SignOutIcon size={14} />} color="red" onClick={handleLogout}>
                   Sign out
                 </Menu.Item>
@@ -218,28 +226,39 @@ export function AppShell({ children }: { children: ReactNode }) {
       <MantineAppShell.Navbar p="xs">
         <MantineAppShell.Section grow component={ScrollArea} scrollbarSize={4}>
           <Stack gap={2}>
-            <NavLink
-              label="All projects"
-              leftSection={<FoldersIcon size={18} />}
-              active={location.pathname === '/projects' || location.pathname === '/projects/'}
-              onClick={() => navigate({ to: '/projects' })}
-              variant="light"
-            />
-            <NavLink
-              label="Imported models"
-              leftSection={<CubeIcon size={18} />}
-              active={location.pathname === '/imported-models' || location.pathname.startsWith('/imported-models/')}
-              onClick={() => navigate({ to: '/imported-models' })}
-              variant="light"
-            />
-            {isAdmin && (
-              <NavLink
-                label="Administration"
-                leftSection={<ShieldCheckIcon size={18} />}
-                active={location.pathname === '/admin' || location.pathname.startsWith('/admin/')}
-                onClick={() => navigate({ to: '/admin' })}
-                variant="light"
-              />
+            {adminOnly ? (
+              <>
+                <SectionLabel px="xs" pb={2}>
+                  Administration
+                </SectionLabel>
+                {ADMIN_NAV_ITEMS.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    label={item.label}
+                    leftSection={<item.icon size={18} />}
+                    active={isAdminNavActive(item, location.pathname)}
+                    onClick={() => navigate({ to: item.to })}
+                    variant="light"
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                <NavLink
+                  label="All projects"
+                  leftSection={<FoldersIcon size={18} />}
+                  active={location.pathname === '/projects' || location.pathname === '/projects/'}
+                  onClick={() => navigate({ to: '/projects' })}
+                  variant="light"
+                />
+                <NavLink
+                  label="Imported models"
+                  leftSection={<CubeIcon size={18} />}
+                  active={location.pathname === '/imported-models' || location.pathname.startsWith('/imported-models/')}
+                  onClick={() => navigate({ to: '/imported-models' })}
+                  variant="light"
+                />
+              </>
             )}
             {activeProject && (
               <>
