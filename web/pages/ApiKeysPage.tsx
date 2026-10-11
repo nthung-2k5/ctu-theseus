@@ -11,14 +11,7 @@ import { useForm } from '@mantine/form'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { CheckIcon, CopyIcon, KeyIcon, PlusIcon, TrashIcon, WarningCircleIcon } from '@phosphor-icons/react'
-import {
-  confirmDelete,
-  DataTable,
-  type DataTableColumn,
-  EmptyState,
-  QueryBoundary,
-  SectionLabel,
-} from '@public/components/ui'
+import { confirmDelete, DataTable, type DataTableColumn, EmptyState, QueryBoundary } from '@public/components/ui'
 import {
   getCreateApiKeyMutationOptions,
   getListApiKeysQueryKey,
@@ -37,8 +30,11 @@ interface ApiKeySummary {
   revokedAt: string | Date | null
 }
 
-/** Issue, list and revoke API keys. Rendered as a section of the Settings page. */
-export function ApiKeysSection() {
+/**
+ * Issue, list and revoke API keys. Rendered as a section of the Settings page. It draws its own heading so the
+ * "New key" button can sit on the same line as the title.
+ */
+export function ApiKeysSection({ title, description }: { title: string; description: string }) {
   const queryClient = useQueryClient()
   const keysQueryKey = getListApiKeysQueryKey()
 
@@ -155,9 +151,9 @@ export function ApiKeysSection() {
     <div className="flex flex-col gap-2">
       <Group justify="space-between">
         <div>
-          <SectionLabel>API keys</SectionLabel>
+          <Text fw={600}>{title}</Text>
           <Text size="xs" c="dimmed">
-            Bearer credentials for the hosted prediction API (POST /api/v1/predict/:runId).
+            {description}
           </Text>
         </div>
         <Button leftSection={<PlusIcon size={14} />} onClick={openCreate}>

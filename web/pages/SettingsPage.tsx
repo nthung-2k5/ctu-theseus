@@ -1,4 +1,4 @@
-import { Badge, Group, Paper, Text } from '@mantine/core'
+import { Group, Paper, Text } from '@mantine/core'
 import { HuggingFaceIntegration } from '@public/components/settings/HuggingFaceIntegration'
 import { PageHeader } from '@public/components/ui'
 import { sessionQueryOptions } from '@public/lib/auth'
@@ -24,7 +24,8 @@ function SettingsSection({
           {description}
         </Text>
       </div>
-      {children}
+      {/* Stretch the card so side-by-side sections end on the same line. */}
+      <div className="flex flex-1 flex-col *:flex-1">{children}</div>
     </section>
   )
 }
@@ -37,43 +38,38 @@ export function SettingsPage() {
     <div className="flex flex-col gap-5 p-3">
       <PageHeader title="Settings" description="Your account, connected services and API access." />
 
-      <SettingsSection title="Account" description="How you are signed in.">
-        <Paper p="md">
-          <div className="flex flex-col gap-1">
-            <Group justify="space-between">
-              <Text size="xs" c="dimmed">
-                Name
-              </Text>
-              <Text size="sm">{user?.name ?? '—'}</Text>
-            </Group>
-            <Group justify="space-between">
-              <Text size="xs" c="dimmed">
-                Email
-              </Text>
-              <Text size="sm">{user?.email ?? '—'}</Text>
-            </Group>
-            <Group justify="space-between">
-              <Text size="xs" c="dimmed">
-                Role
-              </Text>
-              <Badge variant="light" color={user?.role === 'admin' ? 'grape' : 'gray'} tt="capitalize">
-                {user?.role ?? '—'}
-              </Badge>
-            </Group>
-          </div>
-        </Paper>
-      </SettingsSection>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <SettingsSection title="Account" description="How you are signed in.">
+          <Paper p="md">
+            <div className="flex flex-col gap-1">
+              <Group justify="space-between">
+                <Text size="xs" c="dimmed">
+                  Name
+                </Text>
+                <Text size="sm">{user?.name ?? '—'}</Text>
+              </Group>
+              <Group justify="space-between">
+                <Text size="xs" c="dimmed">
+                  Email
+                </Text>
+                <Text size="sm">{user?.email ?? '—'}</Text>
+              </Group>
+            </div>
+          </Paper>
+        </SettingsSection>
 
-      <SettingsSection
-        title="Integrations"
-        description="Connect outside services so OmniTrain can fetch things on your behalf."
-      >
-        <HuggingFaceIntegration />
-      </SettingsSection>
+        <SettingsSection
+          title="Integrations"
+          description="Connect outside services so OmniTrain can fetch things on your behalf."
+        >
+          <HuggingFaceIntegration />
+        </SettingsSection>
+      </div>
 
-      <SettingsSection title="API access" description="Keys for calling a trained model from your own code.">
-        <ApiKeysSection />
-      </SettingsSection>
+      <ApiKeysSection
+        title="API access"
+        description="Keys for calling a trained model from your own code (POST /api/v1/predict/:runId)."
+      />
     </div>
   )
 }
