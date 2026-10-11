@@ -248,7 +248,27 @@ class TestCompileCustom:
         config = compile_custom(
             "image_classification", ref("timm_image", "/unused", source_ref="resnet50"), imageSize=224
         )
-        assert config["input_features"][0]["preprocessing"] == {"height": 224, "width": 224}
+        assert config["input_features"][0]["preprocessing"] == {"mode": "eager", "height": 224, "width": 224}
+
+    def test_a_custom_image_encoder_decodes_images_once_not_every_epoch(self):
+        # Ludwig's default `lazy` re-reads every image from S3 on every batch; only its built-in torchvision
+        # encoders opt out of that by themselves.
+        for custom in (
+            ref("hf_vision", "/m/vit"),
+            ref("timm_image", "/unused", source_ref="resnet50.a1_in1k"),
+        ):
+            config = compile_custom("image_classification", custom)
+            assert config["input_features"][0]["preprocessing"] == {"mode": "eager"}
+
+    def test_a_builtin_image_encoder_is_left_to_ludwig(self):
+        config = compile_ludwig_config(
+            get_task_descriptor("image_classification"), SnapshotContext(), LudwigHyperparameters()
+        )
+        assert "mode" not in config["input_features"][0].get("preprocessing", {})
+
+    def test_other_custom_inputs_get_no_image_preprocessing(self):
+        config = compile_custom("text_classification", ref("hf_transformer", "/m/bert"))
+        assert "preprocessing" not in config["input_features"][0]
 
     def test_a_kind_the_task_does_not_offer_is_refused(self):
         with pytest.raises(ConfigError, match="cannot be used for task"):
@@ -301,7 +321,7 @@ class TestHfVision:
             "pretrained_model_name_or_path": "/m/vit",
             "trainable": False,
         }
-        assert feature["preprocessing"] == {"height": 224, "width": 224}
+        assert feature["preprocessing"] == {"mode": "eager", "height": 224, "width": 224}
 
     def test_it_is_refused_for_a_task_that_does_not_offer_it(self):
         with pytest.raises(ConfigError, match="cannot be used for task"):

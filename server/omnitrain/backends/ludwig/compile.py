@@ -258,6 +258,7 @@ def _with_encoder(
     if custom is not None:
         # Bypass the built-in catalog entirely: the model id is "custom:{uuid}", not one of its entries.
         encoder = _custom_encoder(custom, freeze)
+        feature = _with_eager_images(feature)
         return feature if encoder is None or feature.get("encoder") else {**feature, "encoder": encoder}
     if feature.get("encoder") or not encoders:
         return feature
@@ -279,6 +280,16 @@ def _with_encoder(
             **({"trainable": False} if freeze else {}),
         },
     }
+
+
+def _with_eager_images(feature: dict[str, Any]) -> dict[str, Any]:
+    """Decode an image input feature once, during preprocessing. Ludwig's default for an image is `lazy`: keep
+    the file paths and re-download and re-decode every image of every batch on the CPU, every epoch (from S3
+    here, so a run crawls at a few samples a second with the GPU idle). Ludwig only keeps the images in memory
+    itself for the built-in torchvision encoders; a custom encoder (`hf_vision`, `timm`) must ask for it."""
+    if feature["type"] != "image":
+        return feature
+    return {**feature, "preprocessing": {"mode": "eager", **feature.get("preprocessing", {})}}
 
 
 def _with_image_resize(feature: dict[str, Any], size: int | None) -> dict[str, Any]:
