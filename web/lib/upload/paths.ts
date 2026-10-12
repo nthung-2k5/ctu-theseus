@@ -7,6 +7,8 @@
 
 /** The server rejects anything larger (`MAX_UPLOAD_BYTES` in `routers/datasets.py`). */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024
+/** The same for a video clip (`MAX_VIDEO_UPLOAD_BYTES` in `routers/datasets.py`). */
+export const MAX_VIDEO_FILE_BYTES = 200 * 1024 * 1024
 
 const EXT_MIME: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -16,6 +18,8 @@ const EXT_MIME: Record<string, string> = {
   mp3: 'audio/mpeg',
   flac: 'audio/flac',
   ogg: 'audio/ogg',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
 }
 
 export function extensionOf(name: string): string {
@@ -26,6 +30,15 @@ export function extensionOf(name: string): string {
 /** The MIME type implied by a file name, or `''` when we don't know it. */
 export function mimeFromName(name: string): string {
   return EXT_MIME[extensionOf(name)] ?? ''
+}
+
+/** The largest file the server takes for a file of this name: video has its own, larger limit. */
+export function maxBytesFor(name: string): number {
+  return mimeFromName(name).startsWith('video/') ? MAX_VIDEO_FILE_BYTES : MAX_FILE_BYTES
+}
+
+export function megabytes(bytes: number): number {
+  return bytes / 1024 / 1024
 }
 
 export type SafePath = { ok: true; segments: string[] } | { ok: false; reason: string }
@@ -96,5 +109,9 @@ export function sniffMime(head: Uint8Array): string | null {
   if (b.length >= 4 && ascii(0, 4) === 'OggS') return 'audio/ogg'
   if (b.length >= 3 && ascii(0, 3) === 'ID3') return 'audio/mpeg'
   if (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return 'audio/mpeg'
+  // MP4 / MOV: a 4-byte box size, then the `ftyp` box.
+  if (b.length >= 8 && ascii(4, 8) === 'ftyp') return 'video/mp4'
+  // WebM / Matroska: the EBML header.
+  if (b.length >= 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'video/webm'
   return null
 }

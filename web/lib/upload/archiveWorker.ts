@@ -15,7 +15,7 @@ import {
   type WorkerEntry,
   type WorkerMessage,
 } from './archiveProtocol'
-import { isJunkPath, looksLikeTar, MAX_FILE_BYTES, normalizePath } from './paths'
+import { isJunkPath, looksLikeTar, maxBytesFor, megabytes, normalizePath } from './paths'
 import { TarParser } from './tar'
 
 const scope = self as unknown as {
@@ -28,7 +28,7 @@ const post = (message: WorkerMessage, transfer?: Transferable[]) => scope.postMe
 /** Aborts the whole archive (as opposed to skipping one entry); its message is shown to the user. */
 class LimitError extends Error {}
 
-const SIZE_LIMIT_REASON = `Larger than the ${MAX_FILE_BYTES / 1024 / 1024} MB limit`
+const sizeLimitReason = (name: string) => `Larger than the ${megabytes(maxBytesFor(name))} MB limit`
 
 function concat(chunks: Uint8Array[], size: number): Uint8Array {
   const out = new Uint8Array(size)
@@ -60,8 +60,8 @@ class Collector {
       this.junk++
       return false
     }
-    if (declaredSize !== undefined && declaredSize > MAX_FILE_BYTES) {
-      post({ type: 'skipped', path: rawPath, reason: SIZE_LIMIT_REASON })
+    if (declaredSize !== undefined && declaredSize > maxBytesFor(rawPath)) {
+      post({ type: 'skipped', path: rawPath, reason: sizeLimitReason(rawPath) })
       return false
     }
     if (this.entries >= MAX_ARCHIVE_ENTRIES) {
@@ -80,8 +80,9 @@ class Collector {
       throw new LimitError(`Archive expands to more than ${MAX_ARCHIVE_BYTES / 1024 / 1024 / 1024} GB`)
     }
     entry.size += chunk.length
-    if (entry.size > MAX_FILE_BYTES) {
-      post({ type: 'skipped', path: entry.path.join('/'), reason: SIZE_LIMIT_REASON })
+    const name = entry.path.join('/')
+    if (entry.size > maxBytesFor(name)) {
+      post({ type: 'skipped', path: name, reason: sizeLimitReason(name) })
       this.current = null
       return false
     }

@@ -4,6 +4,7 @@ import {
   BoundingBoxIcon,
   ChartLineIcon,
   ChartScatterIcon,
+  FilmStripIcon,
   ImageSquareIcon,
   ImagesIcon,
   ListChecksIcon,
@@ -107,6 +108,10 @@ export const TASK_META: Record<ProjectTask, TaskMeta> = {
   audio_segmentation: {
     icon: ScissorsIcon,
     description: 'Mark the time ranges in a recording where each sound occurs.',
+  },
+  video_classification: {
+    icon: FilmStripIcon,
+    description: 'Assign a short video clip to a category, such as an action or an event.',
   },
 }
 

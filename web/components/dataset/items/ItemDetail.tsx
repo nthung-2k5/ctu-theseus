@@ -40,6 +40,17 @@ const Preview = ({ item, modality }: { item: DatasetListItem; modality: Modality
       <audio controls src={item.downloadUrl} style={{ width: '100%' }} />
     ) : null
   }
+  if (modality === 'video') {
+    return item.downloadUrl ? (
+      // biome-ignore lint/a11y/useMediaCaption: raw video dataset item has no caption track
+      <video
+        controls
+        preload="metadata"
+        src={item.downloadUrl}
+        style={{ width: '100%', maxHeight: 360, borderRadius: 8, background: '#000' }}
+      />
+    ) : null
+  }
   if (modality === 'text') {
     return (
       <ScrollArea.Autosize mah={260}>
@@ -181,6 +192,21 @@ export const ItemDetail = ({
               {Number(item.audioFeatures.durationSeconds).toFixed(1)}s · {item.audioFeatures.sampleRateHz}Hz
             </Text>
           </Row>
+        )}
+        {modality === 'video' && item.videoFeatures && (
+          <>
+            <Row label="Dimensions">
+              <Text size="sm">
+                {item.videoFeatures.width} × {item.videoFeatures.height} · {Number(item.videoFeatures.fps).toFixed(1)}{' '}
+                fps
+              </Text>
+            </Row>
+            <Row label="Duration">
+              <Text size="sm">
+                {Number(item.videoFeatures.durationSeconds).toFixed(1)}s · {item.videoFeatures.frameCount} frames
+              </Text>
+            </Row>
+          </>
         )}
         <Row label="Created">
           <Text size="sm">{new Date(item.createdAt).toLocaleString()}</Text>

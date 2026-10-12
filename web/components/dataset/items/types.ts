@@ -15,11 +15,18 @@ export interface DatasetListItem {
   createdAt: string | Date
   annotations?: Annotation[]
   downloadUrl?: string | null
-  /** A small JPEG of an image item, for grids; absent for anything that isn't an image. */
+  /** A small JPEG of an image item (a poster frame for a video), for grids; absent for anything else. */
   thumbnailUrl?: string | null
   textFeatures?: { rawText: string } | null
   visionFeatures?: { width: number; height: number; imageFormat: string | null } | null
   audioFeatures?: { durationSeconds: string | number; sampleRateHz: number } | null
+  videoFeatures?: {
+    width: number
+    height: number
+    durationSeconds: string | number
+    fps: string | number
+    frameCount: number
+  } | null
   tabularFeatures?: { featuresJson: unknown } | null
   /** Set on any derived item (preprocessed, augmented, or both): the pool original it came from. */
   sourceItemId?: string | null

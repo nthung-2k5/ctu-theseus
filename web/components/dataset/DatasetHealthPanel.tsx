@@ -17,6 +17,7 @@ import {
   TableIcon,
   TagIcon,
   TextTIcon,
+  VideoCameraIcon,
   WarningCircleIcon,
 } from '@phosphor-icons/react'
 import { EmptyState, QueryBoundary, StatCard } from '@public/components/ui'
@@ -151,6 +152,23 @@ function ModalitySection({ report }: { report: DatasetHealthReport }) {
         </Group>
         <MinMaxAvgRow label="Duration" unit="s" stats={report.audio.durationSeconds} />
         <BreakdownChips counts={report.audio.sampleRates} />
+      </Stack>
+    )
+  }
+  if (report.video) {
+    return (
+      <Stack gap="xs">
+        <Group gap="xs">
+          <VideoCameraIcon size={16} />
+          <Text size="sm" fw={600}>
+            Video clips
+          </Text>
+        </Group>
+        <MinMaxAvgRow label="Duration" unit="s" stats={report.video.durationSeconds} />
+        <MinMaxAvgRow label="Width" unit="px" stats={report.video.width} />
+        <MinMaxAvgRow label="Height" unit="px" stats={report.video.height} />
+        <MinMaxAvgRow label="Frame rate" unit=" fps" stats={report.video.fps} />
+        <BreakdownChips counts={report.video.containers} />
       </Stack>
     )
   }

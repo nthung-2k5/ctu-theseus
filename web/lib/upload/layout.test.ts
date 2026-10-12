@@ -96,6 +96,8 @@ test('magic-byte sniffing', () => {
   expect(sniffMime(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('image/png')
   expect(sniffMime(new TextEncoder().encode('RIFF0000WAVEfmt '))).toBe('audio/wav')
   expect(sniffMime(new TextEncoder().encode('hello world!'))).toBeNull()
+  expect(sniffMime(Uint8Array.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]))).toBe('video/mp4')
+  expect(sniffMime(Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42]))).toBe('video/webm')
   expect(sniffArchive(Uint8Array.from([0x50, 0x4b, 0x03, 0x04]))).toBe('zip')
   expect(sniffArchive(Uint8Array.from([0x1f, 0x8b, 0x08]))).toBe('gzip')
   expect(sniffArchive(new TextEncoder().encode('not an archive'))).toBeNull()

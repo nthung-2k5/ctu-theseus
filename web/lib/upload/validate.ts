@@ -5,7 +5,7 @@
  * the first bytes because files pulled out of an archive carry no MIME type of their own.
  */
 
-import { extensionOf, MAX_FILE_BYTES, mimeFromName, sniffMime } from './paths'
+import { extensionOf, maxBytesFor, megabytes, mimeFromName, sniffMime } from './paths'
 import type { Issue } from './types'
 
 const MIME_LABEL: Record<string, string> = {
@@ -15,6 +15,8 @@ const MIME_LABEL: Record<string, string> = {
   'audio/mpeg': 'MP3',
   'audio/flac': 'FLAC',
   'audio/ogg': 'OGG',
+  'video/mp4': 'MP4',
+  'video/webm': 'WebM',
 }
 
 const label = (mime: string) => MIME_LABEL[mime] ?? mime
@@ -27,10 +29,11 @@ function formatMegabytes(bytes: number): string {
 export async function validateFile(file: File, accept: string[] | undefined): Promise<Issue[]> {
   const issues: Issue[] = []
   if (file.size === 0) return [{ severity: 'error', message: 'Empty file' }]
-  if (file.size > MAX_FILE_BYTES) {
+  const limit = maxBytesFor(file.name)
+  if (file.size > limit) {
     issues.push({
       severity: 'error',
-      message: `Larger than the ${MAX_FILE_BYTES / 1024 / 1024} MB limit (${formatMegabytes(file.size)})`,
+      message: `Larger than the ${megabytes(limit)} MB limit (${formatMegabytes(file.size)})`,
     })
   }
   if (!accept) return issues

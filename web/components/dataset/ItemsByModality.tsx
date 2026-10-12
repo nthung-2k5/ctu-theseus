@@ -77,7 +77,7 @@ export function ItemsByModality<T extends DatasetListItem>({
     (editing ? (item: T) => <ItemActionsMenu item={item} editing={editing} onOpen={() => onOpen(item)} /> : undefined)
 
   const list =
-    modality === 'vision' || modality === 'audio' ? (
+    modality === 'vision' || modality === 'audio' || modality === 'video' ? (
       <MediaGrid
         items={items}
         modality={modality}

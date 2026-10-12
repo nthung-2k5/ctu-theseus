@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -37,6 +38,7 @@ from omnitrain.db.models import (
     Project,
     TabularFeatures,
     TextFeatures,
+    VideoFeatures,
     VisionFeatures,
 )
 from omnitrain.deps import AnnotationDep, DraftDep, ItemDep, ProjectDep, SessionDep, VersionDep
@@ -95,17 +97,20 @@ from omnitrain.schemas.datasets import (
     VersionDataset,
     VersionDetail,
     VersionDetailResponse,
+    VideoFeaturesOut,
+    VideoHealth,
     VisionFeaturesOut,
     VisionHealth,
 )
 from omnitrain.schemas.projects import DatasetSplit, VersionOut
 from omnitrain.services import datasets as svc
 from omnitrain.services import storage, thumbnails
+from omnitrain.services import video as video_media
 from omnitrain.services.boxes import is_background, validate_box_annotation
 from omnitrain.services.cleanup import cleanup_version_storage
 from omnitrain.services.dataset_views import split_counts_for_dataset
 from omnitrain.services.derived_items import delete_derived_items
-from omnitrain.services.image_size import read_image_dimensions
+from omnitrain.services.image_size import ImageDimensions, read_image_dimensions
 from omnitrain.services.item_filter import TooManyMatches, build_item_filters, matching_item_ids
 from omnitrain.services.snapshot import build_snapshot
 from omnitrain.services.task_registry import class_annotation_type, get_task_descriptor, is_classification_task
@@ -118,6 +123,8 @@ CLASSIFY_CHUNK = 2000
 router = APIRouter(tags=["datasets"])
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+# Clips are far larger than images or audio. The upload route holds one in memory at a time (see `upload_items`).
+MAX_VIDEO_UPLOAD_BYTES = 200 * 1024 * 1024
 SORTS = ("newest", "oldest", "filename")
 _background: set[asyncio.Task] = set()
 
@@ -396,6 +403,7 @@ async def list_items(
         text = {r.item_id: r for r in (await by_item(TextFeatures)).scalars()}
         vision = {r.item_id: r for r in (await by_item(VisionFeatures)).scalars()}
         audio = {r.item_id: r for r in (await by_item(AudioFeatures)).scalars()}
+        video = {r.item_id: r for r in (await by_item(VideoFeatures)).scalars()}
         tabular = {r.item_id: r for r in (await by_item(TabularFeatures)).scalars()}
         anns: dict[uuid.UUID, list[Annotation]] = {}
         for a in (
@@ -422,6 +430,7 @@ async def list_items(
                     text_features=TextFeaturesOut.model_validate(text[item_id]) if item_id in text else None,
                     vision_features=VisionFeaturesOut.model_validate(vision[item_id]) if item_id in vision else None,
                     audio_features=AudioFeaturesOut.model_validate(audio[item_id]) if item_id in audio else None,
+                    video_features=VideoFeaturesOut.model_validate(video[item_id]) if item_id in video else None,
                     tabular_features=TabularFeaturesOut.model_validate(tabular[item_id])
                     if item_id in tabular
                     else None,
@@ -453,7 +462,10 @@ async def list_items(
 
 @router.get("/items/{item_id}/thumbnail", status_code=307, response_class=Response)
 async def get_item_thumbnail(item: ItemDep, size: Annotated[int, Query()] = thumbnails.LIST_SIZE) -> RedirectResponse:
-    """A cached JPEG thumbnail of an image item, made on first request. Redirects to object storage."""
+    """A cached JPEG thumbnail of an image item (a poster frame for a video), made on first request.
+
+    Redirects to object storage.
+    """
     if size not in storage.THUMBNAIL_SIZES:
         raise HTTPException(422, f"size must be one of {', '.join(str(s) for s in storage.THUMBNAIL_SIZES)}")
     if not thumbnails.is_thumbnailable(item.storage_url):
@@ -560,6 +572,16 @@ async def _parse_upload_boxes(
     return result
 
 
+@dataclass
+class _Pooled:
+    """What one uploaded file became before the database is touched: stored, or rejected with a reason."""
+
+    upload: storage.PoolUpload | None = None
+    reason: str | None = None
+    image: ImageDimensions | None = None
+    video: video_media.VideoInfo | None = None
+
+
 @router.post("/projects/{project_id}/upload", response_model=UploadResponse)
 async def upload_items(
     draft: DraftDep,
@@ -569,7 +591,7 @@ async def upload_items(
     class_id: Annotated[uuid.UUID | None, Form(alias="classId")] = None,
     boxes: Annotated[str | None, Form()] = None,
 ) -> UploadResponse:
-    """Upload files (vision/audio) into the pool and draft with one split (and optionally one class).
+    """Upload files (vision/audio/video) into the pool and draft with one split (and optionally one class).
 
     For an object-detection project, `boxes` labels the files instead of a class: a JSON list with one entry per file,
     in order, each either null (leave it unlabelled), `[]` (labelled, nothing in it) or a list of
@@ -592,34 +614,47 @@ async def upload_items(
         raise HTTPException(404, "Dataset not found")
 
     loop = asyncio.get_running_loop()
-    payloads: list[tuple[UploadFile, bytes | None]] = []
-    for f in files:
-        data = await f.read(MAX_UPLOAD_BYTES + 1)
-        payloads.append((f, data if len(data) <= MAX_UPLOAD_BYTES else None))
+    is_video = dataset.modality == "video"
+    limit, limit_label = (MAX_VIDEO_UPLOAD_BYTES, "200 MB") if is_video else (MAX_UPLOAD_BYTES, "50 MB")
 
-    # S3 uploads run concurrently and OUTSIDE any transaction: slow network I/O must not hold one
-    # open, and a leftover pool object after a later DB failure is a harmless no-op (content
-    # addressed, so a retry reuses it).
-    gate = asyncio.Semaphore(4)
+    # Each file is read, checked and stored inside one gated step, so at most `gate` files are in memory at once:
+    # a batch of clips must not be held whole. S3 uploads run OUTSIDE any transaction: slow network I/O must not
+    # hold one open, and a leftover pool object after a later DB failure is a harmless no-op (content addressed,
+    # so a retry reuses it).
+    gate = asyncio.Semaphore(1 if is_video else 4)
 
-    async def to_pool(f: UploadFile, data: bytes | None):
-        if data is None:
-            return None
-        ext = os.path.splitext(f.filename or "")[1]
+    async def to_pool(f: UploadFile) -> _Pooled:
         async with gate:
-            return await loop.run_in_executor(None, storage.upload_to_pool, str(project_id), data, ext, f.content_type)
+            data = await f.read(limit + 1)
+            if len(data) > limit:
+                return _Pooled(reason=f"File is larger than the {limit_label} limit")
+            ext = os.path.splitext(f.filename or "")[1]
+            try:
+                container = video_media.container_for(f.content_type, ext) if is_video else None
+                info = await loop.run_in_executor(None, video_media.probe, data, ext, container) if is_video else None
+                dims = (
+                    read_image_dimensions(data)
+                    if dataset.modality == "vision" and (f.content_type or "").startswith("image/")
+                    else None
+                )
+                upload = await loop.run_in_executor(
+                    None, storage.upload_to_pool, str(project_id), data, ext, f.content_type
+                )
+            except video_media.VideoError as e:
+                return _Pooled(reason=str(e))
+            except Exception:
+                logger.error("Pool upload failed for %s", f.filename, exc_info=True)
+                return _Pooled(reason="Failed to store file")
+            return _Pooled(upload=upload, image=dims, video=info)
 
-    pooled = await asyncio.gather(*(to_pool(f, d) for f, d in payloads), return_exceptions=True)
+    pooled = await asyncio.gather(*(to_pool(f) for f in files))
 
     results: list[UploadResult] = []
-    for index, ((f, data), upload) in enumerate(zip(payloads, pooled, strict=True)):
-        if data is None:
-            results.append(UploadResult(status="rejected", reason="File is larger than the 50 MB limit"))
+    for index, (f, got) in enumerate(zip(files, pooled, strict=True)):
+        if got.upload is None:
+            results.append(UploadResult(status="rejected", reason=got.reason))
             continue
-        if isinstance(upload, BaseException):
-            logger.error("Pool upload failed for %s", f.filename, exc_info=upload)
-            results.append(UploadResult(status="rejected", reason="Failed to store file"))
-            continue
+        upload = got.upload
         try:
             async with session.begin_nested():
                 existing = (
@@ -639,15 +674,22 @@ async def upload_items(
                     )  # fmt: skip
                     session.add(item)
                     await session.flush()
-                    if dataset.modality == "vision" and (f.content_type or "").startswith("image/"):
-                        dims = read_image_dimensions(data)
-                        if dims:
-                            session.add(
-                                VisionFeatures(
-                                    item_id=item.id, width=dims.width, height=dims.height, channels=3,
-                                    image_format="png" if f.content_type == "image/png" else "jpeg",
-                                )
-                            )  # fmt: skip
+                    if got.image:
+                        session.add(
+                            VisionFeatures(
+                                item_id=item.id, width=got.image.width, height=got.image.height, channels=3,
+                                image_format="png" if f.content_type == "image/png" else "jpeg",
+                            )
+                        )  # fmt: skip
+                    if got.video:
+                        v = got.video
+                        session.add(
+                            VideoFeatures(
+                                item_id=item.id, width=v.width, height=v.height,
+                                duration_seconds=Decimal(str(v.duration_seconds)), fps=Decimal(str(v.fps)),
+                                frame_count=v.frame_count, container=v.container, codec=v.codec,
+                            )
+                        )  # fmt: skip
                     # Only label a freshly created item: a dedup hit is content already in the pool,
                     # possibly labeled differently, and a same-batch upload must not overwrite that.
                     if class_id is not None:
@@ -890,7 +932,7 @@ async def get_dataset_health(draft: DraftDep, session: SessionDep) -> DatasetHea
         return DatasetHealth(
             item_count=0, labeled_count=0, unlabeled_count=0, modality=modality, class_distribution=[],
             small_classes=[], duplicate_content_hashes=0, missing_content_hash=0,
-            vision=None, audio=None, text=None, tabular=None,
+            vision=None, audio=None, video=None, text=None, tabular=None,
         )  # fmt: skip
 
     item_count = (await session.execute(sa.select(sa.func.count()).select_from(vi).where(in_draft))).scalar_one()
@@ -944,7 +986,7 @@ async def get_dataset_health(draft: DraftDep, session: SessionDep) -> DatasetHea
         avg = svc.js_round(_num(av)) if integer else _num(av)
         return MinMaxAvg(min=_num(mn), max=_num(mx), avg=avg)
 
-    vision = audio = text = tabular = None
+    vision = audio = video = text = tabular = None
     if modality == "vision":
         agg = (
             await session.execute(
@@ -991,6 +1033,35 @@ async def get_dataset_health(draft: DraftDep, session: SessionDep) -> DatasetHea
         audio = AudioHealth(
             count=agg[0], duration_seconds=mma(agg[1], agg[2], agg[3]), sample_rates={str(r): n for r, n in rates}
         )
+    elif modality == "video":
+        agg = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(), sa.func.min(VideoFeatures.duration_seconds),
+                    sa.func.max(VideoFeatures.duration_seconds), sa.func.avg(VideoFeatures.duration_seconds),
+                    sa.func.min(VideoFeatures.width), sa.func.max(VideoFeatures.width),
+                    sa.func.avg(VideoFeatures.width),
+                    sa.func.min(VideoFeatures.height), sa.func.max(VideoFeatures.height),
+                    sa.func.avg(VideoFeatures.height), sa.func.min(VideoFeatures.fps), sa.func.max(VideoFeatures.fps),
+                    sa.func.avg(VideoFeatures.fps),
+                )
+                .join(vi, VideoFeatures.item_id == vi.item_id)
+                .where(in_draft)
+            )
+        ).one()  # fmt: skip
+        containers = (
+            await session.execute(
+                sa.select(VideoFeatures.container, sa.func.count())
+                .join(vi, VideoFeatures.item_id == vi.item_id)
+                .where(in_draft)
+                .group_by(VideoFeatures.container)
+            )
+        ).all()
+        video = VideoHealth(
+            count=agg[0], duration_seconds=mma(agg[1], agg[2], agg[3]), width=mma(agg[4], agg[5], agg[6], True),
+            height=mma(agg[7], agg[8], agg[9], True), fps=mma(agg[10], agg[11], agg[12]),
+            containers={(c or "unknown"): n for c, n in containers},
+        )  # fmt: skip
     elif modality == "text":
         agg = (
             await session.execute(
@@ -1030,7 +1101,8 @@ async def get_dataset_health(draft: DraftDep, session: SessionDep) -> DatasetHea
         health=DatasetHealth(
             item_count=item_count, labeled_count=labeled, unlabeled_count=item_count - labeled, modality=modality,
             class_distribution=distribution, small_classes=small, duplicate_content_hashes=len(dup_groups),
-            missing_content_hash=missing_hash, vision=vision, audio=audio, text=text, tabular=tabular,
+            missing_content_hash=missing_hash, vision=vision, audio=audio, video=video, text=text,
+            tabular=tabular,
         )
     )  # fmt: skip
 

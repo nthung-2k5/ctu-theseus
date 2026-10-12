@@ -11,7 +11,7 @@ import {
   ThemeIcon,
   UnstyledButton,
 } from '@mantine/core'
-import { SpeakerHighIcon } from '@phosphor-icons/react'
+import { PlayIcon, SpeakerHighIcon } from '@phosphor-icons/react'
 import { EmptyState, StatusBadge, VirtualGrid } from '@public/components/ui'
 import { SPLIT_COLORS } from '@public/lib/constants'
 import { type Direction, nextInDirection, type Box as Rect } from '@public/lib/gridNav'
@@ -34,7 +34,7 @@ const ARROW_DIRECTIONS: Record<string, Direction> = {
   ArrowDown: 'down',
 }
 
-/** Media (vision/audio) item grid: click a card (or press Enter on its name) to open it in the item drawer. */
+/** Media (vision/audio/video) item grid: click a card (or press Enter on its name) to open it in the item drawer. */
 export const MediaGrid = <T extends DatasetListItem>({
   items,
   modality,
@@ -48,7 +48,7 @@ export const MediaGrid = <T extends DatasetListItem>({
   captionEditing,
 }: {
   items: T[]
-  modality: 'vision' | 'audio'
+  modality: 'vision' | 'audio' | 'video'
   isLoading?: boolean
   spec: GroundTruthSpec
   classNameById: Map<string, string>
@@ -107,7 +107,7 @@ export const MediaGrid = <T extends DatasetListItem>({
         onClick={() => onOpen(item)}
       >
         <Box pos="relative">
-          {modality === 'vision' ? (
+          {modality === 'vision' || (modality === 'video' && item.thumbnailUrl) ? (
             <Image
               src={item.thumbnailUrl ?? item.downloadUrl ?? undefined}
               // Decorative: the "Open <name>" button beside it is what names the item.
@@ -115,13 +115,21 @@ export const MediaGrid = <T extends DatasetListItem>({
               h={110}
               fit="cover"
               loading="lazy"
-              // A thumbnail that can't be made (or a stale link) falls back to the full-size image.
-              fallbackSrc={item.downloadUrl ?? ''}
+              // A thumbnail that can't be made (or a stale link) falls back to the full-size image. A video has
+              // no image to fall back to, so a poster frame that fails just shows the empty placeholder.
+              fallbackSrc={modality === 'video' ? '' : (item.downloadUrl ?? '')}
             />
           ) : (
             <Center h={110} bg="var(--mantine-color-default-hover)">
-              <ThemeIcon size={40} variant="light" color="orange" radius="xl">
-                <SpeakerHighIcon size={22} />
+              <ThemeIcon size={40} variant="light" color={modality === 'video' ? 'pink' : 'orange'} radius="xl">
+                {modality === 'video' ? <PlayIcon size={22} /> : <SpeakerHighIcon size={22} />}
+              </ThemeIcon>
+            </Center>
+          )}
+          {modality === 'video' && item.thumbnailUrl && (
+            <Center pos="absolute" inset={0} style={{ pointerEvents: 'none' }}>
+              <ThemeIcon size={36} variant="filled" color="dark" radius="xl" style={{ opacity: 0.7 }}>
+                <PlayIcon size={18} weight="fill" />
               </ThemeIcon>
             </Center>
           )}

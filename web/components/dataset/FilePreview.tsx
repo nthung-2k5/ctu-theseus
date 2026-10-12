@@ -7,7 +7,13 @@ import type { StagedFile } from '@public/lib/upload/types'
 import { useEffect, useState } from 'react'
 
 export function FilePreview({ file, taskUsesClasses }: { file: StagedFile; taskUsesClasses: boolean }) {
-  const kind = file.file.type.startsWith('image/') ? 'image' : file.file.type.startsWith('audio/') ? 'audio' : null
+  const kind = file.file.type.startsWith('image/')
+    ? 'image'
+    : file.file.type.startsWith('audio/')
+      ? 'audio'
+      : file.file.type.startsWith('video/')
+        ? 'video'
+        : null
 
   // The object URL exists only while this file is selected, so browsing a large tree never holds blobs open.
   const [url, setUrl] = useState<string | null>(null)
@@ -40,6 +46,10 @@ export function FilePreview({ file, taskUsesClasses }: { file: StagedFile; taskU
       {kind === 'audio' && url && (
         // biome-ignore lint/a11y/useMediaCaption: dataset audio has no captions to offer
         <audio src={url} controls style={{ width: '100%' }} />
+      )}
+      {kind === 'video' && url && (
+        // biome-ignore lint/a11y/useMediaCaption: dataset video has no captions to offer
+        <video src={url} controls preload="metadata" style={{ width: '100%', maxHeight: 220, borderRadius: 6 }} />
       )}
       <div>
         <Text size="sm" fw={600} style={{ wordBreak: 'break-all' }}>

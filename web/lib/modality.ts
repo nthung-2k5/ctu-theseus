@@ -1,4 +1,4 @@
-import { ChatTextIcon, ImageSquareIcon, TableIcon, WaveformIcon } from '@phosphor-icons/react'
+import { ChatTextIcon, ImageSquareIcon, TableIcon, VideoCameraIcon, WaveformIcon } from '@phosphor-icons/react'
 import type { DatasetModality } from '@public/lib/api/enums'
 
 export interface ModalityMeta {
@@ -27,6 +27,12 @@ export const MODALITY_META: Record<DatasetModality, ModalityMeta> = {
     color: 'orange',
     icon: WaveformIcon,
     description: 'Sound classification & acoustic event labeling',
+  },
+  video: {
+    label: 'Video',
+    color: 'pink',
+    icon: VideoCameraIcon,
+    description: 'Action recognition & clip classification',
   },
   tabular: {
     label: 'Tabular',
