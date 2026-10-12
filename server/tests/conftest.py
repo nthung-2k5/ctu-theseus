@@ -102,6 +102,16 @@ async def app(db):
     await writer.start()
     set_event_writer(writer)
     yield create_app()
+    # A snapshot build is started as a background task (routers/datasets.py) that no request waits for. If the test
+    # ends first, the `db` fixture drops the database under it and the event loop then cannot finish cancelling it,
+    # which hangs pytest at teardown. Let in-flight builds finish while the database still exists.
+    from omnitrain.routers import datasets
+
+    pending = list(datasets._background)
+    if pending:
+        await asyncio.wait(pending, timeout=15)
+        for task in pending:
+            task.cancel()
     await writer.stop()
     set_event_writer(None)
 
