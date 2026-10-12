@@ -19,7 +19,7 @@ from omnitrain.backends.base import _registry as backend_registry
 from omnitrain.db.models import RunEvaluation, RunEvent, TrainingMetric, TrainingRun
 from omnitrain.events import InProcessRunEventBus, set_event_writer
 from omnitrain.events.writer import EventWriter
-from omnitrain.jobs import abort
+from omnitrain.jobs import abort, run_core
 from omnitrain.jobs import train as train_job
 from omnitrain.services import storage
 from omnitrain.settings import get_settings
@@ -136,7 +136,7 @@ async def env(db, monkeypatch, tmp_path, make_run):
     uploads: dict[str, str] = {}
     json_uploads: dict[str, object] = {}
     monkeypatch.setattr(get_settings(), "temp_dir", tmp_path)
-    monkeypatch.setattr(train_job.pd, "read_parquet", lambda path: pd.DataFrame({"x": [1]}))
+    monkeypatch.setattr(run_core.pd, "read_parquet", lambda path: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(storage, "file_exists", lambda bucket, key: True)
     monkeypatch.setattr(storage, "delete_prefix", lambda bucket, prefix: 0)
     monkeypatch.setattr(storage, "upload_file", lambda bucket, key, path: uploads.__setitem__(key, open(path).read()))
