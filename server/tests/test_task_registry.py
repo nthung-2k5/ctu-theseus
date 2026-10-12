@@ -20,8 +20,8 @@ def test_every_project_task_has_a_descriptor_and_no_extras():
     assert set(TASK_REGISTRY) == set(get_args(ProjectTask))
 
 
-def test_fourteen_selectable_tasks_and_five_planned():
-    assert len(list_selectable_tasks()) == 14
+def test_fifteen_selectable_tasks_and_five_planned():
+    assert len(list_selectable_tasks()) == 15
     planned = [t for t in TASK_REGISTRY.values() if t.status == "planned"]
     assert len(planned) == 5
     assert all(t.output is None and t.columns == [] for t in planned)

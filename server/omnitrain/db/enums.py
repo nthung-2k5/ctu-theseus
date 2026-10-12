@@ -9,12 +9,14 @@ ProjectTask = Literal[
     "image_classification", "object_detection", "image_segmentation", "image_captioning",
     "audio_classification", "automatic_speech_recognition", "audio_segmentation", "audio_captioning",
     "tabular_regression", "tabular_classification", "tabular_clustering", "tabular_anomaly_detection",
+    "video_classification",
 ]
 # fmt: on
-DatasetModality = Literal["text", "vision", "audio", "tabular"]
+DatasetModality = Literal["text", "vision", "audio", "video", "tabular"]
 SplitType = Literal["train", "test", "validation"]
 ImageFormat = Literal["jpeg", "png"]
 AudioCodec = Literal["wav", "mp3", "flac", "ogg"]
+VideoContainer = Literal["mp4", "webm"]
 AnnotationType = Literal[
     "classification", "bounding_box", "segmentation_mask", "text_sequence", "token_tags", "preference_rank"
 ]

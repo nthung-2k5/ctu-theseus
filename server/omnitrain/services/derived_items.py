@@ -133,6 +133,9 @@ def feature_row(modality: str, item_id: uuid.UUID, f: dict[str, Any]) -> Any:
             language_code=f["language_code"],
             meta_json=f["meta_json"],
         )
+    if modality == "video":
+        # No preprocessing or augmentation op targets video yet, so nothing can produce a derived clip.
+        raise ValueError("Video items have no derived form")
     return TabularFeatures(item_id=item_id, features_json=f["features_json"])
 
 

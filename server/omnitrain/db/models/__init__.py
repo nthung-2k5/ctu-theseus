@@ -14,6 +14,7 @@ from omnitrain.db.models.dataset import (
     Project,
     TabularFeatures,
     TextFeatures,
+    VideoFeatures,
     VisionFeatures,
 )
 from omnitrain.db.models.integration import UserIntegration
@@ -24,5 +25,5 @@ __all__ = [
     "Annotation", "ApiKey", "AudioFeatures", "CustomModel", "Dataset", "DatasetItem", "DatasetVersion",
     "DatasetVersionItem", "LabelClass", "ModelExport", "PluginSetting", "Project", "RefreshToken",
     "RunEvaluation", "RunEvent", "Sweep", "TabularFeatures", "TextFeatures", "TrainingMetric",
-    "TrainingRun", "User", "UserIntegration", "VisionFeatures",
+    "TrainingRun", "User", "UserIntegration", "VideoFeatures", "VisionFeatures",
 ]  # fmt: skip

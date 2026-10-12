@@ -8,7 +8,7 @@ from omnitrain.preprocessing.config import ParamSpec, PreprocessingConfig, Prepr
 from omnitrain.services import plugin_settings
 from omnitrain.services.task_registry import TaskDescriptor
 
-_MODALITY_ORDER = ("vision", "text", "audio", "tabular")
+_MODALITY_ORDER = ("vision", "text", "audio", "video", "tabular")
 
 
 class PreprocessingConfigError(ValueError):

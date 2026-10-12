@@ -1129,7 +1129,7 @@
           "datasets"
         ],
         "summary": "Get Item Thumbnail",
-        "description": "A cached JPEG thumbnail of an image item, made on first request. Redirects to object storage.",
+        "description": "A cached JPEG thumbnail of an image item (a poster frame for a video), made on first request.\n\nRedirects to object storage.",
         "operationId": "get_item_thumbnail",
         "parameters": [
           {
@@ -1176,7 +1176,7 @@
           "datasets"
         ],
         "summary": "Upload Items",
-        "description": "Upload files (vision/audio) into the pool and draft with one split (and optionally one class).\n\nFor an object-detection project, `boxes` labels the files instead of a class: a JSON list with one entry per file,\nin order, each either null (leave it unlabelled), `[]` (labelled, nothing in it) or a list of\n`{classId, x, y, w, h}` boxes (see services/boxes.py). As with `classId`, only a file that is new to the pool is\nlabelled; one already there keeps whatever labels it has.",
+        "description": "Upload files (vision/audio/video) into the pool and draft with one split (and optionally one class).\n\nFor an object-detection project, `boxes` labels the files instead of a class: a JSON list with one entry per file,\nin order, each either null (leave it unlabelled), `[]` (labelled, nothing in it) or a list of\n`{classId, x, y, w, h}` boxes (see services/boxes.py). As with `classId`, only a file that is new to the pool is\nlabelled; one already there keeps whatever labels it has.",
         "operationId": "upload_items",
         "parameters": [
           {
@@ -5041,6 +5041,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -5900,7 +5901,8 @@
               "tabular_regression",
               "tabular_classification",
               "tabular_clustering",
-              "tabular_anomaly_detection"
+              "tabular_anomaly_detection",
+              "video_classification"
             ],
             "title": "Task"
           }
@@ -6358,6 +6360,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -6404,6 +6407,16 @@
               }
             ]
           },
+          "video": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoHealth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "text": {
             "anyOf": [
               {
@@ -6437,6 +6450,7 @@
           "missingContentHash",
           "vision",
           "audio",
+          "video",
           "text",
           "tabular"
         ],
@@ -6467,6 +6481,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -6644,6 +6659,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -7733,6 +7749,16 @@
               }
             ]
           },
+          "videoFeatures": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VideoFeaturesOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "tabularFeatures": {
             "anyOf": [
               {
@@ -8569,6 +8595,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -8681,7 +8708,8 @@
               "tabular_regression",
               "tabular_classification",
               "tabular_clustering",
-              "tabular_anomaly_detection"
+              "tabular_anomaly_detection",
+              "video_classification"
             ],
             "title": "Task"
           },
@@ -8817,7 +8845,8 @@
               "tabular_regression",
               "tabular_classification",
               "tabular_clustering",
-              "tabular_anomaly_detection"
+              "tabular_anomaly_detection",
+              "video_classification"
             ],
             "title": "Task"
           },
@@ -8892,7 +8921,8 @@
               "tabular_regression",
               "tabular_classification",
               "tabular_clustering",
-              "tabular_anomaly_detection"
+              "tabular_anomaly_detection",
+              "video_classification"
             ],
             "title": "Task"
           },
@@ -9568,6 +9598,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -10852,6 +10883,7 @@
               "text",
               "vision",
               "audio",
+              "video",
               "tabular"
             ],
             "title": "Modality"
@@ -11211,6 +11243,112 @@
           "createdAt"
         ],
         "title": "VersionOut"
+      },
+      "VideoFeaturesOut": {
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Itemid"
+          },
+          "width": {
+            "type": "integer",
+            "title": "Width"
+          },
+          "height": {
+            "type": "integer",
+            "title": "Height"
+          },
+          "durationSeconds": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Durationseconds"
+          },
+          "fps": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Fps"
+          },
+          "frameCount": {
+            "type": "integer",
+            "title": "Framecount"
+          },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "mp4",
+                  "webm"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container"
+          },
+          "codec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codec"
+          }
+        },
+        "type": "object",
+        "required": [
+          "itemId",
+          "width",
+          "height",
+          "durationSeconds",
+          "fps",
+          "frameCount",
+          "container",
+          "codec"
+        ],
+        "title": "VideoFeaturesOut"
+      },
+      "VideoHealth": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "durationSeconds": {
+            "$ref": "#/components/schemas/MinMaxAvg"
+          },
+          "width": {
+            "$ref": "#/components/schemas/MinMaxAvg"
+          },
+          "height": {
+            "$ref": "#/components/schemas/MinMaxAvg"
+          },
+          "fps": {
+            "$ref": "#/components/schemas/MinMaxAvg"
+          },
+          "containers": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Containers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "durationSeconds",
+          "width",
+          "height",
+          "fps",
+          "containers"
+        ],
+        "title": "VideoHealth"
       },
       "VisionFeaturesIn": {
         "properties": {

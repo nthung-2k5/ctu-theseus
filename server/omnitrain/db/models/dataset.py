@@ -16,6 +16,7 @@ modality_t = pg_enum(e.DatasetModality, "modality")
 split_type_t = pg_enum(e.SplitType, "split_type")
 image_format_t = pg_enum(e.ImageFormat, "image_format")
 audio_codec_t = pg_enum(e.AudioCodec, "audio_codec")
+video_container_t = pg_enum(e.VideoContainer, "video_container")
 annotation_type_t = pg_enum(e.AnnotationType, "annotation_type")
 dataset_version_status_t = pg_enum(e.DatasetVersionStatus, "dataset_version_status")
 
@@ -163,6 +164,20 @@ class AudioFeatures(Base):
     sample_rate_hz: Mapped[int] = mapped_column(sa.Integer)
     channels: Mapped[int | None] = mapped_column(sa.Integer, server_default="1")
     audio_codec: Mapped[str | None] = mapped_column(audio_codec_t)
+
+
+class VideoFeatures(Base):
+    __tablename__ = "video_features"
+
+    item_id: Mapped[uuid.UUID] = _fk("dataset_items.id", primary_key=True)
+    width: Mapped[int] = mapped_column(sa.Integer)
+    height: Mapped[int] = mapped_column(sa.Integer)
+    duration_seconds: Mapped[Decimal] = mapped_column(sa.Numeric(10, 3))
+    fps: Mapped[Decimal] = mapped_column(sa.Numeric(7, 3))
+    frame_count: Mapped[int] = mapped_column(sa.Integer)
+    container: Mapped[str | None] = mapped_column(video_container_t)
+    # Free text (the codec's fourcc, e.g. "avc1"): it only informs, nothing branches on it.
+    codec: Mapped[str | None] = mapped_column(sa.String(16))
 
 
 class TabularFeatures(Base):

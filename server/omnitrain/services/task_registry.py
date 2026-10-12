@@ -97,9 +97,11 @@ IMAGE_PATH = C.IMAGE_PATH_COLUMN_NAME
 CLASS = C.CLASS_COLUMN_NAME
 SPLIT = C.SPLIT_COLUMN_NAME
 BOXES = "boxes"
+VIDEO_PATH = "video_path"
 
 _AUDIO_MIME = ["audio/wav", "audio/mpeg", "audio/flac", "audio/ogg"]
 _IMAGE_MIME = ["image/jpeg", "image/png"]
+_VIDEO_MIME = ["video/mp4", "video/webm"]
 
 
 def _col(name: str, kind: ColumnKind) -> ColumnSpec:
@@ -213,6 +215,13 @@ _TASKS: list[TaskDescriptor] = [
     _file_caption_task(
         "automatic_speech_recognition", "Automatic Speech Recognition", "audio", "audio_path", "transcript",
         _AUDIO_MIME,
+    ),
+    # -- Tier 3b: video. One class per clip, like audio classification. --
+    _task(
+        "video_classification", "Video Classification", "video", "experimental",
+        ItemSpec(payload="file", accept=_VIDEO_MIME), _CLASSIFY,
+        [_col(VIDEO_PATH, "storage_uri"), _col(CLASS, "label"), _col(SPLIT, "split")],
+        output=TaskOutput(column=CLASS, kind="classification"),
     ),
     # -- Tier 4: experimental (boxes) --
     # `boxes` holds a JSON list of {label, x, y, w, h} per image (normalised, top-left origin; see services/boxes.py).

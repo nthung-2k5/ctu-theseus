@@ -14,6 +14,7 @@ from omnitrain.db.enums import (
     DatasetModality,
     ImageFormat,
     SplitType,
+    VideoContainer,
 )
 from omnitrain.preprocessing.config import PreprocessingConfig, PreprocessingInfo
 from omnitrain.schemas.common import ApiModel
@@ -94,6 +95,17 @@ class AudioFeaturesOut(ApiModel):
     audio_codec: AudioCodec | None
 
 
+class VideoFeaturesOut(ApiModel):
+    item_id: uuid.UUID
+    width: int
+    height: int
+    duration_seconds: Decimal
+    fps: Decimal
+    frame_count: int
+    container: VideoContainer | None
+    codec: str | None
+
+
 class TabularFeaturesOut(ApiModel):
     item_id: uuid.UUID
     features_json: Any
@@ -114,6 +126,7 @@ class ItemOut(ItemRow):
     text_features: TextFeaturesOut | None = None
     vision_features: VisionFeaturesOut | None = None
     audio_features: AudioFeaturesOut | None = None
+    video_features: VideoFeaturesOut | None = None
     tabular_features: TabularFeaturesOut | None = None
     annotations: list[AnnotationOut] = []
     split_type: SplitType
@@ -374,6 +387,15 @@ class TextHealth(ApiModel):
     languages: dict[str, int]
 
 
+class VideoHealth(ApiModel):
+    count: int
+    duration_seconds: MinMaxAvg
+    width: MinMaxAvg
+    height: MinMaxAvg
+    fps: MinMaxAvg
+    containers: dict[str, int]
+
+
 class TabularHealth(ApiModel):
     count: int
 
@@ -389,6 +411,7 @@ class DatasetHealth(ApiModel):
     missing_content_hash: int
     vision: VisionHealth | None
     audio: AudioHealth | None
+    video: VideoHealth | None
     text: TextHealth | None
     tabular: TabularHealth | None
 

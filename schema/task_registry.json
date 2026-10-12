@@ -548,6 +548,50 @@
       },
       "inferenceOutputKind": "text"
     },
+    "video_classification": {
+      "id": "video_classification",
+      "label": "Video Classification",
+      "modality": "video",
+      "status": "experimental",
+      "itemSpec": {
+        "payload": "file",
+        "accept": [
+          "video/mp4",
+          "video/webm"
+        ]
+      },
+      "annotation": {
+        "type": "classification",
+        "requiresLabelClasses": true
+      },
+      "columns": [
+        {
+          "name": "video_path",
+          "kind": "storage_uri"
+        },
+        {
+          "name": "class",
+          "kind": "label"
+        },
+        {
+          "name": "split",
+          "kind": "split"
+        }
+      ],
+      "inputFields": [],
+      "output": {
+        "column": "class",
+        "kind": "classification"
+      },
+      "inferenceInputSpec": {
+        "kind": "file",
+        "accept": [
+          "video/mp4",
+          "video/webm"
+        ]
+      },
+      "inferenceOutputKind": "classification"
+    },
     "object_detection": {
       "id": "object_detection",
       "label": "Object Detection",
