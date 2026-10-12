@@ -10,7 +10,8 @@ export function predictSnippets(runId: string, input: InferenceInputSpec, origin
   let curlBody: string
   let pyBody: string
   if (input.kind === 'file') {
-    curlBody = `  -F "file=@input.${input.accept?.some((a) => a.startsWith('audio')) ? 'wav' : 'jpg'}"`
+    const kind = input.accept?.[0]?.split('/')[0]
+    curlBody = `  -F "file=@input.${kind === 'audio' ? 'wav' : kind === 'video' ? 'mp4' : 'jpg'}"`
     pyBody = `    files={"file": open("input", "rb")},`
   } else if (input.kind === 'text') {
     const example = JSON.stringify(Object.fromEntries(input.fields.map((f) => [f, `your ${f} here`])))

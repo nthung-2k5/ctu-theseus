@@ -32,6 +32,7 @@ from fastapi import HTTPException, UploadFile
 
 from omnitrain.db.models import TrainingRun
 from omnitrain.jobs.executors import run_in_executor
+from omnitrain.services import video as video_media
 from omnitrain.services.predict import InferenceOutput, build_batch_result_frame
 from omnitrain.services.task_registry import get_inference_input_spec
 from omnitrain.settings import get_settings
@@ -39,6 +40,8 @@ from omnitrain.settings import get_settings
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+# A clip is far larger than an image or a sound; this is for tasks whose input is video.
+MAX_VIDEO_UPLOAD_BYTES = 100 * 1024 * 1024
 # Keeps one batch's memory and predict time bounded, and its result CSV a sane download size.
 MAX_BATCH_ROWS = 10_000
 BUSY_WAIT_SECONDS = 1.0
@@ -141,11 +144,21 @@ def _parse_fields_object(raw: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-async def _read_upload(file: UploadFile) -> bytes:
-    data = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, f"File is larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit")
+async def _read_upload(file: UploadFile, limit: int | None = None) -> bytes:
+    limit = MAX_UPLOAD_BYTES if limit is None else limit
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, f"File is larger than the {limit // (1024 * 1024)} MB limit")
     return data
+
+
+async def _check_decodable_video(data: bytes, ext: str) -> None:
+    """Refuse a file that is not a video before it takes an inference slot: a clip that cannot be decoded is the
+    caller's mistake (422), not a server failure."""
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, video_media.probe, data, ext)
+    except video_media.VideoError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 def _safe_extension(filename: str | None) -> str:
@@ -170,7 +183,14 @@ async def _validated_input(task: str, *, file: UploadFile | None, fields: str | 
         accept = spec.get("accept")
         if accept and file.content_type not in accept:
             raise HTTPException(422, f"This task only accepts: {', '.join(accept)}")
-        return "file", await _read_upload(file), _safe_extension(file.filename)
+        is_video = bool(accept) and all(a.startswith("video/") for a in accept)
+        data = await _read_upload(file, MAX_VIDEO_UPLOAD_BYTES if is_video else None)
+        ext = _safe_extension(file.filename)
+        if is_video:
+            if ext.lower() not in video_media.VIDEO_EXTENSIONS:
+                ext = ".webm" if video_media.container_for(file.content_type, ext) == "webm" else ".mp4"
+            await _check_decodable_video(data, ext)
+        return "file", data, ext
 
     if not fields:
         raise HTTPException(422, "This task requires a `fields` field")

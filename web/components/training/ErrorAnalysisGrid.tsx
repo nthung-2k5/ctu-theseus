@@ -31,6 +31,10 @@ function ErrorItemPreview({ row, modality }: { row: EvaluationErrorRow; modality
       // biome-ignore lint/a11y/useMediaCaption: raw audio dataset item has no transcript source
       return <audio controls src={row.item.downloadUrl} style={{ maxWidth: 240 }} />
     }
+    if (modality === 'video') {
+      // biome-ignore lint/a11y/useMediaCaption: raw video dataset item has no caption track
+      return <video controls preload="metadata" src={row.item.downloadUrl} style={{ maxWidth: 240, maxHeight: 140 }} />
+    }
   }
   return (
     <Text size="xs" c="dimmed">

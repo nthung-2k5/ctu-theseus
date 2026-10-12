@@ -199,6 +199,34 @@ async def test_an_oversized_upload_is_413_before_the_model_is_touched(client, ne
     assert FakeModel.predict_calls == []
 
 
+async def test_a_video_request_is_type_checked_decoded_and_scored_from_a_temp_file(client, new_user, db, model):
+    from tests.test_video import make_mp4
+
+    model["model"] = FakeModel(columns=("video_path",))
+    c = await new_user()
+    run = await succeeded_run(c, db, task="video_classification")
+    url = f"/api/inference/{run}"
+    bad = await c.post(url, files={"file": ("x.png", b"\x89PNG", "image/png")})
+    assert bad.status_code == 422 and "only accepts: video/mp4, video/webm" in msg(bad)
+    undecodable = await c.post(url, files={"file": ("x.mp4", b"not a video" * 30, "video/mp4")})
+    assert undecodable.status_code == 422 and FakeModel.predict_calls == []
+
+    ok = await c.post(url, files={"file": ("walk", make_mp4(), "video/mp4")})  # no extension on the name
+    assert ok.status_code == 200, ok.text
+    path = FakeModel.predict_calls[0]["video_path"].iloc[0]
+    assert path.endswith("input.mp4")
+    assert FakeModel.file_existed_during_predict == [True] and not os.path.exists(path)
+
+
+async def test_video_has_its_own_larger_upload_limit(client, new_user, db, model, monkeypatch):
+    assert svc.MAX_VIDEO_UPLOAD_BYTES > svc.MAX_UPLOAD_BYTES
+    monkeypatch.setattr(svc, "MAX_VIDEO_UPLOAD_BYTES", 10)
+    c = await new_user()
+    run = await succeeded_run(c, db, task="video_classification")
+    r = await c.post(f"/api/inference/{run}", files={"file": ("big.mp4", b"x" * 11, "video/mp4")})
+    assert r.status_code == 413 and FakeModel.predict_calls == []
+
+
 async def test_an_upload_extension_is_sanitized(client, new_user, db, model):
     model["model"] = FakeModel(columns=("image_path",))
     c = await new_user()

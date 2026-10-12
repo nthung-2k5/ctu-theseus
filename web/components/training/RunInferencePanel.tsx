@@ -79,7 +79,10 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
     data: { project: activeProject },
   } = useSuspenseQuery(projectDetailQueryOptions(projectId))
   const inputSpec = getInferenceInputSpec(activeProject.task)
-  const isAudio = getTaskDescriptor(activeProject.task).modality === 'audio'
+  const modality = getTaskDescriptor(activeProject.task).modality
+  const isAudio = modality === 'audio'
+  const isVideo = modality === 'video'
+  const fileInputTitle = isAudio ? 'Test Audio' : isVideo ? 'Test Video' : 'Test Image'
 
   const runId = run.id
   const isReady = run.status === 'succeeded'
@@ -240,9 +243,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
           {/* Input */}
           <Card withBorder padding="lg" radius="md">
             <Group justify="space-between" mb="md">
-              <Title order={5}>
-                {batchMode ? 'Batch Input' : isFileTask ? (isAudio ? 'Test Audio' : 'Test Image') : 'Test Input'}
-              </Title>
+              <Title order={5}>{batchMode ? 'Batch Input' : isFileTask ? fileInputTitle : 'Test Input'}</Title>
               <Group gap="xs">
                 {!isFileTask && (
                   <Button
@@ -271,7 +272,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                 onDrop={handleBatchDrop}
                 onReject={handleReject}
                 accept={['text/csv']}
-                maxSize={25 * 1024 * 1024}
+                maxSize={(isVideo ? 100 : 25) * 1024 * 1024}
                 radius="md"
                 p="xl"
                 style={{ borderStyle: 'dashed', borderWidth: 2, transition: 'all 150ms ease' }}
@@ -316,7 +317,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                     <CloudArrowUpIcon size={30} />
                   </ThemeIcon>
                   <Text size="sm" fw={500}>
-                    Drop {isAudio ? 'an audio file' : 'an image'} here or click to browse
+                    Drop {isAudio ? 'an audio file' : isVideo ? 'a video clip' : 'an image'} here or click to browse
                   </Text>
                 </Stack>
               </Dropzone>
@@ -328,6 +329,9 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
                   {isAudio ? (
                     // biome-ignore lint/a11y/useMediaCaption: user-uploaded test clip, no transcript source
                     <audio controls src={inputFileUrl} style={{ width: '100%' }} />
+                  ) : isVideo ? (
+                    // biome-ignore lint/a11y/useMediaCaption: user-uploaded test clip, no caption track
+                    <video controls src={inputFileUrl} style={{ width: '100%', maxHeight: 320, background: '#000' }} />
                   ) : output?.kind === 'detections' ? (
                     // The boxes the model found, drawn on the image it was given, at the chosen threshold.
                     <BoxCanvas
