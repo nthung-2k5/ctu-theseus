@@ -64,6 +64,17 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   order a run assigned each class — see the export bullet below); and `train()` should report a
   `validation`-split `loss` metric wherever possible, since `events/writer.py` uses the lowest
   validation loss so far as a task-agnostic definition of a run's best epoch.
+- **Video is a file modality with its own backend.** `video_classification` (one class per clip, like audio) is
+  trained only by `backends/video/` (torchvision's Kinetics-400 classifiers, BSD-3). Decoding is OpenCV
+  (`services/video.py` to validate an upload and cut a poster frame; `backends/video/frames.py` to sample clips),
+  deliberately not torchcodec, which needs FFmpeg shared libraries on the host. One sampling definition
+  (`ClipSpec`: frames, stride, size, mean/std) serves training, evaluation, serving and the export manifest, and is
+  written into `names.json` with the class order. Uploads of video go through the same `upload_to_pool` but are read
+  one file at a time (limit `MAX_VIDEO_UPLOAD_BYTES`, 200 MB, against 50 MB for the rest; the web mirrors both in
+  `lib/upload/paths.ts`). `modality` and `project_task` are Postgres enums, so a new value needs an
+  `ALTER TYPE ... ADD VALUE` migration (see `0013`). The generated devkits and apps do not decode video, so
+  `supports_generated_clients` leaves video with the bare ONNX model only. No preprocessing or augmentation op
+  targets video yet; `derived_items.feature_row` raises for it rather than guessing a feature table.
 - **Bounding boxes are one annotation each.** Object detection stores one `bounding_box` annotation
   per box with a `class_id`, and `label_structured = {x, y, w, h}`: top-left corner and size, as
   fractions (0..1) of the displayed image. An image with nothing in it carries one class-less

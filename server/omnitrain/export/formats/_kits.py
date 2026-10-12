@@ -11,8 +11,9 @@ from omnitrain.services.task_registry import TaskDescriptor
 def supports_generated_clients(task: TaskDescriptor) -> bool:
     """The generated clients implement preprocessing and postprocessing for classification and regression. A
     detector's output is a pile of candidate boxes that needs non-maximum suppression and an undone letterbox, which
-    none of them do, so offering a devkit or app for it would hand over a client that cannot run the model."""
-    return task.output is None or task.output.kind != "detections"
+    none of them do, so offering a devkit or app for it would hand over a client that cannot run the model. Nor do
+    they decode a video or sample frames from it, so a video model is exported as the bare ONNX model only."""
+    return task.modality != "video" and (task.output is None or task.output.kind != "detections")
 
 
 class DevkitFormat(ExportFormat):
