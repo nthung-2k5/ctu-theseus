@@ -30,6 +30,7 @@ from omnitrain.routers import (
     projects,
     sweeps,
     training,
+    worker,
 )
 
 
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     api.include_router(models.router)
     api.include_router(integrations.router)
     api.include_router(admin.router)
+    api.include_router(worker.router)
     app.include_router(api)
     app.include_router(health.router)
     return app

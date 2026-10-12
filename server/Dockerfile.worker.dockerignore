@@ -1,0 +1,9 @@
+# Context is the repository root (see Dockerfile.worker): send only what the image copies.
+*
+!server/pyproject.toml
+!server/uv.lock
+!server/.python-version
+!server/omnitrain
+!schema/constants.json
+**/__pycache__
+**/*.pyc

@@ -22,6 +22,7 @@ from omnitrain.db.models import (
     TextFeatures,
     TrainingMetric,
     TrainingRun,
+    TrainingWorker,
 )
 from omnitrain.deps import ProjectDep, RunDep, SessionDep
 from omnitrain.events import get_event_bus, get_event_writer
@@ -130,6 +131,13 @@ async def _model_label(session: SessionDep, run: TrainingRun) -> str | None:
     return known.get(model_id, model_id)
 
 
+async def _worker_name(session: SessionDep, run: TrainingRun) -> str | None:
+    if run.worker_id is None:
+        return None
+    worker = await session.get(TrainingWorker, run.worker_id)
+    return worker.name if worker is not None else None
+
+
 @router.get("/runs/{run_id}", response_model=RunDetailResponse)
 async def get_run(run: RunDep, session: SessionDep) -> RunDetailResponse:
     version = await session.get(DatasetVersion, run.dataset_version_id)
@@ -153,6 +161,7 @@ async def get_run(run: RunDep, session: SessionDep) -> RunDetailResponse:
         hyperparameters=run.hyperparameters,
         custom_model_id=run.custom_model_id,
         model_label=await _model_label(session, run),
+        worker_name=await _worker_name(session, run),
         failed_message=run.failed_message,
         started_at=run.started_at,
         completed_at=run.completed_at,

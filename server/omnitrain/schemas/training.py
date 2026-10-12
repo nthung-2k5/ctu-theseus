@@ -147,6 +147,8 @@ class RunDetail(ApiModel):
     # A person-readable name for the model the run used: a custom model's name (even one since archived), or
     # the built-in model's label. None when the run named no model (the backend's default was used).
     model_label: str | None = None
+    # The remote worker the run trained on; None when it trained on the server itself.
+    worker_name: str | None = None
     failed_message: str | None
     started_at: datetime | None
     completed_at: datetime | None

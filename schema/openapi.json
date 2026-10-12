@@ -4224,6 +4224,308 @@
           }
         }
       }
+    },
+    "/api/admin/workers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin List Workers",
+        "operationId": "admin_list_workers",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerListResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Create Worker",
+        "operationId": "admin_create_worker",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkerBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedWorker"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/workers/{worker_id}": {
+      "patch": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Update Worker",
+        "description": "Switch a worker on or off. Off only stops it taking NEW runs: one it is training carries on.",
+        "operationId": "admin_update_worker",
+        "parameters": [
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Worker Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkerBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Revoke Worker",
+        "description": "Revoke a worker's token for good. Its in-progress run is failed at once rather than left to the heartbeat\nreaper: a revoked worker can no longer report anything, so nothing would ever finish it.",
+        "operationId": "admin_revoke_worker",
+        "parameters": [
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Worker Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worker/claim": {
+      "post": {
+        "tags": [
+          "worker"
+        ],
+        "summary": "Worker Claim",
+        "description": "Hand this worker the oldest queued run it can train, or 204.\n\nThe worker's self-description is stored first, even when nothing is handed out: the queue reads it to decide\nwhether the server should wait for this worker. A worker running a different package version advertises no\nbackends (so the server does not wait for it) and is told why.",
+        "operationId": "worker_claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerClaimBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerRunSpec"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No run is waiting for this worker"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worker/runs/{run_id}/events": {
+      "post": {
+        "tags": [
+          "worker"
+        ],
+        "summary": "Worker Events",
+        "description": "Metrics and a heartbeat from a training worker. The answer is how the worker learns of a cancel.",
+        "operationId": "worker_events",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerEventsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerEventsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/worker/runs/{run_id}/complete": {
+      "post": {
+        "tags": [
+          "worker"
+        ],
+        "summary": "Worker Complete",
+        "description": "The worker's last word on a run. Idempotent: a run that already ended keeps the status it has.",
+        "operationId": "worker_complete",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerCompleteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerCompleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4418,6 +4720,17 @@
           "backend": {
             "type": "string",
             "title": "Backend"
+          },
+          "workerName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workername"
           },
           "createdAt": {
             "type": "string",
@@ -6007,6 +6320,21 @@
         ],
         "title": "CreateVersionBody"
       },
+      "CreateWorkerBody": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateWorkerBody"
+      },
       "CreatedApiKey": {
         "properties": {
           "id": {
@@ -6041,6 +6369,23 @@
           "key"
         ],
         "title": "CreatedApiKey"
+      },
+      "CreatedWorker": {
+        "properties": {
+          "worker": {
+            "$ref": "#/components/schemas/WorkerOut"
+          },
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "worker",
+          "token"
+        ],
+        "title": "CreatedWorker"
       },
       "CustomModelKindListResponse": {
         "properties": {
@@ -9111,6 +9456,17 @@
             ],
             "title": "Modellabel"
           },
+          "workerName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workername"
+          },
           "failedMessage": {
             "anyOf": [
               {
@@ -10122,6 +10478,14 @@
           "customModelBytes": {
             "type": "integer",
             "title": "Custommodelbytes"
+          },
+          "workers": {
+            "type": "integer",
+            "title": "Workers"
+          },
+          "workersOnline": {
+            "type": "integer",
+            "title": "Workersonline"
           }
         },
         "type": "object",
@@ -10134,7 +10498,9 @@
           "activeRuns",
           "exports",
           "customModels",
-          "customModelBytes"
+          "customModelBytes",
+          "workers",
+          "workersOnline"
         ],
         "title": "SystemCounts"
       },
@@ -10661,6 +11027,19 @@
         },
         "type": "object",
         "title": "UpdateUserBody"
+      },
+      "UpdateWorkerBody": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "UpdateWorkerBody"
       },
       "UploadResponse": {
         "properties": {
@@ -11493,6 +11872,532 @@
           "formats"
         ],
         "title": "VisionHealth"
+      },
+      "WorkerClaimBody": {
+        "properties": {
+          "backends": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 64,
+            "title": "Backends"
+          },
+          "protocol": {
+            "type": "integer",
+            "title": "Protocol"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Version"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu"
+          }
+        },
+        "type": "object",
+        "required": [
+          "backends",
+          "protocol",
+          "version"
+        ],
+        "title": "WorkerClaimBody"
+      },
+      "WorkerCompleteBody": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed",
+              "canceled"
+            ],
+            "title": "Status"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "evaluation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerEvaluation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "WorkerCompleteBody"
+      },
+      "WorkerCompleteResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "WorkerCompleteResponse"
+      },
+      "WorkerCustomModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "sourceKind": {
+            "type": "string",
+            "enum": [
+              "hub",
+              "upload"
+            ],
+            "title": "Sourcekind"
+          },
+          "sourceRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceref"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha256"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Spec"
+          },
+          "serverPath": {
+            "type": "string",
+            "title": "Serverpath"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "sourceKind",
+          "serverPath"
+        ],
+        "title": "WorkerCustomModel",
+        "description": "A bring-your-own model the worker fetches for itself. The server only hands one out when no secret is needed\nto get it: an uploaded bundle (read from S3) or a public Hub model at a pinned revision."
+      },
+      "WorkerEvaluation": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "train",
+                  "test",
+                  "validation",
+                  "full"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report"
+          },
+          "accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "macroF1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macrof1"
+          },
+          "failedMessage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failedmessage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "WorkerEvaluation",
+        "description": "The `run_evaluations` columns `jobs.run_core.evaluate` produced. The object keys are not taken from the worker:\nthe server derives them from the run id."
+      },
+      "WorkerEventsBody": {
+        "properties": {
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerMetric"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Metrics"
+          },
+          "heartbeat": {
+            "type": "boolean",
+            "title": "Heartbeat",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "WorkerEventsBody"
+      },
+      "WorkerEventsResponse": {
+        "properties": {
+          "cancel": {
+            "type": "boolean",
+            "title": "Cancel"
+          },
+          "terminal": {
+            "type": "boolean",
+            "title": "Terminal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancel",
+          "terminal"
+        ],
+        "title": "WorkerEventsResponse"
+      },
+      "WorkerListResponse": {
+        "properties": {
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerOut"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workers"
+        ],
+        "title": "WorkerListResponse"
+      },
+      "WorkerMetric": {
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "title": "Epoch"
+          },
+          "split": {
+            "type": "string",
+            "enum": [
+              "train",
+              "test",
+              "validation"
+            ],
+            "title": "Split"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "epoch",
+          "split",
+          "metrics"
+        ],
+        "title": "WorkerMetric"
+      },
+      "WorkerOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "online": {
+            "type": "boolean",
+            "title": "Online"
+          },
+          "lastSeenAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastseenat"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "revokedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revokedat"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "backends": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Backends"
+          },
+          "currentRunId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentrunid"
+          },
+          "currentRunName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentrunname"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "online",
+          "lastSeenAt",
+          "createdAt",
+          "revokedAt",
+          "hostname",
+          "gpu",
+          "version",
+          "backends",
+          "currentRunId",
+          "currentRunName"
+        ],
+        "title": "WorkerOut"
+      },
+      "WorkerRunSpec": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config"
+          },
+          "datasetVersionId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Datasetversionid"
+          },
+          "configKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configkey"
+          },
+          "customModel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerCustomModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "backend",
+          "config",
+          "datasetVersionId",
+          "configKey"
+        ],
+        "title": "WorkerRunSpec",
+        "description": "What a worker needs to train a run: the same fields `jobs.run_core.RunSpec` takes."
       }
     }
   }

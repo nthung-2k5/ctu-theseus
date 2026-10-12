@@ -11,7 +11,7 @@ from typing import Annotated
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from omnitrain.db.models import ModelExport, Project, TrainingRun, User
+from omnitrain.db.models import ModelExport, Project, TrainingRun, TrainingWorker, User
 from omnitrain.deps import SessionDep
 from omnitrain.jobs import abort
 from omnitrain.jobs.dispatcher import nudge
@@ -37,9 +37,10 @@ async def admin_list_runs(
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> AdminRunListResponse:
     base = (
-        sa.select(TrainingRun, Project.name, Project.task, User.email)
+        sa.select(TrainingRun, Project.name, Project.task, User.email, TrainingWorker.name)
         .join(Project, Project.id == TrainingRun.project_id)
         .join(User, User.id == Project.user_id)
+        .outerjoin(TrainingWorker, TrainingWorker.id == TrainingRun.worker_id)
     )
     if status:
         base = base.where(TrainingRun.status == status)
@@ -65,12 +66,13 @@ async def admin_list_runs(
                 task=task,
                 owner_email=email,
                 backend=run.backend,
+                worker_name=worker_name,
                 created_at=run.created_at,
                 started_at=run.started_at,
                 completed_at=run.completed_at,
                 failed_message=run.failed_message,
             )
-            for run, project_name, task, email in rows
+            for run, project_name, task, email, worker_name in rows
         ],
         total=total,
         page=page,

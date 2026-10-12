@@ -1,0 +1,46 @@
+# A remote training worker: trains OmniTrain runs on a GPU machine for an OmniTrain server.
+#
+# Build from the REPOSITORY ROOT (the image needs schema/constants.json, which lives outside server/):
+#
+#     docker build -f server/Dockerfile.worker -t omnitrain-worker .
+#
+# Run it on any machine with an NVIDIA GPU and the NVIDIA container toolkit. It needs to reach the server's API and the
+# same S3 buckets the server uses, and the server must run the same commit of this repository:
+#
+#     docker run --rm --gpus all \
+#       -e OMNITRAIN_API_URL=https://omnitrain.example \
+#       -e OMNITRAIN_WORKER_TOKEN=thwk_... \
+#       -e S3_ENDPOINT=https://s3.example -e S3_ACCESS_KEY=... -e S3_SECRET_KEY=... \
+#       omnitrain-worker
+#
+# The token comes from Admin -> Workers. Add -v omnitrain-worker-cache:/tmp/omnitrain to keep downloaded pretrained
+# weights between runs.
+FROM nvidia/cuda:13.1.2-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+# ffmpeg and libsndfile1 for audio, libgl1 and libglib2.0-0 for OpenCV (video and YOLO).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3.12 python3.12-venv ffmpeg libsndfile1 libgl1 libglib2.0-0 ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON=python3.12 \
+    PATH=/app/.venv/bin:$PATH
+
+WORKDIR /app/server
+# Dependencies first, so a code change does not reinstall torch.
+COPY server/pyproject.toml server/uv.lock server/.python-version ./
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --no-dev
+
+COPY server/omnitrain ./omnitrain
+COPY schema/constants.json /app/schema/constants.json
+ENV SCHEMA_DIR=/app/schema \
+    OMNITRAIN_ROLE=worker \
+    TEMP_DIR=/tmp/omnitrain \
+    PYTHONUTF8=1
+
+ENTRYPOINT ["python", "-m", "omnitrain.worker"]

@@ -8,7 +8,7 @@ one carries an `admin_` prefix to stay unique across routers.
 from fastapi import APIRouter, Depends
 
 from omnitrain.deps import require_admin
-from omnitrain.routers.admin import jobs, models, plugins, system, users
+from omnitrain.routers.admin import jobs, models, plugins, system, users, workers
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 router.include_router(users.router)
@@ -16,3 +16,4 @@ router.include_router(plugins.router)
 router.include_router(models.router)
 router.include_router(jobs.router)
 router.include_router(system.router)
+router.include_router(workers.router)

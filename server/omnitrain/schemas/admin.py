@@ -4,6 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
+from pydantic import Field
+
 from omnitrain.schemas.common import ApiModel
 
 
@@ -82,6 +84,8 @@ class AdminRunOut(ApiModel):
     task: str
     owner_email: str
     backend: str
+    # The remote worker that trained (or is training) it; None for a run on this server.
+    worker_name: str | None = None
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -145,9 +149,48 @@ class SystemCounts(ApiModel):
     exports: int
     custom_models: int
     custom_model_bytes: int
+    # Remote training workers that are not revoked, and how many of those were heard from recently.
+    workers: int
+    workers_online: int
 
 
 class SystemResponse(ApiModel):
     counts: SystemCounts
     lanes: list[LaneOut]
     backends: list[BackendStatusOut]
+
+
+class CreateWorkerBody(ApiModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class UpdateWorkerBody(ApiModel):
+    enabled: bool
+
+
+class WorkerOut(ApiModel):
+    id: uuid.UUID
+    name: str
+    enabled: bool
+    # Heard from within the server's `worker_online_seconds`. A revoked worker is never online.
+    online: bool
+    last_seen_at: datetime | None
+    created_at: datetime
+    revoked_at: datetime | None
+    # What the worker last said about itself (empty until its first call).
+    hostname: str | None
+    gpu: str | None
+    version: str | None
+    backends: list[str]
+    current_run_id: uuid.UUID | None
+    current_run_name: str | None
+
+
+class WorkerListResponse(ApiModel):
+    workers: list[WorkerOut]
+
+
+class CreatedWorker(ApiModel):
+    worker: WorkerOut
+    # The raw token: returned exactly once, never stored, not derivable from its hash.
+    token: str

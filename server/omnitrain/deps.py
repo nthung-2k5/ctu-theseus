@@ -1,8 +1,9 @@
 """FastAPI dependencies: the equivalent of the Elysia .macro() guards in server/routes/auth.ts.
 
-Two auth surfaces stay distinct, as before:
+Three auth surfaces stay distinct:
   * current_user_id  - browser session (JWT access cookie), for everything under /api
   * ApiKeyUserId     - bearer API key, for the hosted prediction API under /api/v1
+  * WorkerDep        - bearer worker token, for remote training workers under /api/worker
 
 Ownership dependencies all follow one pattern: load the entity together with its project ->
 404 if missing -> 403 if the project belongs to someone else -> hand the entity to the handler.
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from omnitrain.auth import rate_limit
 from omnitrain.auth.api_keys import hash_api_key
 from omnitrain.auth.jwt import InvalidToken, decode_access_token
+from omnitrain.auth.worker_tokens import hash_worker_token
 from omnitrain.db.base import get_session, get_sessionmaker
 from omnitrain.db.models import (
     Annotation,
@@ -32,6 +34,7 @@ from omnitrain.db.models import (
     Project,
     Sweep,
     TrainingRun,
+    TrainingWorker,
     User,
 )
 from omnitrain.settings import get_settings
@@ -77,6 +80,8 @@ async def require_admin(user_id: UserId, session: SessionDep) -> uuid.UUID:
 AdminId = Annotated[uuid.UUID, Depends(require_admin)]
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# Routes authenticated by a bearer token only (never a cookie), so there is nothing for a hostile page to ride on.
+_BEARER_ONLY_PREFIXES = ("/api/v1/", "/api/worker/")
 
 
 async def verify_origin(request: Request) -> None:
@@ -86,7 +91,7 @@ async def verify_origin(request: Request) -> None:
     type that a hostile page can submit cross-site. Bearer-token routes are exempt because a
     browser never attaches those credentials on its own.
     """
-    if request.method not in _UNSAFE_METHODS or request.url.path.startswith("/api/v1/"):
+    if request.method not in _UNSAFE_METHODS or request.url.path.startswith(_BEARER_ONLY_PREFIXES):
         return
     origin = request.headers.get("origin")
     if not origin:
@@ -260,3 +265,59 @@ async def api_key_run(run_id: uuid.UUID, user_id: ApiKeyUserId, session: Session
 
 
 ApiKeyRunDep = Annotated[TrainingRun, Depends(api_key_run)]
+
+
+# -- Remote training workers -----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WorkerIdentity:
+    """Who a worker token belongs to. Plain values rather than the ORM row, whose session is already closed."""
+
+    id: uuid.UUID
+    name: str
+    enabled: bool
+
+
+async def current_worker(request: Request) -> WorkerIdentity:
+    """The worker the bearer token belongs to. Every call counts as a sign of life: `last_seen_at` is what makes a
+    worker "online" for the queue (jobs/queue.py), so it is bumped here, before the handler runs.
+
+    A disabled worker still authenticates (it may be finishing a run an admin has not cancelled); the claim route is
+    where `enabled` stops it taking new work. A revoked one is refused outright.
+    """
+    header = request.headers.get("authorization", "")
+    raw = header[len("Bearer ") :] if header.startswith("Bearer ") else None
+    if not raw:
+        raise HTTPException(401, "Missing worker token: send it as an Authorization Bearer header")
+    async with get_sessionmaker()() as s:
+        row = (
+            await s.execute(
+                sa.update(TrainingWorker)
+                .where(TrainingWorker.token_hash == hash_worker_token(raw), TrainingWorker.revoked_at.is_(None))
+                .values(last_seen_at=sa.func.now())
+                .returning(TrainingWorker.id, TrainingWorker.name, TrainingWorker.enabled)
+            )
+        ).first()
+        await s.commit()
+    if row is None:
+        raise HTTPException(401, "Invalid or revoked worker token")
+    return WorkerIdentity(*row)
+
+
+WorkerDep = Annotated[WorkerIdentity, Depends(current_worker)]
+
+
+async def worker_run(run_id: uuid.UUID, worker: WorkerDep, session: SessionDep) -> TrainingRun:
+    """A run that THIS worker claimed. Anyone else's (or an unknown id) is a 404, never a 403."""
+    run = (
+        await session.execute(
+            sa.select(TrainingRun).where(TrainingRun.id == run_id, TrainingRun.worker_id == worker.id)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(404, "Training run not found")
+    return run
+
+
+WorkerRunDep = Annotated[TrainingRun, Depends(worker_run)]
