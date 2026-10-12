@@ -168,6 +168,21 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   model's. Every Hub call goes through `custom_models._hub_token`, which turns "no token" into `False`: passing
   `None` would let `huggingface_hub` fall back to `HF_TOKEN` or a cached login on the server. Tokens are only
   stored through `services/secrets.encrypt` and never returned by an API.
+- **A backend's `train()` and `evaluate()` must run on a machine that has only S3 and an HTTP link to the API.**
+  Training can happen on a remote worker (`omnitrain/worker/`, README "Remote training workers") that runs
+  `jobs/run_core.execute`, the same function the local `train` lane runs. So `train` and `evaluate` may use S3
+  (`run.dataset_uri`, `run.output_uri`, `services/storage`) and the `TrainContext` callbacks, and nothing else:
+  no Postgres, no event writer, no `abort` registry, no files on the API host. `run_core` imports none of those
+  either; the database half (`jobs/train.py`, `routers/worker.py`) wraps it. Run state still changes only through
+  `EventWriter`, from the lane or from `/api/worker` handlers, never from the worker process. A run on a
+  bring-your-own model is claimed by a worker only if the worker can fetch the model with no secret (an upload, or a
+  public Hub model; never a private/gated one, whose owner's token stays on the server) and its backend sets
+  `remote_custom_models = True` (queue `_worker_can_take_model`). Set that flag only for a backend whose TRAINED model
+  loads, serves and exports from the run's results alone, because on a worker the base model's files are at a
+  different path; Ludwig's are not (its checkpoint re-reads the model from the config's path), so it keeps its
+  custom-model runs. Bump `PROTOCOL_VERSION`
+  (`schemas/worker.py`) when the worker API's shape, a run's S3 layout or what `run_core` asks of a backend
+  changes.
 - **Job handlers must stay fast and idempotent.** `omnitrain/jobs/dispatcher.py` claims work off the
   domain tables themselves (`training_runs`, `model_exports` — see
   `README.md`'s "Jobs" section) with a guarded compare-and-swap

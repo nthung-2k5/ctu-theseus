@@ -48,6 +48,8 @@ are the only schema.
 **It must run as exactly one process** (`workers=1`, asserted at startup). The in-process event
 bus, the API-key rate limiter, the loaded-model cache and the GPU all assume it, and forking after
 a CUDA context exists is not survivable. Never run it with `--reload`, gunicorn or multiple workers.
+That one process is still the only thing that writes run state: training can also happen on other
+machines (see "Remote training workers"), but they report back to it over HTTP.
 
 **Jobs.** The domain tables are the queue: `training_runs`, `model_exports` and `custom_models` carry `attempt`,
 `max_attempts`, `available_at`, `claimed_by`, `lease_expires_at` and `last_error`. A dispatcher
@@ -58,6 +60,40 @@ status column is the lock**: every transition is a guarded compare-and-swap
 (`UPDATE ... WHERE status = ... RETURNING`), and zero rows means someone else got there first.
 Training is never retried; export is (3 attempts, 30 s apart); validation retries only an unexpected
 error such as a network failure (3 attempts), never a model that is simply not acceptable.
+
+**Remote training workers.** A run can train on another machine instead of this server's GPU, with no
+change to any trainer backend. A worker is a second process, `python -m omnitrain.worker`
+(`server/omnitrain/worker/`, image recipe in `server/Dockerfile.worker`), that you start on any GPU box:
+a rented VM, a lab machine. It **pulls**: it asks `POST /api/worker/claim` for a queued run every few
+seconds, trains it with the same `jobs/run_core.execute` the server's own `train` lane uses, and reports
+back through `/api/worker/runs/{id}/events` (metrics, heartbeat; the answer says whether the run was
+canceled) and `/complete` (outcome and evaluation). It never opens a database connection and the API
+never sends it storage secrets: it reads the snapshot and writes the results to S3 directly, with its own
+`S3_ENDPOINT` / `S3_ACCESS_KEY` / `S3_SECRET_KEY`. Those must reach the same buckets the server uses,
+because snapshot parquets embed absolute `s3://theseus-datasets/...` URIs; for a local RustFS that
+means exposing its port to the worker (a tunnel or VPN).
+
+Register a worker under Admin > Workers: it gets a `thwk_...` bearer token (hashed like an API key, shown
+once). Nobody chooses where a run trains. A new run is held back for up to
+`REMOTE_CLAIM_GRACE_SECONDS` (20) while an enabled worker that is online (heard from within
+`WORKER_ONLINE_SECONDS`, 30), idle, and able to train the run's backend exists; if no worker takes it in
+that time, the server trains it itself. A worker holds one run at a time.
+
+A run on a bring-your-own model goes to a worker only when the worker can get the model **by itself, with no
+secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, today only `video`: a fine-tuned
+Hugging Face video model is saved as a self-contained folder, so it never needs the base model's files again).
+The run spec then carries a `customModel` description; the worker fetches the files with the server's own code
+(`custom_models.ensure_local`: an uploaded bundle from S3 with its checksum re-checked, or a public Hub model at
+its pinned revision, fetched anonymously whatever token the machine has) into its own temp dir and swaps the
+server's path for that one in the config. Everything else trains on the server: a private or gated Hub model
+(it needs its owner's saved token, which never leaves the server), and every Ludwig custom model (its checkpoint
+re-reads the model from the path in its config, which would be the worker's). The two sides
+must agree on `schemas/worker.PROTOCOL_VERSION`, which is bumped when the wire contract, a run's S3
+layout or what a backend must do changes, and should be built from the same commit.
+
+A server restart does not touch a remote run (it fails only runs it was training itself); a worker that
+dies is caught by the heartbeat reaper like a hung local thread; revoking a worker fails its run at once.
+Cancel reaches a worker through its next progress call, so it stops at an epoch boundary as local runs do.
 
 **Inference is not a job.** A prediction runs inside the request that asked for it and its result is
 the response (`services/inference.py`): nothing is queued, stored or polled. At most
@@ -383,7 +419,9 @@ server/               The backend (FastAPI + Ludwig); see server/README.md
                           inference, export, api_keys, api_v1, models, admin/)
   omnitrain/services/       task_registry (source of truth), ludwig_config, snapshot, sweep,
                           plugin_settings, model_catalog, custom_models, ...
-  omnitrain/jobs/           queue, dispatcher, lanes, train/export/validate_model, recovery, reapers
+  omnitrain/jobs/           queue, dispatcher, lanes, run_core (train+evaluate, shared with workers),
+                          train/export/validate_model, recovery, reapers
+  omnitrain/worker/         the remote training worker (`python -m omnitrain.worker`)
   omnitrain/events/         run-event writer, in-process bus, SSE stream
   omnitrain/export/         devkit/app bundle assembly + templates
   omnitrain/db/, migrations/  SQLAlchemy models + Alembic
@@ -394,5 +432,5 @@ web/                      React SPA
   components/dataset/     Dataset browsing, upload staging and snapshot UI (item grid/table in items/, file tree, CSV importer, bulk actions)
   components/ui/          Shared design-system primitives (PageHeader, EmptyState, DataTable, ...)
   components/models/      Imported-model table, import form and file upload (Imported models + admin)
-  pages/admin/            Administration: users, models, plugins & availability
+  pages/admin/            Administration: users, models, plugins & availability, jobs, remote workers
 ```
