@@ -19,11 +19,18 @@ from omnitrain.db.models.dataset import (
 )
 from omnitrain.db.models.integration import UserIntegration
 from omnitrain.db.models.serving import ModelExport
-from omnitrain.db.models.training import RunEvaluation, RunEvent, Sweep, TrainingMetric, TrainingRun
+from omnitrain.db.models.training import (
+    RunEvaluation,
+    RunEvent,
+    Sweep,
+    TrainingMetric,
+    TrainingRun,
+    TrainingWorker,
+)
 
 __all__ = [
     "Annotation", "ApiKey", "AudioFeatures", "CustomModel", "Dataset", "DatasetItem", "DatasetVersion",
     "DatasetVersionItem", "LabelClass", "ModelExport", "PluginSetting", "Project", "RefreshToken",
     "RunEvaluation", "RunEvent", "Sweep", "TabularFeatures", "TextFeatures", "TrainingMetric",
-    "TrainingRun", "User", "UserIntegration", "VideoFeatures", "VisionFeatures",
+    "TrainingRun", "TrainingWorker", "User", "UserIntegration", "VideoFeatures", "VisionFeatures",
 ]  # fmt: skip

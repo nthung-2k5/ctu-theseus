@@ -53,6 +53,9 @@ class VideoBackend(TrainerBackend):
     Hyperparameters = VideoHyperparameters
     artifacts = ARTIFACTS
     metadata_filename = METADATA_FILENAME
+    # A fine-tuned Hugging Face video model is saved as a self-contained folder (backends/video/hf.py), so it never
+    # needs the original files again and the run may train on a worker.
+    remote_custom_models = True
 
     @classmethod
     def available(cls) -> str | None:

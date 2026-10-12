@@ -186,6 +186,32 @@ def make_run(db):
 
 
 @pytest.fixture
+def make_worker(db):
+    """Create a remote training worker (online, enabled, able to train ludwig), returning its id.
+
+    Pass `token="thwk_..."` to be able to authenticate as it; otherwise its token is unguessable."""
+    import uuid
+
+    from omnitrain.auth.worker_tokens import hash_worker_token
+    from omnitrain.db.models import TrainingWorker
+
+    async def _make(backends: tuple[str, ...] = ("ludwig",), token: str | None = None, **fields):
+        fields.setdefault("last_seen_at", sa.func.now())
+        async with db() as s:
+            worker = TrainingWorker(
+                name="gpu-box",
+                token_hash=hash_worker_token(token) if token else uuid.uuid4().hex + uuid.uuid4().hex,
+                info={"backends": list(backends)},
+                **fields,
+            )
+            s.add(worker)
+            await s.commit()
+            return worker.id
+
+    return _make
+
+
+@pytest.fixture
 def make_export(db, make_run):
     """Create an export row (and its run), returning (export_id, run_id)."""
     from omnitrain.db.models import ModelExport, TrainingRun

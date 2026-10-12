@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     environment: str = Field(default="development", validation_alias="ENVIRONMENT")
+    # "worker" for a remote training worker (`python -m omnitrain.worker`), which has S3 but no database and
+    # signs no tokens. The worker entrypoint sets it; nothing else should.
+    role: str = Field(default="server", validation_alias="OMNITRAIN_ROLE")
 
     database_uri: str = Field(default=_DEV_DB, validation_alias="CTU_OMNITRAIN_DB_URI")
 
@@ -72,6 +75,12 @@ class Settings(BaseSettings):
     # beats every few seconds while training, so this only needs to exceed the longest stretch without one
     # (dataset preprocessing).
     run_heartbeat_timeout_seconds: int = 900
+    # Remote training workers (jobs/queue.py). A worker is "online" if it called the API within this many seconds;
+    # workers poll every few seconds, so this leaves room for a missed poll or two.
+    worker_online_seconds: int = 30
+    # How long a queued run is held back for an idle online worker before this server trains it itself. It is what
+    # stops a worker that is online but not claiming (a bug, a backend it lacks) from stalling the queue.
+    remote_claim_grace_seconds: int = 20
 
     @property
     def is_production(self) -> bool:
@@ -105,12 +114,12 @@ class Settings(BaseSettings):
         if not self.is_production:
             return self
         required = {
-            "CTU_OMNITRAIN_DB_URI": "database_uri",
             "S3_ENDPOINT": "s3_endpoint",
             "S3_ACCESS_KEY": "s3_access_key",
             "S3_SECRET_KEY": "s3_secret_key",
-            "JWT_SECRET": "jwt_secret",
         }
+        if self.role != "worker":
+            required |= {"CTU_OMNITRAIN_DB_URI": "database_uri", "JWT_SECRET": "jwt_secret"}
         missing = [env for env, field in required.items() if field not in self.model_fields_set]
         if missing:
             raise ValueError("Missing required environment variables in production: " + ", ".join(missing))

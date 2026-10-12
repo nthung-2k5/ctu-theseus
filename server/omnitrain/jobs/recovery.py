@@ -6,7 +6,9 @@ is marked in-flight in the database is definitely not running any more.
 
   training   running -> failed. NEVER auto-resumed: that is what max_deliver=1 meant. A restarted
              run must not silently re-burn hours of GPU. Queued runs are untouched (they never
-             started, so they are simply picked up).
+             started, so they are simply picked up). Only runs this server was training: a run on a
+             remote worker (worker_id set) keeps going through a restart, and the heartbeat reaper
+             fails it if the worker really died.
   export     converting/assembling -> pending (assembly rewrites the same S3 keys, so re-running
              is idempotent), or failed once attempts are exhausted.
   snapshot   building -> failed (the parquet build is in-process and cannot resume).
@@ -51,7 +53,7 @@ async def recover_on_startup() -> RecoveryReport:
             (
                 await s.execute(
                     sa.update(TrainingRun)
-                    .where(TrainingRun.status == "running")
+                    .where(TrainingRun.status == "running", TrainingRun.worker_id.is_(None))
                     .values(claimed_by=None, lease_expires_at=None, last_error=RESTART_MESSAGE)
                     .returning(TrainingRun.id)
                 )

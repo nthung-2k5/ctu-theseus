@@ -221,6 +221,11 @@ class TrainerBackend(ABC):
     # Suffix of an S3 object under the run's results prefix that `preprocessing_manifest` needs
     # beyond the compiled config, if any (e.g. Ludwig's "training_set_metadata.json").
     metadata_filename: ClassVar[str | None] = None
+    # Whether a run on a bring-your-own model may train on a remote worker. A worker keeps the model's files at its
+    # own path, so this is only sound for a backend whose TRAINED model does not point back at them: the saved result
+    # must load, serve and export from the run's results alone. Ludwig fails that (its checkpoint re-reads the model
+    # from the path in its config), so its custom-model runs stay on the server.
+    remote_custom_models: ClassVar[bool] = False
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

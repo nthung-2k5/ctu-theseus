@@ -49,6 +49,27 @@ class Sweep(Base):
     updated_at: Mapped[datetime] = updated_at()
 
 
+class TrainingWorker(Base):
+    """A remote GPU machine allowed to claim training runs (see routers/worker.py). It authenticates with a bearer
+    token whose sha256 is stored here, never the token itself."""
+
+    __tablename__ = "training_workers"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(sa.String(100))
+    token_hash: Mapped[str] = mapped_column(sa.CHAR(64), unique=True)
+    # Admin switch: a disabled worker claims nothing, and the server stops waiting for it.
+    enabled: Mapped[bool] = mapped_column(sa.Boolean, server_default=sa.true())
+    created_by: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("users.id", ondelete="SET NULL"))
+    # Bumped by every call the worker makes. "Online" means this is recent (settings.worker_online_seconds).
+    last_seen_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    # What the worker last reported about itself: {"backends": [ids it can train], "hostname", "gpu", "version"}.
+    info: Mapped[Any] = mapped_column(JSONB, server_default=sa.text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = created_at()
+    # Soft-revoked, like an API key: the row stays so runs keep showing where they trained.
+    revoked_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+
 class TrainingRun(JobColumns, Base):
     __tablename__ = "training_runs"
 
@@ -67,6 +88,10 @@ class TrainingRun(JobColumns, Base):
     # archived (see routers/models.py), never removed out from under that run.
     custom_model_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("custom_models.id", ondelete="RESTRICT"), index=True
+    )
+    # The remote worker that claimed this run. NULL means it trains (or trained) on this server.
+    worker_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("training_workers.id", ondelete="SET NULL"), index=True
     )
     # The exact compiled config this backend produced, for reproducibility. Opaque outside the
     # backend that wrote it (see TrainerBackend.compile).
