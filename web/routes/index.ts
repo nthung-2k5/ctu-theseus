@@ -6,6 +6,7 @@ import {
   adminPluginsRoute,
   adminRoute,
   adminUsersRoute,
+  adminWorkersRoute,
 } from './admin.route'
 import { apiKeysRoute, appRoute, dashboardRoute, importedModelsRoute, settingsRoute } from './app.route'
 import { guestRoute, landingRoute, loginRoute, registerRoute } from './guest.route'
@@ -73,6 +74,7 @@ const adminTree = adminRoute.addChildren([
   adminModelsRoute,
   adminPluginsRoute,
   adminJobsRoute,
+  adminWorkersRoute,
 ])
 
 const appTree = appRoute.addChildren([

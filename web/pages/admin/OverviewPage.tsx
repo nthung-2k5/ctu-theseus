@@ -5,7 +5,15 @@
  */
 
 import { Badge, Group, Paper, SimpleGrid, Stack, Text } from '@mantine/core'
-import { BrainIcon, CubeIcon, ExportIcon, FoldersIcon, ShieldCheckIcon, UsersIcon } from '@phosphor-icons/react'
+import {
+  BrainIcon,
+  CpuIcon,
+  CubeIcon,
+  ExportIcon,
+  FoldersIcon,
+  ShieldCheckIcon,
+  UsersIcon,
+} from '@phosphor-icons/react'
 import { MeterBar, PageHeader, QueryBoundary, SectionLabel, StatCard } from '@public/components/ui'
 import { getAdminSystemQueryOptions } from '@public/lib/api/generated/admin/admin'
 import { formatBytes } from '@public/lib/importedModels'
@@ -24,7 +32,7 @@ export function OverviewPage() {
       <QueryBoundary isLoading={isLoading} isError={isError} onRetry={() => refetch()}>
         {data && counts && (
           <>
-            <SimpleGrid cols={{ base: 2, md: 3, lg: 6 }} spacing="sm">
+            <SimpleGrid cols={{ base: 2, md: 4, lg: 7 }} spacing="sm">
               <StatCard
                 icon={UsersIcon}
                 label="Users"
@@ -44,6 +52,12 @@ export function OverviewPage() {
                 label="Imported models"
                 value={counts.customModels}
                 hint={formatBytes(counts.customModelBytes)}
+              />
+              <StatCard
+                icon={CpuIcon}
+                label="Remote workers"
+                value={counts.workersOnline}
+                hint={`online of ${counts.workers} registered`}
               />
               <StatCard
                 icon={ShieldCheckIcon}

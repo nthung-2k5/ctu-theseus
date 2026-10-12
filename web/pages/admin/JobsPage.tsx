@@ -131,6 +131,7 @@ function RunsTable() {
           </Text>
           <Text size="xs" c="dimmed">
             {r.projectName} · {r.task} · {r.backend}
+            {r.workerName ? ` · on ${r.workerName}` : ''}
           </Text>
           {r.status === 'failed' && r.failedMessage && (
             <Text size="xs" c="red" lineClamp={2} title={r.failedMessage} maw={360}>

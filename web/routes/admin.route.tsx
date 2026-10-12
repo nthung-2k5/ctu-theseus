@@ -5,6 +5,7 @@ import { AdminModelsPage } from '@public/pages/admin/ModelsPage'
 import { OverviewPage } from '@public/pages/admin/OverviewPage'
 import { PluginsPage } from '@public/pages/admin/PluginsPage'
 import { UsersPage } from '@public/pages/admin/UsersPage'
+import { WorkersPage } from '@public/pages/admin/WorkersPage'
 import { createRoute, redirect } from '@tanstack/react-router'
 import { appRoute } from './app.route'
 
@@ -44,6 +45,12 @@ export const adminModelsRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: '/models',
   component: AdminModelsPage,
+})
+
+export const adminWorkersRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: '/workers',
+  component: WorkersPage,
 })
 
 export const adminPluginsRoute = createRoute({
