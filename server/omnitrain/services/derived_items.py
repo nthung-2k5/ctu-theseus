@@ -19,6 +19,7 @@ from omnitrain.db.models import (
     DatasetVersionItem,
     TabularFeatures,
     TextFeatures,
+    VideoFeatures,
     VisionFeatures,
 )
 
@@ -134,8 +135,16 @@ def feature_row(modality: str, item_id: uuid.UUID, f: dict[str, Any]) -> Any:
             meta_json=f["meta_json"],
         )
     if modality == "video":
-        # No preprocessing or augmentation op targets video yet, so nothing can produce a derived clip.
-        raise ValueError("Video items have no derived form")
+        return VideoFeatures(
+            item_id=item_id,
+            width=f["width"],
+            height=f["height"],
+            duration_seconds=Decimal(str(f["duration_seconds"])),
+            fps=Decimal(str(f["fps"])),
+            frame_count=f["frame_count"],
+            container=f["container"],
+            codec=f["codec"],
+        )
     return TabularFeatures(item_id=item_id, features_json=f["features_json"])
 
 

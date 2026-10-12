@@ -45,7 +45,6 @@ from omnitrain.services.task_registry import get_task_descriptor
 logger = logging.getLogger(__name__)
 
 _BATCH = 16  # items per DB transaction
-_CONCURRENCY = 4  # items preprocessed at once (threads)
 
 
 @dataclass
@@ -78,9 +77,9 @@ def _produce(original: Original, ops: list[ConfiguredOp], version_id: uuid.UUID,
         return Produced(None, "", None, {}, [], unchanged=True)
     try:
         source_ext = media.file_ext(original.storage_url)
-        if modality in ("vision", "audio"):
+        if modality in media.FILE_MODALITIES:
             raw = storage.download_bytes(C.BUCKET_DATASETS, original.storage_url or "")
-            sample = media.decode_image(raw) if modality == "vision" else media.decode_audio(raw, source_ext)
+            sample = media.decode_sample(modality, raw, source_ext)
         elif modality == "text":
             sample = original.text["raw_text"] if original.text else ""
         else:
@@ -88,12 +87,10 @@ def _produce(original: Original, ops: list[ConfiguredOp], version_id: uuid.UUID,
 
         new, applied = preprocess(sample, ops)
 
-        if modality == "vision":
-            enc = media.encode_image(new, source_ext)
-        elif modality == "audio":
-            enc = media.encode_audio(new)
-        else:
-            enc = None
+        if modality == "video" and new is sample:
+            # Every op left the clip as it was (they hand back the same object): re-encoding would only degrade it.
+            return Produced(None, "", None, {}, [], unchanged=True)
+        enc = media.encode_sample(modality, new, source_ext) if modality in media.FILE_MODALITIES else None
 
         if enc is not None:
             digest = hashlib.sha256(enc.data).hexdigest()
@@ -162,7 +159,7 @@ async def materialize_preprocessing(version_id: uuid.UUID) -> PreprocessResult:
         return result
 
     plan = build_plan(config, samples_for_fit(train_items, modality))
-    gate = asyncio.Semaphore(_CONCURRENCY)
+    gate = asyncio.Semaphore(media.worker_count(modality))
 
     async def run(item: Original) -> Produced | None:
         ops = ops_for_split(plan, item.split_type)

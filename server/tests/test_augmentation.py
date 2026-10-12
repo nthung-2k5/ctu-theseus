@@ -62,7 +62,7 @@ def run_op(op_id, seed=0, params=None):
 
 def test_every_shipped_op_is_discovered_and_grouped_by_modality():
     ids = [(op.modality, op.id) for op in list_augmentations()]
-    assert [m for m, _ in ids] == sorted((m for m, _ in ids), key=("vision", "text", "audio", "tabular").index)
+    assert [m for m, _ in ids] == sorted((m for m, _ in ids), key=("vision", "text", "audio", "video", "tabular").index)
     assert {"image_rotate", "text_word_deletion", "audio_noise", "tabular_gaussian_noise"} <= {i for _, i in ids}
     assert len({i for _, i in ids}) == len(ids)
 

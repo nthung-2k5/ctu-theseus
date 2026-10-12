@@ -2,6 +2,8 @@
 
 Submodules:
   tasks.py      the model catalog and clip-sampling defaults (pure data)
+  custom.py     bring-your-own Hugging Face video models: kinds, file checks, the clip a model needs
+  hf.py         builds, saves and loads those models as a network (torch, transformers)
   compile.py    task + snapshot + hyperparameters -> training config dict (no torch import)
   runtime.py    where weights are cached, device and dataloader choice (torch imported only inside functions)
   frames.py     frame selection, decoding with OpenCV, resize/crop and normalisation (shared by train, serve, docs)
@@ -26,6 +28,7 @@ from typing import Any
 import pandas as pd
 
 from omnitrain.backends.base import (
+    CustomModelKind,
     CustomModelRef,
     EvalResult,
     LoadedModel,
@@ -33,6 +36,7 @@ from omnitrain.backends.base import (
     TrainContext,
     TrainerBackend,
 )
+from omnitrain.backends.video import custom as _custom
 from omnitrain.backends.video.artifacts import ARTIFACTS
 from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config
 from omnitrain.backends.video.compile import hyperparameter_specs as _hyperparameter_specs
@@ -71,6 +75,18 @@ class VideoBackend(TrainerBackend):
     @classmethod
     def hyperparameter_specs(cls, task: TaskDescriptor) -> list[ParamSpec]:
         return _hyperparameter_specs(task)
+
+    @classmethod
+    def custom_model_kinds(cls, task: TaskDescriptor) -> list[CustomModelKind]:
+        return _custom.custom_kinds_for(task.id)
+
+    @classmethod
+    def suggest_custom_kind(cls, config: dict[str, Any]) -> str | None:
+        return _custom.suggest_kind(config)
+
+    @classmethod
+    def validate_custom_model(cls, task: TaskDescriptor, ref: CustomModelRef) -> None:
+        _custom.validate_custom_model(task, ref)
 
     @classmethod
     def compile(

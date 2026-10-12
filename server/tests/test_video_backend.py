@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from omnitrain.backends.base import ConfigError
+from omnitrain.backends.base import ConfigError, CustomModelRef
 from omnitrain.backends.registry import get_backend, trainable_backends
 from omnitrain.backends.video import VideoBackend, frames
 from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config, hyperparameter_specs
@@ -100,9 +100,10 @@ class TestCompile:
         with pytest.raises(ConfigError, match='"label" column'):
             compile_(bare)
 
-    def test_a_custom_model_is_refused(self):
-        with pytest.raises(ConfigError, match="bring-your-own"):
-            compile_video_config(TASK, SNAPSHOT, VideoHyperparameters(), custom=object())  # type: ignore[arg-type]
+    def test_a_custom_model_of_another_kind_is_refused(self):
+        other = CustomModelRef(id="u", kind="timm_image", source_kind="hub", local_path="unused")
+        with pytest.raises(ConfigError, match="cannot be used"):
+            compile_video_config(TASK, SNAPSHOT, VideoHyperparameters(), custom=other)
 
     def test_unknown_hyperparameters_are_rejected(self):
         with pytest.raises(ValidationError):

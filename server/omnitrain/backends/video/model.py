@@ -117,6 +117,11 @@ def _localize(path: str, scratch: str, index: int) -> str:
 def load(model_dir: str) -> VideoLoadedModel:
     root = Path(model_dir)
     meta = json.loads((root / runtime.METADATA_FILENAME).read_text(encoding="utf-8"))
+    if meta.get("hf"):
+        # A fine-tuned Hugging Face model was saved whole, so it loads with no trace of the files it started from.
+        from omnitrain.backends.video import hf
+
+        return VideoLoadedModel(hf.load(str(root)), meta)
     net = network.build_model(meta["model"], len(meta["names"]), pretrained=False)
     # weights_only: the file is a plain state dict, and nothing here should ever unpickle arbitrary objects.
     net.load_state_dict(torch.load(root / runtime.WEIGHTS_FILENAME, map_location="cpu", weights_only=True))

@@ -60,7 +60,7 @@ def run_op(op_id, params=None, train_samples=None):
 
 def test_every_shipped_op_is_discovered_and_grouped_by_modality():
     ids = [(op.modality, op.id) for op in list_preprocessing()]
-    assert [m for m, _ in ids] == sorted((m for m, _ in ids), key=("vision", "text", "audio", "tabular").index)
+    assert [m for m, _ in ids] == sorted((m for m, _ in ids), key=("vision", "text", "audio", "video", "tabular").index)
     assert {"image_resize", "text_lowercase", "audio_resample", "tabular_standardize"} <= {i for _, i in ids}
     assert len({i for _, i in ids}) == len(ids)
 

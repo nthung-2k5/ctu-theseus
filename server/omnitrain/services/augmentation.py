@@ -50,7 +50,6 @@ from omnitrain.services.task_registry import get_task_descriptor
 logger = logging.getLogger(__name__)
 
 _BATCH = 16  # originals per DB transaction
-_CONCURRENCY = 4  # originals augmented at once (threads)
 
 
 @dataclass
@@ -99,9 +98,9 @@ def _produce(
     pending: list[tuple[int, list[dict[str, Any]], bytes | None, str, str, str | None, dict[str, Any]]] = []
     try:
         source_ext = media.file_ext(original.storage_url)
-        if modality in ("vision", "audio"):
+        if modality in media.FILE_MODALITIES:
             raw = storage.download_bytes(C.BUCKET_DATASETS, original.storage_url or "")
-            sample = media.decode_image(raw) if modality == "vision" else media.decode_audio(raw, source_ext)
+            sample = media.decode_sample(modality, raw, source_ext)
         elif modality == "text":
             sample = original.text["raw_text"] if original.text else ""
         else:
@@ -111,12 +110,9 @@ def _produce(
             rng = random.Random(seed_for(version_id, original.id, i))
             new, applied = augment(sample, plan, rng)
             number = i + 1
-            if modality == "vision":
-                enc = media.encode_image(new, source_ext)
-            elif modality == "audio":
-                enc = media.encode_audio(new)
-            else:
-                enc = None
+            if modality == "video" and new is sample:
+                continue  # the ops could not change this clip; a lossy re-encode of it teaches nothing
+            enc = media.encode_sample(modality, new, source_ext) if modality in media.FILE_MODALITIES else None
 
             if enc is not None:
                 digest = hashlib.sha256(enc.data).hexdigest()
@@ -236,7 +232,7 @@ async def materialize_augmentations(version_id: uuid.UUID) -> AugmentResult:
         return result
 
     plan = build_plan(config, samples_for_fit(originals, modality))
-    gate = asyncio.Semaphore(_CONCURRENCY)
+    gate = asyncio.Semaphore(media.worker_count(modality))
 
     async def run(original: Original) -> list[Produced] | None:
         async with gate:

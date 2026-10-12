@@ -11,6 +11,7 @@ from pydantic import Field
 
 from omnitrain.backends.base import ConfigError, CustomModelRef, HyperparamsBase
 from omnitrain.backends.video import tasks
+from omnitrain.backends.video.custom import HF_VIDEO
 from omnitrain.schemas.common import ParamSpec
 from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
@@ -44,20 +45,28 @@ class VideoHyperparameters(HyperparamsBase):
 def compile_video_config(
     task: TaskDescriptor, ctx: SnapshotContext, hp: VideoHyperparameters, custom: CustomModelRef | None = None
 ) -> dict[str, Any]:
-    if custom is not None:
-        raise ConfigError("The video backend does not support bring-your-own models")
     if task.id not in tasks.VIDEO_TASKS:
         raise ConfigError(f'The video backend does not support the task "{task.id}"')
     if len(ctx.label_class_names) < 2:
         raise ConfigError("Video classification needs a snapshot with at least two classes")
 
-    model_id = hp.model_id or tasks.VIDEO_MODELS[0].id
-    model = tasks.MODELS_BY_ID.get(model_id)
-    if model is None:
-        raise ConfigError(f'"{model_id}" is not a video model for the task "{task.id}"')
-
-    mean, std = model.mean, model.std
-    num_frames, frame_size = hp.num_frames or model.frames, hp.frame_size or model.crop
+    if custom is None and hp.model_id and hp.model_id.startswith("custom:"):
+        raise ConfigError(f'Custom model "{hp.model_id}" was not resolved (it may have been removed or disabled)')
+    if custom is not None:
+        if custom.kind != HF_VIDEO:
+            raise ConfigError(f'A "{custom.kind}" custom model cannot be used for task "{task.id}"')
+        # The files are not necessarily on disk yet, so the model's own clip (frames, size, normalisation) is read
+        # from its config when training starts (train.py) and written into names.json; what is here is a stand-in.
+        # Frames and size are the model's to decide: its position embeddings are tied to them.
+        mean, std = tasks.VIDEO_MODELS[0].mean, tasks.VIDEO_MODELS[0].std
+        model_id, num_frames, frame_size = hp.model_id or custom.id, 16, 224
+    else:
+        model_id = hp.model_id or tasks.VIDEO_MODELS[0].id
+        model = tasks.MODELS_BY_ID.get(model_id)
+        if model is None:
+            raise ConfigError(f'"{model_id}" is not a video model for the task "{task.id}"')
+        mean, std = model.mean, model.std
+        num_frames, frame_size = hp.num_frames or model.frames, hp.frame_size or model.crop
     frame_stride = hp.frame_stride or tasks.DEFAULT_FRAME_STRIDE
     patience = hp.early_stop_patience if hp.early_stop_patience is not None else tasks.DEFAULT_EARLY_STOP_PATIENCE
     epochs = hp.epochs or tasks.DEFAULT_EPOCHS
@@ -67,7 +76,9 @@ def compile_video_config(
         "backend": "video",
         "task": "classify",
         "model": model_id,
-        "pretrained": True if hp.pretrained is None else hp.pretrained,
+        "pretrained": True if custom is not None or hp.pretrained is None else hp.pretrained,
+        # Where the bring-your-own model's files are, for train.py. Absent for a built-in model.
+        **({"custom": {"kind": custom.kind, "path": custom.local_path}} if custom is not None else {}),
         "clipColumn": _column(ctx, "storage_uri"),
         "labelColumn": _column(ctx, "label"),
         # The index a class gets is its position here. `train.py` writes this order into names.json, and a loaded
@@ -153,7 +164,7 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             name="numFrames", label="Frames per clip", type="choice", group=_DATA,
             default="16", choices=[str(n) for n in tasks.FRAME_COUNTS],
             description="How many frames the model sees at once. More frames capture slower actions but cost more "
-            "memory and time.",
+            "memory and time. A Hugging Face model uses its own number and ignores this.",
         ),
         ParamSpec(
             name="frameStride", label="Frame stride", type="int", group=_DATA,
@@ -165,7 +176,8 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             name="frameSize", label="Frame size", type="choice", group=_DATA,
             default="112", choices=[str(n) for n in tasks.FRAME_SIZES],
             description="Every frame is resized so its shorter side is this many pixels, then cropped to a square. "
-            "Larger keeps more detail but is much slower. Each model was pretrained at 112 or 224.",
+            "Larger keeps more detail but is much slower. Each model was pretrained at 112 or 224. A Hugging Face "
+            "model uses its own size and ignores this.",
         ),
         ParamSpec(
             name="clipsPerVideo", label="Clips per video when scoring", type="int", group=_DATA,

@@ -73,8 +73,20 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   one file at a time (limit `MAX_VIDEO_UPLOAD_BYTES`, 200 MB, against 50 MB for the rest; the web mirrors both in
   `lib/upload/paths.ts`). `modality` and `project_task` are Postgres enums, so a new value needs an
   `ALTER TYPE ... ADD VALUE` migration (see `0013`). The generated devkits and apps do not decode video, so
-  `supports_generated_clients` leaves video with the bare ONNX model only. No preprocessing or augmentation op
-  targets video yet; `derived_items.feature_row` raises for it rather than guessing a feature table.
+  `supports_generated_clients` leaves video with the bare ONNX model only.
+  - **Preprocessing and augmentation ops exist for video** (`preprocessing/ops/video.py`: resize, lower frame rate,
+    trim; `augmentation/ops/video.py`: flip, random segment, brightness, speed, zoom). A sample is a `VideoClip`
+    (all frames decoded, uint8 RGB, so `media.MAX_DECODED_VIDEO_BYTES` refuses a clip too big to hold and
+    `media.worker_count` runs video one item at a time). Derived clips are always written as VP8 **WebM**
+    (`media.encode_video`): MPEG-4 in MP4 does not play in browsers and H.264 needs a library the host may lack. An op
+    with nothing to do must return the clip it was given (the same object), because the services read `new is sample`
+    as "leave the original alone" and skip a lossy re-encode.
+  - **Bring-your-own video models** are Hugging Face VideoMAE, TimeSformer and ViViT (`hf_video`, in
+    `backends/video/custom.py` and `hf.py`). The model dictates its own frame count, image size and normalisation (read
+    from its `config.json` and `preprocessor_config.json` when training starts, since `compile` cannot assume the files
+    are on disk), and the fine-tuned network is saved as a self-contained Hugging Face folder so serving never needs
+    the original files. Load the backbone strictly and replace only the head: `ignore_mismatched_sizes=True` silently
+    re-initialises any mismatched backbone tensor with random weights.
 - **Bounding boxes are one annotation each.** Object detection stores one `bounding_box` annotation
   per box with a `class_id`, and `label_structured = {x, y, w, h}`: top-left corner and size, as
   fractions (0..1) of the displayed image. An image with nothing in it carries one class-less

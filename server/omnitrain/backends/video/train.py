@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from omnitrain import constants as C
 from omnitrain.backends.base import TrainContext
-from omnitrain.backends.video import data, frames, network, runtime
+from omnitrain.backends.video import custom, data, frames, hf, network, runtime
 from omnitrain.backends.video.model import VideoLoadedModel, clip_spec_from_meta
 from omnitrain.backends.video.model import load as load_model
 from omnitrain.services import storage
@@ -135,11 +135,17 @@ def train(run: TrainContext) -> VideoLoadedModel:
         )
         run.check_abort()
 
-        clip: dict[str, Any] = cfg["clip"]
+        # A bring-your-own model dictates its own frames, image size and normalisation (see custom.py).
+        bring_your_own = cfg.get("custom")
+        clip: dict[str, Any] = dict(cfg["clip"])
+        if bring_your_own:
+            clip.update(custom.clip_settings(bring_your_own["path"]))
         meta: dict[str, Any] = {
             "schemaVersion": 1,
             "task": cfg["task"],
             "model": cfg["model"],
+            # True: the trained network is a Hugging Face folder (config.json + model.safetensors), not model.pt.
+            "hf": bool(bring_your_own),
             "numFrames": clip["numFrames"],
             "frameStride": clip["frameStride"],
             "frameSize": clip["frameSize"],
@@ -171,9 +177,15 @@ def train(run: TrainContext) -> VideoLoadedModel:
         )
         val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False, num_workers=workers)
 
-        net = network.build_model(
-            cfg["model"], len(class_names), pretrained=cfg["pretrained"], freeze_backbone=hp["freezeBackbone"]
-        ).to(device)
+        if bring_your_own:
+            net = hf.build(bring_your_own["path"], class_names)
+            if hp["freezeBackbone"]:
+                hf.freeze_backbone(net)
+        else:
+            net = network.build_model(
+                cfg["model"], len(class_names), pretrained=cfg["pretrained"], freeze_backbone=hp["freezeBackbone"]
+            )
+        net = net.to(device)
         trainable = [p for p in net.parameters() if p.requires_grad]
         if hp["optimizer"] == "SGD":
             optimizer: torch.optim.Optimizer = torch.optim.SGD(
@@ -203,7 +215,10 @@ def train(run: TrainContext) -> VideoLoadedModel:
         stage.mkdir()
         if best_state is not None:
             net.load_state_dict(best_state)
-        torch.save(net.state_dict(), stage / runtime.WEIGHTS_FILENAME)
+        if bring_your_own:
+            hf.save(net, str(stage))
+        else:
+            torch.save(net.state_dict(), stage / runtime.WEIGHTS_FILENAME)
         (stage / runtime.METADATA_FILENAME).write_text(json.dumps(meta, indent=2), encoding="utf-8")
         storage.upload_dir(C.BUCKET_TRAINING, storage.training_results_prefix(run.run_id), str(stage))
 
