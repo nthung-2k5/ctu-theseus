@@ -24,7 +24,7 @@ from omnitrain.schemas.projects import (
 from omnitrain.services import plugin_settings
 from omnitrain.services.cleanup import cleanup_project_storage
 from omnitrain.services.dataset_views import split_counts_for_dataset, version_with_counts
-from omnitrain.services.task_registry import get_task_descriptor, task_to_modality
+from omnitrain.services.task_registry import find_task_descriptor, task_to_modality
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -149,7 +149,9 @@ async def get_project(project: ProjectDep, session: SessionDep) -> ProjectDetail
 
 @router.post("", response_model=ProjectResponse)
 async def create_project(body: CreateProjectBody, user_id: UserId, session: SessionDep) -> ProjectResponse:
-    descriptor = get_task_descriptor(body.task)
+    descriptor = find_task_descriptor(body.task)
+    if descriptor is None:
+        raise HTTPException(422, f'Unknown task "{body.task}".')
     # Only NEW projects are blocked: a project already on a task an admin later disables keeps working.
     if not plugin_settings.is_enabled("task", body.task):
         raise HTTPException(422, f'Task "{body.task}" has been disabled by an administrator.')

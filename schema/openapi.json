@@ -6195,28 +6195,6 @@
           },
           "task": {
             "type": "string",
-            "enum": [
-              "text_classification",
-              "token_classification",
-              "text_generation",
-              "question_answering",
-              "summarization",
-              "sequence_to_sequence",
-              "text_embedding",
-              "image_classification",
-              "object_detection",
-              "image_segmentation",
-              "image_captioning",
-              "audio_classification",
-              "automatic_speech_recognition",
-              "audio_segmentation",
-              "audio_captioning",
-              "tabular_regression",
-              "tabular_classification",
-              "tabular_clustering",
-              "tabular_anomaly_detection",
-              "video_classification"
-            ],
             "title": "Task"
           }
         },
@@ -9034,28 +9012,6 @@
           },
           "task": {
             "type": "string",
-            "enum": [
-              "text_classification",
-              "token_classification",
-              "text_generation",
-              "question_answering",
-              "summarization",
-              "sequence_to_sequence",
-              "text_embedding",
-              "image_classification",
-              "object_detection",
-              "image_segmentation",
-              "image_captioning",
-              "audio_classification",
-              "automatic_speech_recognition",
-              "audio_segmentation",
-              "audio_captioning",
-              "tabular_regression",
-              "tabular_classification",
-              "tabular_clustering",
-              "tabular_anomaly_detection",
-              "video_classification"
-            ],
             "title": "Task"
           },
           "userId": {
@@ -9171,28 +9127,6 @@
           },
           "task": {
             "type": "string",
-            "enum": [
-              "text_classification",
-              "token_classification",
-              "text_generation",
-              "question_answering",
-              "summarization",
-              "sequence_to_sequence",
-              "text_embedding",
-              "image_classification",
-              "object_detection",
-              "image_segmentation",
-              "image_captioning",
-              "audio_classification",
-              "automatic_speech_recognition",
-              "audio_segmentation",
-              "audio_captioning",
-              "tabular_regression",
-              "tabular_classification",
-              "tabular_clustering",
-              "tabular_anomaly_detection",
-              "video_classification"
-            ],
             "title": "Task"
           },
           "userId": {
@@ -9247,28 +9181,6 @@
           },
           "task": {
             "type": "string",
-            "enum": [
-              "text_classification",
-              "token_classification",
-              "text_generation",
-              "question_answering",
-              "summarization",
-              "sequence_to_sequence",
-              "text_embedding",
-              "image_classification",
-              "object_detection",
-              "image_segmentation",
-              "image_captioning",
-              "audio_classification",
-              "automatic_speech_recognition",
-              "audio_segmentation",
-              "audio_captioning",
-              "tabular_regression",
-              "tabular_classification",
-              "tabular_clustering",
-              "tabular_anomaly_detection",
-              "video_classification"
-            ],
             "title": "Task"
           },
           "createdAt": {

@@ -11,7 +11,6 @@ from omnitrain.db import enums as e
 from omnitrain.db.base import Base
 from omnitrain.db.models._common import created_at, pg_enum, updated_at, uuid_pk
 
-project_task_t = pg_enum(e.ProjectTask, "project_task")
 modality_t = pg_enum(e.DatasetModality, "modality")
 split_type_t = pg_enum(e.SplitType, "split_type")
 image_format_t = pg_enum(e.ImageFormat, "image_format")
@@ -34,7 +33,8 @@ class Project(Base):
     user_id: Mapped[uuid.UUID] = _fk("users.id", index=True)
     name: Mapped[str] = mapped_column(sa.Text)
     description: Mapped[str | None] = mapped_column(sa.Text, server_default="")
-    task: Mapped[str] = mapped_column(project_task_t)
+    # A task plugin id (omnitrain/tasks/), validated by the API, not by the database.
+    task: Mapped[str] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = created_at()
     updated_at: Mapped[datetime] = updated_at()
 

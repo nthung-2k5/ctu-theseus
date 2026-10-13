@@ -1,11 +1,10 @@
 import json
-from typing import get_args
 
 import pytest
 
-from omnitrain.db.enums import ProjectTask
 from omnitrain.services.task_registry import (
     TASK_REGISTRY,
+    find_task_descriptor,
     get_inference_input_spec,
     get_inference_output_kind,
     get_task_descriptor,
@@ -15,9 +14,26 @@ from omnitrain.services.task_registry import (
     task_to_modality,
 )
 
+BUILTIN_TASKS = [
+    "image_classification", "text_classification", "tabular_classification", "tabular_regression",
+    "audio_classification", "token_classification", "text_generation", "summarization",
+    "sequence_to_sequence", "question_answering", "image_captioning", "audio_captioning",
+    "automatic_speech_recognition", "video_classification", "object_detection",
+    "image_segmentation", "audio_segmentation", "tabular_clustering", "tabular_anomaly_detection",
+    "text_embedding",
+]  # fmt: skip
 
-def test_every_project_task_has_a_descriptor_and_no_extras():
-    assert set(TASK_REGISTRY) == set(get_args(ProjectTask))
+
+def test_the_builtin_tasks_are_registered_in_display_order():
+    # The order is what the web's task picker shows within a modality; it is pinned by each task's `order`.
+    assert list(TASK_REGISTRY) == BUILTIN_TASKS
+
+
+def test_unknown_task_is_a_key_error_or_none():
+    with pytest.raises(KeyError):
+        get_task_descriptor("no_such_task")
+    assert find_task_descriptor("no_such_task") is None
+    assert "no_such_task" not in TASK_REGISTRY
 
 
 def test_fifteen_selectable_tasks_and_five_planned():
@@ -133,3 +149,81 @@ class TestObjectDetection:
         assert class_annotation_type("tabular_regression") is None  # no classes at all
         assert class_annotation_type("image_captioning") is None
         assert class_annotation_type(None) is None
+
+
+class TestTaskPlugins:
+    """A task is a class: defining one registers it, with nothing else to edit."""
+
+    @pytest.fixture
+    def tasks(self):
+        from omnitrain.tasks import TASKS
+
+        TASKS.ensure_loaded()
+        before = set(TASKS._items)
+        yield TASKS
+        for plugin_id in set(TASKS._items) - before:
+            TASKS.unregister(plugin_id)
+
+    def test_a_new_class_shows_up_everywhere_the_registry_is_read(self, tasks):
+        from omnitrain.tasks import AnnotationSpec, ColumnSpec, ItemSpec, Task, TaskOutput
+
+        class SentimentScore(Task):
+            id = "sentiment_score"
+            label = "Sentiment Score"
+            modality = "text"
+            item_spec = ItemSpec(payload="inline_text")
+            annotation = AnnotationSpec(type="classification", requires_label_classes=False)
+            columns = [ColumnSpec(name="text", kind="inline_text"), ColumnSpec(name="score", kind="label")]
+            output = TaskOutput(column="score", kind="regression")
+            input_fields = ["text"]
+
+        assert find_task_descriptor("sentiment_score") is not None
+        assert list(TASK_REGISTRY)[-1] == "sentiment_score"  # a plugin that sets no `order` sorts last
+        assert task_to_modality("sentiment_score") == "text"
+        assert get_inference_output_kind("sentiment_score") == "regression"
+        assert "sentiment_score" in registry_json()["tasks"]
+        assert SentimentScore in tasks.all()
+
+    def test_a_helper_base_without_an_id_is_not_a_task(self, tasks):
+        from omnitrain.tasks import Task
+
+        before = len(TASK_REGISTRY)
+
+        class Helper(Task):
+            label = "not a task"
+
+        assert len(TASK_REGISTRY) == before
+
+    def test_duplicate_ids_are_refused(self, tasks):
+        from omnitrain.tasks import Task
+
+        with pytest.raises(ValueError, match="Duplicate task id"):
+
+            class Again(Task):
+                id = "image_classification"
+                label = "Imposter"
+                modality = "vision"
+                item_spec = TASK_REGISTRY["image_classification"].item_spec
+                annotation = TASK_REGISTRY["image_classification"].annotation
+                columns = TASK_REGISTRY["image_classification"].columns
+                output = TASK_REGISTRY["image_classification"].output
+
+    def test_an_incomplete_task_is_refused_at_class_creation(self, tasks):
+        from omnitrain.tasks import Task
+
+        with pytest.raises(TypeError, match="is missing"):
+
+            class Nameless(Task):
+                id = "nameless"
+
+        with pytest.raises(TypeError, match="needs snapshot columns and an output"):
+
+            class NoOutput(Task):
+                id = "no_output"
+                label = "No output"
+                modality = "text"
+                status = "stable"
+                item_spec = TASK_REGISTRY["text_classification"].item_spec
+                annotation = TASK_REGISTRY["text_classification"].annotation
+
+        assert find_task_descriptor("nameless") is None and find_task_descriptor("no_output") is None

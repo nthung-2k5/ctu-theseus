@@ -12,8 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from omnitrain.backends.base import CustomModelKind
-from omnitrain.db.enums import ProjectTask
-from omnitrain.services.task_registry import CLASS, IMAGE_PATH
+from omnitrain.services.task_registry import CLASS, IMAGE_PATH, TASK_REGISTRY
 
 LudwigFeatureType = Literal["image", "text", "audio", "number", "category", "binary", "sequence", "vector"]
 
@@ -269,4 +268,4 @@ def _timm_kind() -> CustomModelKind:
 
 
 # Sanity: every key above is a real project task.
-assert set(LUDWIG_TASKS) <= set(ProjectTask.__args__)  # type: ignore[attr-defined]
+assert set(LUDWIG_TASKS) <= set(TASK_REGISTRY)

@@ -129,14 +129,16 @@ lifespan, so a slow migration cannot fail the health check.
 
 ### Task registry
 
-`server/omnitrain/services/task_registry.py` is the single source of truth every other piece
-derives from: it declares, per task, which modality it belongs to, what shape a dataset item takes
+Tasks are plugins: each is one `Task` subclass in `server/omnitrain/tasks/builtin/` (a module dropped
+there registers on the next backend restart), and `server/omnitrain/services/task_registry.py` is the
+lookup over them and the single source of truth every other piece derives from. A task declares, per task, which modality it belongs to, what shape a dataset item takes
 (`itemSpec.payload`: `file` / `inline_text` / `record`), what annotation type it needs, the snapshot
 columns, and the inference input/output kinds. It says nothing about how a task is *trained*: that is a
 trainer backend's job (`server/omnitrain/backends/`, one package per framework). The frontend's task
 picker, the per-modality upload/labeling UI and snapshot column derivation are all driven off this one
-descriptor per task, so adding a new task's data side means adding one registry entry, not touching five
-files. The frontend reads it from the generated `schema/task_registry.json` (`web/lib/tasks.ts`), with
+descriptor per task, so adding a new task's data side means adding one class, not touching five files:
+`projects.task` is free text, so there is no enum or migration, and `POST /api/projects` rejects an id
+no installed task defines. The picker's icon and blurb come from `web/lib/task-meta.ts` (generic fallback). The frontend reads it from the generated `schema/task_registry.json` (`web/lib/tasks.ts`), with
 the inference input/output kinds already evaluated.
 
 #### Object detection data
@@ -417,7 +419,8 @@ schema/                   constants.json (shared), openapi.json + task_registry.
 server/               The backend (FastAPI + Ludwig); see server/README.md
   omnitrain/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
                           inference, export, api_keys, api_v1, models, admin/)
-  omnitrain/services/       task_registry (source of truth), ludwig_config, snapshot, sweep,
+  omnitrain/tasks/          task plugins (base + builtin/), looked up via services/task_registry
+  omnitrain/services/       task_registry (lookup), ludwig_config, snapshot, sweep,
                           plugin_settings, model_catalog, custom_models, ...
   omnitrain/jobs/           queue, dispatcher, lanes, run_core (train+evaluate, shared with workers),
                           train/export/validate_model, recovery, reapers

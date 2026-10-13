@@ -2,16 +2,8 @@
 
 from typing import Literal
 
-# fmt: off
-ProjectTask = Literal[
-    "text_classification", "token_classification", "text_generation", "question_answering",
-    "summarization", "sequence_to_sequence", "text_embedding",
-    "image_classification", "object_detection", "image_segmentation", "image_captioning",
-    "audio_classification", "automatic_speech_recognition", "audio_segmentation", "audio_captioning",
-    "tabular_regression", "tabular_classification", "tabular_clustering", "tabular_anomaly_detection",
-    "video_classification",
-]
-# fmt: on
+# A task is a plugin (omnitrain/tasks/), not an enum: `projects.task` is free text holding a task id.
+
 DatasetModality = Literal["text", "vision", "audio", "video", "tabular"]
 SplitType = Literal["train", "test", "validation"]
 ImageFormat = Literal["jpeg", "png"]

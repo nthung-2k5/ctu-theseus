@@ -10,7 +10,7 @@ from datetime import datetime
 from pydantic import Field, field_validator
 
 from omnitrain.augmentation.config import AugmentationConfig
-from omnitrain.db.enums import DatasetModality, DatasetVersionStatus, ProjectTask, SplitType, TrainingStatus
+from omnitrain.db.enums import DatasetModality, DatasetVersionStatus, SplitType, TrainingStatus
 from omnitrain.preprocessing.config import PreprocessingConfig
 from omnitrain.schemas.common import ApiModel
 
@@ -79,7 +79,7 @@ class ProjectSummary(ApiModel):
     id: uuid.UUID
     name: str
     description: str | None
-    task: ProjectTask
+    task: str
     created_at: datetime
     draft_dataset: DraftDatasetOut | None = None
     # What a project card shows without opening the project: how much data, how much training, and how it last went.
@@ -94,7 +94,7 @@ class ProjectRow(ApiModel):
     id: uuid.UUID
     name: str
     description: str | None
-    task: ProjectTask
+    task: str
     user_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -121,7 +121,7 @@ class ProjectDetailResponse(ApiModel):
 class CreateProjectBody(ApiModel):
     name: str = Field(min_length=1)
     description: str | None = None
-    task: ProjectTask
+    task: str
 
 
 class UpdateProjectBody(ApiModel):
