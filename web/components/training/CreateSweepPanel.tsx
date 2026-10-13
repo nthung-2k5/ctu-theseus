@@ -13,6 +13,7 @@ import { Checkbox, Group, MultiSelect, NumberInput, Paper, Select, SimpleGrid, T
 import { FlaskIcon } from '@phosphor-icons/react'
 import { groupParams, LabelWithTip, SectionLabel } from '@public/components/ui'
 import type { ParamSpec } from '@public/lib/api/generated/models'
+import { useListSweepStrategies } from '@public/lib/api/generated/sweeps/sweeps'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
 import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail, SweepSearchSpace, SweepStrategyValue } from '@public/store/types'
@@ -93,7 +94,10 @@ export function CreateSweepPanel({
   const backends = data?.backends ?? []
 
   const [name, setName] = useState('')
+  const { data: strategyList } = useListSweepStrategies()
+  const strategies = strategyList?.strategies ?? []
   const [strategy, setStrategy] = useState<SweepStrategyValue>('grid')
+  const chosenStrategy = strategies.find((s) => s.id === strategy)
   const [maxTrials, setMaxTrials] = useState<number | string>(6)
 
   const [backendId, setBackendId] = useState<string | null>(null)
@@ -179,15 +183,12 @@ export function CreateSweepPanel({
               label={
                 <LabelWithTip
                   label="Strategy"
-                  tip="How the settings you tick below are combined. Grid tries every possible combination. Random tries a sample of them, which is quicker when there are many."
+                  tip={`How the settings you tick below are combined into trials. ${chosenStrategy?.description ?? ''}`}
                 />
               }
-              w={230}
+              w={260}
               allowDeselect={false}
-              data={[
-                { value: 'grid', label: 'Grid: every combination' },
-                { value: 'random', label: 'Random: sample combinations' },
-              ]}
+              data={strategies.map((s) => ({ value: s.id, label: s.label }))}
               value={strategy}
               onChange={(v) => v && setStrategy(v as SweepStrategyValue)}
             />
@@ -213,8 +214,8 @@ export function CreateSweepPanel({
       <Paper p="sm">
         <SectionLabel mb={4}>Search space</SectionLabel>
         <Text size="xs" c="dimmed" mb="sm">
-          Tick the settings you want to try and list the values to try for each. Every combination (grid) or a random
-          sample of combinations (random) is trained as its own run, so you can compare the results.
+          Tick the settings you want to try and list the values to try for each. The strategy picks which combinations
+          to train, and each one is its own run, so you can compare the results.
         </Text>
         <div className="flex flex-col gap-3">
           {groupParams(sweepableKnobs).map(({ group, specs }) => (

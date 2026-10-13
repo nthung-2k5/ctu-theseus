@@ -47,7 +47,8 @@ export type SweepSummary = ApiSweepSummary
 export type SweepTrial = ApiSweepTrial
 export type SweepDetail = SweepDetailResponse['sweep']
 export type SweepSearchSpace = SearchSpace
-export type SweepStrategyValue = 'grid' | 'random'
+/** A sweep strategy plugin id; the installed ones come from GET /api/sweep-strategies. */
+export type SweepStrategyValue = string
 export type SweepStatusValue = 'running' | 'completed' | 'canceled'
 
 /* ── Evaluation ── */
