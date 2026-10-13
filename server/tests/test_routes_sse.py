@@ -25,8 +25,14 @@ async def base_url(app):
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", lifespan="off"))
     server.capture_signals = contextlib.nullcontext  # do not hijack pytest's signal handlers
     task = asyncio.create_task(server.serve())
-    while not server.started:
-        await asyncio.sleep(0.02)
+
+    async def started() -> None:
+        while not server.started:
+            if task.done():
+                task.result()  # the server died while starting: surface why instead of waiting forever
+            await asyncio.sleep(0.02)
+
+    await asyncio.wait_for(started(), 15)
     port = server.servers[0].sockets[0].getsockname()[1]
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True

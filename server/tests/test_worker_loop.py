@@ -156,8 +156,11 @@ async def env(client, db, make_run, make_worker, monkeypatch, tmp_path):
     await make_worker(backends=("fakeremote",), token=TOKEN)
     bridge = LoopBridge(client, asyncio.get_running_loop())
 
+    shutdowns: list[threading.Event] = []
+
     async def run_worker(max_runs: int = 1, shutdown: threading.Event | None = None, token: str = TOKEN) -> int:
         shutdown = shutdown or threading.Event()
+        shutdowns.append(shutdown)
         config = WorkerConfig(
             api_url="http://test", token=token, poll_interval_seconds=0.05, flush_interval_seconds=0.05
         )
@@ -168,6 +171,11 @@ async def env(client, db, make_run, make_worker, monkeypatch, tmp_path):
         return await make_run(backend="fakeremote", **fields)
 
     yield SimpleNamespace(run_worker=run_worker, queue_run=queue_run, bridge=bridge)
+    # `serve` runs in a thread that wait_for/cancel cannot stop. A worker still polling when its test ends (nothing to
+    # claim, a failed assertion, a timeout) would keep the event loop's executor shutdown waiting forever: pytest passes
+    # the test and then never exits. Tell every worker to stop.
+    for shutdown in shutdowns:
+        shutdown.set()
     backend_registry.unregister("fakeremote")
 
 
