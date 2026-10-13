@@ -11,8 +11,8 @@ from pydantic import Field
 
 from omnitrain.backends.base import ConfigError, CustomModelRef, HyperparamsBase
 from omnitrain.backends.yolo.tasks import IMAGE_SIZES, OPTIMIZERS, YOLO_TASKS, YoloTaskSpec
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 # Section headings of the hyperparameter form, in the order it shows them.
 _MODEL = "Model details"

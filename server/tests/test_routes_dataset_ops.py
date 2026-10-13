@@ -8,7 +8,7 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from omnitrain import constants as C
+from omnitrain.core import constants as C
 from omnitrain.db.models import Annotation, DatasetItem, DatasetVersion, DatasetVersionItem
 from omnitrain.services import datasets as svc
 from omnitrain.services import storage

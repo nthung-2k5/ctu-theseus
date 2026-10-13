@@ -8,9 +8,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from omnitrain.domain.boxes import BoundingBox, boxes_json, is_background, parse_boxes, validate_box_annotation
+from omnitrain.domain.task_registry import ColumnSpec, get_task_descriptor
 from omnitrain.services import snapshot as snap
-from omnitrain.services.boxes import BoundingBox, boxes_json, is_background, parse_boxes, validate_box_annotation
-from omnitrain.services.task_registry import ColumnSpec, get_task_descriptor
 
 CAT, DOG, GONE = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 NAMES = {CAT: "cat", DOG: "dog"}  # GONE is a deleted class: not among the active ones

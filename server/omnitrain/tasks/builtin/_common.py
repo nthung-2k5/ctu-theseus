@@ -2,7 +2,7 @@
 
 from typing import ClassVar
 
-from omnitrain import constants as C
+from omnitrain.core import constants as C
 from omnitrain.tasks.base import AnnotationSpec, ColumnKind, ColumnSpec, ItemSpec, Task, TaskOutput
 
 IMAGE_PATH = C.IMAGE_PATH_COLUMN_NAME

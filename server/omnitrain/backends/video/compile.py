@@ -12,8 +12,8 @@ from pydantic import Field
 from omnitrain.backends.base import ConfigError, CustomModelRef, HyperparamsBase
 from omnitrain.backends.video import tasks
 from omnitrain.backends.video.custom import HF_VIDEO
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 _MODEL = "Model details"
 _TRAINING = "Training"

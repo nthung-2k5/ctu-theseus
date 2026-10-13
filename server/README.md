@@ -48,15 +48,20 @@ omnitrain/
                         export script and tests can import it
   lifespan.py           startup: single-process check, event writer, log handler, recovery,
                         dispatcher, reapers
-  settings.py, constants.py, telemetry.py, metrics.py, errors.py, deps.py
+  settings.py, errors.py, deps.py
+  core/                 constants, plugins.py (the Registry), telemetry, metrics; imports nothing
+                        else from omnitrain
+  domain/               framework-neutral logic, no DB session or HTTP: task_registry, boxes, predict,
+                        evaluate, classification_report, image_size, video, params, tabular_stats
   db/                   engine/session, enums, models (21 tables)
   auth/                 password (argon2id), JWT, refresh tokens, API keys, rate limiter
-  routers/              one module per area; /api/v1 is the public API-key surface
+  routers/              one module per area (datasets/ is a package, one module per concern); /api/v1 is
+                        the public API-key surface
   schemas/              pydantic request/response models (these are the OpenAPI contract)
   backends/             trainer backend plugins (base.py + registry.py, ludwig/); see "Writing a
                         backend" below
-  services/             domain logic: task_registry (framework-neutral), snapshot (parquet), sweep,
-                        datasets, training, inference, storage, evaluate, predict, model_cache, ...
+  services/             database + S3 orchestration: snapshot (parquet), sweep, datasets, training,
+                        inference, storage, model_cache, ...
   jobs/                 queue (claim/lease/CAS), dispatcher + lanes, train, export,
                         abort, recovery, reapers
   events/               single-writer run_events, in-process bus, SSE stream, log capture
@@ -139,7 +144,7 @@ What to implement, roughly in the order a run touches them:
 5. `load(model_dir)`: load a trained model from a downloaded directory into a `LoadedModel`
    (`predict`, `to_output`, `golden_prediction`, `close`) — the interface `model_cache.py`,
    `services/inference.py` and `jobs/export.py` actually talk to. `output.kind` is one of
-   `classification`, `regression`, `text`, `tokens` or `detections` (`services/predict.py` has the response
+   `classification`, `regression`, `text`, `tokens` or `detections` (`domain/predict.py` has the response
    shape of each). The class names a model reports must come from the trained model itself, never from
    the `label_classes` table.
 6. `evaluate(model, df, split_column, item_id_column)` (optional) and `convert(model, artifact_id,

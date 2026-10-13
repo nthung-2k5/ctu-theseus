@@ -1,10 +1,10 @@
 """`LudwigLoadedModel`: wraps a loaded `LudwigModel` behind the framework-neutral `LoadedModel`
-interface, and the two prediction-shaping functions that used to live in services/predict.py.
+interface, and the two prediction-shaping functions that used to live in domain/predict.py.
 
-Moved out of services/predict.py and the old jobs/inference.py when trainer backends became a plugin
+Moved out of domain/predict.py and the old jobs/inference.py when trainer backends became a plugin
 system. `build_inference_output`/`parse_prediction_row` are Ludwig-specific: they know Ludwig's own
 `{feature}_predictions` / `{feature}_probabilities` prediction-frame column naming and its
-`category`/`number`/`sequence`/`text` feature type strings. `omnitrain.services.predict` keeps only
+`category`/`number`/`sequence`/`text` feature type strings. `omnitrain.domain.predict` keeps only
 what's genuinely framework-neutral (the `InferenceOutput` tagged-union type and the batch CSV
 concat helper).
 """
@@ -17,7 +17,7 @@ from ludwig.api import LudwigModel
 from omnitrain.backends.base import LoadedModel, OutputSpec
 from omnitrain.backends.ludwig import compat as _compat  # noqa: F401  Windows-only Ludwig workarounds
 from omnitrain.backends.ludwig import encoders as _encoders  # noqa: F401  registers this backend's Ludwig encoders
-from omnitrain.services.predict import (
+from omnitrain.domain.predict import (
     ClassificationClass,
     InferenceOutput,
 )

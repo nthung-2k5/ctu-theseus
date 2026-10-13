@@ -33,7 +33,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain import metrics as otel
+from omnitrain.core import metrics as otel
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.enums import TERMINAL_RUN_STATUSES
 from omnitrain.db.models import RunEvent, TrainingMetric, TrainingRun

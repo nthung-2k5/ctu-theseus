@@ -164,7 +164,7 @@ def encode_video(clip: VideoClip) -> Encoded:
     Lossy, like any re-encode; the file is read back to prove it decodes before it is stored."""
     import cv2
 
-    from omnitrain.services import video as video_service
+    from omnitrain.domain import video as video_service
 
     count, height, width = clip.frames.shape[:3]
     with tempfile.TemporaryDirectory() as directory:

@@ -22,7 +22,7 @@ from omnitrain.backends.yolo import YoloBackend, data, runtime
 from omnitrain.backends.yolo import train as train_mod
 from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
 from omnitrain.backends.yolo.model import YoloLoadedModel
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 pytestmark = pytest.mark.skipif(not os.environ.get("YOLO_SMOKE"), reason="set YOLO_SMOKE=1 to train for real")
 

@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from omnitrain.routers import datasets as datasets_router
+from omnitrain.domain import task_registry as tr
+from omnitrain.domain import video as video_media
+from omnitrain.routers.datasets import upload as datasets_router
 from omnitrain.services import storage
-from omnitrain.services import task_registry as tr
-from omnitrain.services import video as video_media
 
 
 @pytest.fixture(autouse=True)

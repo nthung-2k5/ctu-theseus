@@ -11,12 +11,12 @@ import sqlalchemy as sa
 
 from omnitrain.backends.registry import get_backend
 from omnitrain.db.models import CustomModel, DatasetVersion, TrainingRun
+from omnitrain.domain.task_registry import SnapshotContext, get_task_descriptor
 from omnitrain.jobs import queue, validate_model
 from omnitrain.jobs.recovery import recover_on_startup
 from omnitrain.services import custom_models as cm
 from omnitrain.services import run_models, storage
 from omnitrain.services import training as training_service
-from omnitrain.services.task_registry import SnapshotContext, get_task_descriptor
 from omnitrain.services.training import QueueError, queue_training
 from omnitrain.settings import get_settings
 

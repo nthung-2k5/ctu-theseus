@@ -19,10 +19,11 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain import constants as C
 from omnitrain.backends.base import CustomModelKind
 from omnitrain.backends.registry import find_backend, list_backends
+from omnitrain.core import constants as C
 from omnitrain.db.models import CustomModel, TrainingRun, User
+from omnitrain.domain.task_registry import TASK_REGISTRY
 from omnitrain.jobs.dispatcher import nudge
 from omnitrain.model_sources import SourceRefError, find_source, get_source
 from omnitrain.schemas.custom_models import (
@@ -36,7 +37,6 @@ from omnitrain.schemas.custom_models import (
 )
 from omnitrain.services import custom_models, storage
 from omnitrain.services.model_catalog import kind_and_tasks
-from omnitrain.services.task_registry import TASK_REGISTRY
 from omnitrain.settings import get_settings
 
 logger = logging.getLogger(__name__)

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from omnitrain.backends.registry import trainable_backends
 from omnitrain.db.models import Dataset, DatasetVersion, DatasetVersionItem, LabelClass, Project, TrainingRun
 from omnitrain.deps import ProjectDep, SessionDep, UserId
+from omnitrain.domain.task_registry import find_task_descriptor, task_to_modality
 from omnitrain.events import get_event_writer
 from omnitrain.jobs import abort
 from omnitrain.schemas.projects import (
@@ -24,7 +25,6 @@ from omnitrain.schemas.projects import (
 from omnitrain.services import plugin_settings
 from omnitrain.services.cleanup import cleanup_project_storage
 from omnitrain.services.dataset_views import split_counts_for_dataset, version_with_counts
-from omnitrain.services.task_registry import find_task_descriptor, task_to_modality
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 

@@ -27,12 +27,12 @@ from omnitrain.db.models import (
     User,
     VideoFeatures,
 )
+from omnitrain.domain import video as video_service
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.preprocessing.ops import video as pre_ops
 from omnitrain.preprocessing.registry import list_preprocessing
 from omnitrain.services import snapshot as snap
 from omnitrain.services import storage
-from omnitrain.services import video as video_service
-from omnitrain.services.task_registry import get_task_descriptor
 
 TASK = get_task_descriptor("video_classification")
 BUCKET = "theseus-datasets"

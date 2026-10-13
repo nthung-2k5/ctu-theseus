@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from omnitrain.backends.base import ConfigError, CustomModelKind, CustomModelRef
-from omnitrain.services.task_registry import TaskDescriptor
+from omnitrain.domain.task_registry import TaskDescriptor
 
 HF_VIDEO = "hf_video"
 SUPPORTED_MODEL_TYPES = ("videomae", "timesformer", "vivit")

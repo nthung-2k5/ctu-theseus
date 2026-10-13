@@ -21,11 +21,11 @@ from typing import Any
 import pandas as pd
 from opentelemetry import trace
 
-from omnitrain import constants as C
 from omnitrain.backends.base import TrainContext
 from omnitrain.backends.yolo import data, runtime
 from omnitrain.backends.yolo.model import YoloLoadedModel
 from omnitrain.backends.yolo.model import load as load_model
+from omnitrain.core import constants as C
 from omnitrain.services import storage
 
 tracer = trace.get_tracer("omnitrain")

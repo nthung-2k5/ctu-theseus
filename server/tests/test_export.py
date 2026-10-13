@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from omnitrain.constants import SPLIT_COLUMN_NAME
+from omnitrain.core.constants import SPLIT_COLUMN_NAME
 from omnitrain.jobs.export import _shape_input_value
 
 

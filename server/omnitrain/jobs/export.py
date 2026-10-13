@@ -23,9 +23,9 @@ from typing import Any
 import pandas as pd
 import sqlalchemy as sa
 
-from omnitrain import constants as C
 from omnitrain.backends.base import TrainerBackend
 from omnitrain.backends.registry import get_backend
+from omnitrain.core import constants as C
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import ModelExport, TrainingRun
 from omnitrain.export import bundle

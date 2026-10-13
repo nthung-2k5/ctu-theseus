@@ -21,7 +21,7 @@ class ErrorResponse(ApiModel):
 
 class ParamSpec(ApiModel):
     """One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,
-    ...), flattened so the web can render a form without knowing the plugin. See `omnitrain.params`."""
+    ...), flattened so the web can render a form without knowing the plugin. See `omnitrain.domain.params`."""
 
     name: str
     label: str

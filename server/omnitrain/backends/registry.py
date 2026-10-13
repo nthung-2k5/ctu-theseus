@@ -3,9 +3,9 @@
 from dataclasses import dataclass, field
 
 from omnitrain.backends.base import ModelChoice, TrainerBackend, _registry
+from omnitrain.domain.task_registry import TASK_REGISTRY, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
 from omnitrain.services import plugin_settings
-from omnitrain.services.task_registry import TASK_REGISTRY, TaskDescriptor
 
 
 def get_backend(backend_id: str) -> type[TrainerBackend]:

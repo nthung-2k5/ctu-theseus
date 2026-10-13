@@ -9,8 +9,8 @@ import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from omnitrain import constants as C
 from omnitrain.backends.registry import describe, find_backend, list_backends, model_param_name
+from omnitrain.core import constants as C
 from omnitrain.db.models import (
     CustomModel,
     Dataset,
@@ -25,6 +25,7 @@ from omnitrain.db.models import (
     TrainingWorker,
 )
 from omnitrain.deps import ProjectDep, RunDep, SessionDep
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.events import get_event_bus, get_event_writer
 from omnitrain.events.stream import stream_run_events
 from omnitrain.jobs import abort
@@ -52,7 +53,6 @@ from omnitrain.schemas.training import (
 from omnitrain.services import model_catalog, storage
 from omnitrain.services.cleanup import cleanup_run_storage
 from omnitrain.services.evaluation_score import evaluation_brief
-from omnitrain.services.task_registry import get_task_descriptor
 from omnitrain.services.training import QueueError, queue_training
 
 router = APIRouter(tags=["training"])

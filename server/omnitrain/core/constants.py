@@ -11,8 +11,8 @@ def _schema_dir() -> Path:
     # Inside the container the AppHost bind-mounts ./schema at /schema.
     if Path("/schema/constants.json").exists():
         return Path("/schema")
-    # server/omnitrain/constants.py -> the repo root is two levels above the package.
-    return Path(__file__).resolve().parents[2] / "schema"
+    # server/omnitrain/core/constants.py -> the repo root is three levels above this file.
+    return Path(__file__).resolve().parents[3] / "schema"
 
 
 SCHEMA_DIR = _schema_dir()

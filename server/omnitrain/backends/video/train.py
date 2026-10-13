@@ -21,11 +21,11 @@ import torch
 from opentelemetry import trace
 from torch.utils.data import DataLoader, Dataset
 
-from omnitrain import constants as C
 from omnitrain.backends.base import TrainContext
 from omnitrain.backends.video import custom, data, frames, hf, network, runtime
 from omnitrain.backends.video.model import VideoLoadedModel, clip_spec_from_meta
 from omnitrain.backends.video.model import load as load_model
+from omnitrain.core import constants as C
 from omnitrain.services import storage
 
 tracer = trace.get_tracer("omnitrain")

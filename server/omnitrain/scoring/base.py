@@ -13,7 +13,7 @@ telling: accuracy before a regression error, say.
 
 from typing import Any, ClassVar
 
-from omnitrain.plugins import Registry
+from omnitrain.core.plugins import Registry
 
 _registry: Registry["HeadlineScore"] = Registry("headline score", "omnitrain.scoring")
 

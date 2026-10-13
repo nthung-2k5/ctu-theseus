@@ -1,7 +1,7 @@
 """Per-task Ludwig feature tables: input/output feature builders, encoder catalogs and trainer
 knob defaults, keyed by task id.
 
-Moved wholesale out of the framework-neutral `services/task_registry.py` when trainer backends
+Moved wholesale out of the framework-neutral `domain/task_registry.py` when trainer backends
 became a plugin system: everything here is Ludwig's own vocabulary (feature types, encoders,
 `ecd`/`llm` model types) and has no business in a registry other backends also read.
 """
@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from omnitrain.backends.base import CustomModelKind
-from omnitrain.services.task_registry import CLASS, IMAGE_PATH, TASK_REGISTRY
+from omnitrain.domain.task_registry import CLASS, IMAGE_PATH, TASK_REGISTRY
 
 LudwigFeatureType = Literal["image", "text", "audio", "number", "category", "binary", "sequence", "vector"]
 

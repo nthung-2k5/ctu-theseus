@@ -13,13 +13,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from omnitrain.core.telemetry import init_telemetry
 from omnitrain.db.base import dispose_engine
 from omnitrain.events import EventWriter, get_event_bus, set_event_writer
 from omnitrain.jobs.reapers import reaper_loop
 from omnitrain.jobs.recovery import recover_on_startup
 from omnitrain.services import bootstrap_admin, plugin_settings, storage
 from omnitrain.settings import get_settings
-from omnitrain.telemetry import init_telemetry
 
 logger = logging.getLogger(__name__)
 

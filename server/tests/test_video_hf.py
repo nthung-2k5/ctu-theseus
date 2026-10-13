@@ -19,7 +19,7 @@ from omnitrain.backends.video import VideoBackend, custom, data, frames, runtime
 from omnitrain.backends.video import train as train_mod  # noqa: E402
 from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config  # noqa: E402
 from omnitrain.backends.video.model import VideoLoadedModel  # noqa: E402
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor  # noqa: E402
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor  # noqa: E402
 
 TASK = get_task_descriptor("video_classification")
 CLASSES = ["red", "green", "blue"]

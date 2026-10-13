@@ -1,7 +1,7 @@
 """`VideoLoadedModel`: a trained video classifier behind the framework-neutral `LoadedModel` interface.
 
 The prediction frame follows the convention every classifier uses (`{feature}_predictions`, `{feature}_probabilities`,
-plus `{feature}_probability` for `services.evaluate.top_errors`), so batch results, the evaluation report and the
+plus `{feature}_probability` for `domain.evaluate.top_errors`), so batch results, the evaluation report and the
 export golden sample work on it unchanged. A video is scored as `clipsPerVideo` clips spread across it, with the
 softmax probabilities averaged.
 """
@@ -19,8 +19,8 @@ import torch
 from omnitrain.backends.base import LoadedModel, OutputSpec
 from omnitrain.backends.video import frames, network, runtime
 from omnitrain.backends.video.data import split_s3_uri
+from omnitrain.domain.predict import ClassificationClass, InferenceOutput
 from omnitrain.services import storage
-from omnitrain.services.predict import ClassificationClass, InferenceOutput
 
 
 def clip_spec_from_meta(meta: dict[str, Any]) -> frames.ClipSpec:

@@ -34,8 +34,8 @@ from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_lud
 from omnitrain.backends.ludwig.compile import hyperparameter_specs as _hyperparameter_specs
 from omnitrain.backends.ludwig.manifest import METADATA_FILENAME
 from omnitrain.backends.ludwig.tasks import LUDWIG_TASKS, custom_kinds_for
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 
 class LudwigBackend(TrainerBackend):

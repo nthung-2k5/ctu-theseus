@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from omnitrain.backends.base import ConfigError
 from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config, serialize_ludwig_config
 from omnitrain.backends.ludwig.tasks import LUDWIG_TASKS
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 
 def cols(*pairs: tuple[str, str]) -> list[ColumnSpec]:

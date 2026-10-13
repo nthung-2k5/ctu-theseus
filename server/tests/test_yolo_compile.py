@@ -5,7 +5,7 @@ from pydantic.alias_generators import to_camel
 from omnitrain.backends.base import ConfigError
 from omnitrain.backends.yolo import YoloBackend
 from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 VISION = SnapshotContext(
     columns=[

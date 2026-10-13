@@ -18,9 +18,9 @@ from typing import Any, ClassVar
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from omnitrain.core.plugins import Registry
 from omnitrain.db.enums import DatasetModality
-from omnitrain.plugins import Registry
-from omnitrain.services.task_registry import TaskDescriptor
+from omnitrain.domain.task_registry import TaskDescriptor
 
 _registry: Registry["Augmentation"] = Registry("augmentation", "omnitrain.augmentation.ops")
 

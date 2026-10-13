@@ -131,7 +131,7 @@ lifespan, so a slow migration cannot fail the health check.
 ### Task registry
 
 Tasks are plugins: each is one `Task` subclass in `server/omnitrain/tasks/builtin/` (a module dropped
-there registers on the next backend restart), and `server/omnitrain/services/task_registry.py` is the
+there registers on the next backend restart), and `server/omnitrain/domain/task_registry.py` is the
 lookup over them and the single source of truth every other piece derives from. A task declares, per task, which modality it belongs to, what shape a dataset item takes
 (`itemSpec.payload`: `file` / `inline_text` / `record`), what annotation type it needs, the snapshot
 columns, and the inference input/output kinds. It says nothing about how a task is *trained*: that is a
@@ -150,7 +150,7 @@ the inference input/output kinds already evaluated.
 re-upload and nothing at training time needs the image's size. An image with nothing in it carries a
 single marker row (`bounding_box`, no class, `{"background": true}`): a detector must learn what *not* to
 fire on, and that is different from an image nobody has labelled yet, which a trainer leaves out. The
-rules live in `server/omnitrain/services/boxes.py`; the snapshot's `boxes` column is a JSON list of
+rules live in `server/omnitrain/domain/boxes.py`; the snapshot's `boxes` column is a JSON list of
 `{label, x, y, w, h}` per image (`null` while unlabelled). A class belongs to one box, so the bulk "assign
 class" action does not apply; boxes are drawn on the image in the item drawer, or imported with their
 labels from a YOLO-format archive (Upload → Import YOLO dataset).
@@ -418,12 +418,15 @@ the container (`./schema` is bind-mounted read-only there).
 apphost.mts               Aspire AppHost, the only place resources are provisioned
 schema/                   constants.json (shared), openapi.json + task_registry.json (generated)
 server/               The backend (FastAPI + Ludwig); see server/README.md
-  omnitrain/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
-                          inference, export, api_keys, api_v1, models, admin/)
-  omnitrain/tasks/          task plugins (base + builtin/), looked up via services/task_registry
+  omnitrain/core/           constants, the plugin Registry, telemetry, metrics; imports nothing else
+  omnitrain/domain/         framework-neutral logic with no DB session or HTTP (task_registry, boxes, predict, params,
+                          evaluate, video, ...); plugins may import it
+  omnitrain/routers/        HTTP routes (auth, projects, datasets/ (one module per concern), classes, training,
+                          sweeps, inference, export, api_keys, api_v1, models, admin/)
+  omnitrain/tasks/          task plugins (base + builtin/), looked up via domain/task_registry
   omnitrain/sweep_strategies/  sweep strategy plugins (grid, random, random_unique, balanced, one_at_a_time)
-  omnitrain/services/       task_registry (lookup), ludwig_config, snapshot, sweep,
-                          plugin_settings, model_catalog, custom_models, ...
+  omnitrain/services/       database + S3 orchestration: snapshot, sweep, training, plugin_settings,
+                          model_catalog, custom_models, ...
   omnitrain/jobs/           queue, dispatcher, lanes, run_core (train+evaluate, shared with workers),
                           train/export/validate_model, recovery, reapers
   omnitrain/worker/         the remote training worker (`python -m omnitrain.worker`)

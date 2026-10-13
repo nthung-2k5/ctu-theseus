@@ -3,11 +3,11 @@
 Classification and detection share this class; `meta["task"]` (written at train time, see `train.py`) says which.
 
 Classification's prediction frame uses the same column convention as every backend (`{feature}_predictions`,
-`{feature}_probabilities`, plus `{feature}_probability` for `services.evaluate.top_errors`), so batch results,
+`{feature}_probabilities`, plus `{feature}_probability` for `domain.evaluate.top_errors`), so batch results,
 the evaluation report and the export golden sample all work on it unchanged.
 
 Detection has one row per image holding a LIST of detections, in the convention bounding-box annotations use
-(services/boxes.py): the top-left corner and the size, as fractions of the image. `{feature}_predictions` is that
+(domain/boxes.py): the top-left corner and the size, as fractions of the image. `{feature}_predictions` is that
 list (most confident first) and `{feature}_image_size` is `[width, height]` in pixels.
 """
 
@@ -23,8 +23,8 @@ import pandas as pd
 from omnitrain.backends.base import LoadedModel, OutputSpec
 from omnitrain.backends.yolo import runtime
 from omnitrain.backends.yolo.data import split_s3_uri
+from omnitrain.domain.predict import ClassificationClass, Detection, InferenceOutput
 from omnitrain.services import storage
-from omnitrain.services.predict import ClassificationClass, Detection, InferenceOutput
 
 # Detections below this confidence are not returned when serving. Evaluation uses a far lower one (mAP needs the
 # whole precision/recall curve); see `evaluate.py`.

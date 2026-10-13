@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from omnitrain.app import create_app  # noqa: E402
-from omnitrain.services.task_registry import registry_json  # noqa: E402
+from omnitrain.domain.task_registry import registry_json  # noqa: E402
 
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schema"
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from omnitrain.backends.base import ConfigError, CustomModelRef
 from omnitrain.backends.ludwig.tasks import HF_CAUSAL_LM, HF_TRANSFORMER, HF_VISION, TIMM_IMAGE, custom_kinds_for
-from omnitrain.services.task_registry import TaskDescriptor
+from omnitrain.domain.task_registry import TaskDescriptor
 
 # A decoder-only model's `architectures` entry, e.g. LlamaForCausalLM or GPT2LMHeadModel.
 _CAUSAL_LM = re.compile(r"(ForCausalLM|LMHeadModel)$")

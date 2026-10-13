@@ -36,7 +36,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from omnitrain import constants as C
+from omnitrain.core import constants as C
 from omnitrain.settings import get_settings
 
 if TYPE_CHECKING:

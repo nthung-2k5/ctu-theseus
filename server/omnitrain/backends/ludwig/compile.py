@@ -12,7 +12,6 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from omnitrain import constants as C
 from omnitrain.backends.base import ConfigError, CustomModelRef, HyperparamsBase
 from omnitrain.backends.ludwig.tasks import (
     HF_CAUSAL_LM,
@@ -24,8 +23,9 @@ from omnitrain.backends.ludwig.tasks import (
     EncoderChoice,
     custom_kinds_for,
 )
+from omnitrain.core import constants as C
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 LUDWIG_VERSION = "0.17.5"
 

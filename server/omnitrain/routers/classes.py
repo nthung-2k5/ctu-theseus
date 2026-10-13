@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from omnitrain.db.models import Annotation, DatasetVersion, DatasetVersionItem, LabelClass
 from omnitrain.deps import ProjectDep, SessionDep
+from omnitrain.domain.task_registry import class_annotation_type
 from omnitrain.schemas.projects import (
     ClassListResponse,
     ClassResponse,
@@ -22,7 +23,6 @@ from omnitrain.schemas.projects import (
     UpdateClassBody,
 )
 from omnitrain.services import datasets as svc
-from omnitrain.services.task_registry import class_annotation_type
 
 router = APIRouter(prefix="/projects/{project_id}/classes", tags=["classes"])
 

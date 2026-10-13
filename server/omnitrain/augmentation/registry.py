@@ -4,9 +4,9 @@ from pydantic import ValidationError
 
 from omnitrain.augmentation.base import Augmentation, _registry
 from omnitrain.augmentation.config import AugmentationConfig, AugmentationInfo, ParamSpec
-from omnitrain.params import param_specs as _param_specs
+from omnitrain.domain.params import param_specs as _param_specs
+from omnitrain.domain.task_registry import TaskDescriptor
 from omnitrain.services import plugin_settings
-from omnitrain.services.task_registry import TaskDescriptor
 
 _MODALITY_ORDER = ("vision", "text", "audio", "video", "tabular")
 

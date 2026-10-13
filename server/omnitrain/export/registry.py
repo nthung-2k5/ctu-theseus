@@ -1,9 +1,9 @@
 """Lookup over the export format plugins in omnitrain/export/formats/."""
 
 from omnitrain.backends.base import TrainerBackend
+from omnitrain.domain.task_registry import TaskDescriptor
 from omnitrain.export.formats.base import ExportFormat, _registry
 from omnitrain.services import plugin_settings
-from omnitrain.services.task_registry import TaskDescriptor
 
 
 def get_export_format(format_id: str) -> type[ExportFormat]:

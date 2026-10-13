@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from omnitrain import metrics as otel
+from omnitrain.core import metrics as otel
 from omnitrain.jobs import abort, queue
 from omnitrain.settings import get_settings
 

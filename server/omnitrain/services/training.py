@@ -17,17 +17,17 @@ import yaml
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain import constants as C
 from omnitrain.backends.base import ConfigError, TrainerBackend
 from omnitrain.backends.registry import enabled_builtin_models, get_backend, trainable_backends
+from omnitrain.core import constants as C
 from omnitrain.db.models import DatasetVersion, Project, Sweep, TrainingRun
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.events import get_event_writer
 from omnitrain.jobs import abort
 from omnitrain.jobs.dispatcher import nudge
 from omnitrain.services import model_catalog, plugin_settings, storage
 from omnitrain.services.snapshot import read_snapshot_manifest
 from omnitrain.services.sweep import expand_sweep, validate_search_space
-from omnitrain.services.task_registry import get_task_descriptor
 from omnitrain.sweep_strategies import find_strategy
 
 logger = logging.getLogger(__name__)

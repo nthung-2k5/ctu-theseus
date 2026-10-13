@@ -11,7 +11,7 @@ import pytest
 import sqlalchemy as sa
 
 from omnitrain.db.models import Annotation, DatasetItem, DatasetVersion, TextFeatures, VisionFeatures
-from omnitrain.routers import datasets as datasets_router
+from omnitrain.routers.datasets import upload as datasets_router
 from omnitrain.services import storage
 
 

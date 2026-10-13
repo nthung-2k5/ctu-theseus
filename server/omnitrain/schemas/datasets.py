@@ -16,10 +16,10 @@ from omnitrain.db.enums import (
     SplitType,
     VideoContainer,
 )
+from omnitrain.domain.boxes import validate_box_annotation
 from omnitrain.preprocessing.config import PreprocessingConfig, PreprocessingInfo
 from omnitrain.schemas.common import ApiModel
 from omnitrain.schemas.projects import VersionOut
-from omnitrain.services.boxes import validate_box_annotation
 
 
 class VersionDataset(ApiModel):
@@ -197,7 +197,7 @@ class AnnotationIn(ApiModel):
 
     @model_validator(mode="after")
     def _a_box_is_well_formed(self) -> "AnnotationIn":
-        # One annotation is one box (or the "no objects" marker); see services/boxes.py for the convention.
+        # One annotation is one box (or the "no objects" marker); see domain/boxes.py for the convention.
         if self.annotation_type == "bounding_box":
             validate_box_annotation(self.class_id, self.label_structured)
         return self

@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain import constants as C
+from omnitrain.core import constants as C
 from omnitrain.db.models import (
     Annotation,
     AudioFeatures,
@@ -32,9 +32,9 @@ from omnitrain.db.models import (
     TextFeatures,
     VisionFeatures,
 )
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.schemas.datasets import ItemIn
 from omnitrain.services import storage
-from omnitrain.services.task_registry import get_task_descriptor
 
 logger = logging.getLogger(__name__)
 

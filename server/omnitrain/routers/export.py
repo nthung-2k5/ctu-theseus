@@ -14,10 +14,11 @@ import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
-from omnitrain import constants as C
 from omnitrain.backends.registry import get_backend
+from omnitrain.core import constants as C
 from omnitrain.db.models import ModelExport, Project
 from omnitrain.deps import ExportDep, RunDep, SessionDep, UserId, owned_run
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.export.registry import find_export_format
 from omnitrain.export.registry import list_export_formats as installed_export_formats
 from omnitrain.jobs.dispatcher import nudge
@@ -31,7 +32,6 @@ from omnitrain.schemas.serving import (
     ExportRow,
 )
 from omnitrain.services import plugin_settings, storage
-from omnitrain.services.task_registry import get_task_descriptor
 
 router = APIRouter(tags=["export"])
 

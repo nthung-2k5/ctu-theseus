@@ -4,8 +4,8 @@ base class itself (a backend that doesn't override anything beyond the abstract 
 from omnitrain.backends.base import HyperparamsBase, ModelChoice, TrainerBackend
 from omnitrain.backends.base import _registry as backend_registry
 from omnitrain.backends.registry import list_backends
+from omnitrain.domain.task_registry import TASK_REGISTRY, get_task_descriptor
 from omnitrain.export.registry import list_export_formats
-from omnitrain.services.task_registry import TASK_REGISTRY, get_task_descriptor
 
 
 def test_every_registered_backend_has_a_hyperparameters_model_and_sane_artifacts():
@@ -89,7 +89,7 @@ def test_a_backend_that_only_implements_the_required_methods_still_works():
 def test_param_specs_read_the_section_from_json_schema_extra():
     from pydantic import BaseModel, Field
 
-    from omnitrain.params import param_specs
+    from omnitrain.domain.params import param_specs
 
     class Params(BaseModel):
         lr: float = Field(0.1, ge=0, le=1, json_schema_extra={"group": "Optimisation", "step": 0.05})

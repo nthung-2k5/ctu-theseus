@@ -20,7 +20,7 @@ from omnitrain.augmentation.registry import (
     param_specs,
     validate_config,
 )
-from omnitrain.services.task_registry import get_task_descriptor
+from omnitrain.domain.task_registry import get_task_descriptor
 
 IMAGE_TASK = get_task_descriptor("image_classification")
 TEXT_TASK = get_task_descriptor("text_classification")

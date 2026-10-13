@@ -19,9 +19,9 @@ from omnitrain.backends.yolo.evaluate import EVALUATION_CONFIDENCE
 from omnitrain.backends.yolo.evaluate import evaluate as evaluate_detection
 from omnitrain.backends.yolo.manifest import build_preprocessing_manifest
 from omnitrain.backends.yolo.model import DETECT_CONFIDENCE, YoloLoadedModel
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 from omnitrain.export.registry import list_export_formats
 from omnitrain.jobs import abort
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 TASK = get_task_descriptor("object_detection")
 CLASSES = ["cat", "dog"]

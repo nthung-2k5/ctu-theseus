@@ -9,7 +9,7 @@
  * class-index order, read off training_set_metadata.json server-side) —
  * never from the project's label_classes list, which has no idea which
  * index Ludwig assigned to which class. See
- * server/services/evaluate.py's module docstring.
+ * server/omnitrain/domain/evaluate.py's module docstring.
  */
 
 import {

@@ -7,8 +7,8 @@ nothing about validation or test leaks into how a value is scaled.
 from collections.abc import Sequence
 from typing import Any
 
+from omnitrain.domain.tabular_stats import ColumnBounds, ColumnStats, column_bounds, column_stats, is_number
 from omnitrain.preprocessing.base import NoParams, Preprocessing
-from omnitrain.tabular_stats import ColumnBounds, ColumnStats, column_bounds, column_stats, is_number
 
 
 class Standardize(Preprocessing):

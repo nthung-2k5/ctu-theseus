@@ -8,7 +8,7 @@ precision/recall curve, so it runs at a very low confidence threshold), plus per
 
 For classification, Ultralytics reports no per-class statistics through its public API, so they are computed
 here from the model's own predictions on the evaluation split. Every label in either report is a class NAME taken
-from the model (`names.json`), never an index, and never from the `label_classes` table (see services/evaluate.py).
+from the model (`names.json`), never an index, and never from the `label_classes` table (see domain/evaluate.py).
 """
 
 import json
@@ -20,9 +20,9 @@ import pandas as pd
 from omnitrain.backends.base import EvalResult
 from omnitrain.backends.yolo import data, runtime
 from omnitrain.backends.yolo.model import YoloLoadedModel
-from omnitrain.services.boxes import parse_boxes
-from omnitrain.services.classification_report import evaluate_classification
-from omnitrain.services.evaluate import MAX_CLASSES_FOR_MATRIX, pick_eval_split
+from omnitrain.domain.boxes import parse_boxes
+from omnitrain.domain.classification_report import evaluate_classification
+from omnitrain.domain.evaluate import MAX_CLASSES_FOR_MATRIX, pick_eval_split
 
 # Images predicted per call, so a large split is neither one giant batch nor one call per image.
 PREDICT_BATCH = 32

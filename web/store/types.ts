@@ -52,7 +52,7 @@ export type SweepStrategyValue = string
 export type SweepStatusValue = 'running' | 'completed' | 'canceled'
 
 /* ── Evaluation ── */
-/* Mirrors server/services/evaluate.py's report.json shape (ingested */
+/* Mirrors server/omnitrain/domain/evaluate.py's report.json shape (ingested */
 /* verbatim into runEvaluations.report — see server/lib/microservice.ts) */
 /* and the runEvaluations row GET /runs/:runId/evaluation returns.       */
 
@@ -89,7 +89,7 @@ export type EvaluationReport = {
   outputFeature: string
   outputType: 'category' | 'number' | 'sequence' | 'text' | string
   rowCount: number
-  /** Classification only — Ludwig's own class-index order. Confusion matrix rows/columns and topErrors' actual/predicted values are always label strings, never bare indices — never re-derive axis labels from the label_classes table, see services/evaluate.py's module docstring. */
+  /** Classification only — Ludwig's own class-index order. Confusion matrix rows/columns and topErrors' actual/predicted values are always label strings, never bare indices — never re-derive axis labels from the label_classes table, see domain/evaluate.py's module docstring. */
   idx2str?: string[]
   truncated?: boolean
   confusionMatrix?: number[][]

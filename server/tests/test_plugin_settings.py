@@ -7,12 +7,12 @@ import sqlalchemy as sa
 
 from omnitrain.backends.registry import get_backend, trainable_backends
 from omnitrain.db.models import DatasetVersion, PluginSetting, TrainingRun
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.export.registry import find_export_format, list_export_formats
 from omnitrain.preprocessing.config import PreprocessingConfig
 from omnitrain.preprocessing.registry import PreprocessingConfigError, list_preprocessing, validate_config
 from omnitrain.services import plugin_settings as ps
 from omnitrain.services import storage
-from omnitrain.services.task_registry import get_task_descriptor
 from omnitrain.services.training import QueueError, _check_builtin_model, queue_training
 from omnitrain.settings import get_settings
 

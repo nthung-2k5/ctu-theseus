@@ -31,10 +31,10 @@ import pandas as pd
 from fastapi import HTTPException, UploadFile
 
 from omnitrain.db.models import TrainingRun
+from omnitrain.domain import video as video_media
+from omnitrain.domain.predict import InferenceOutput, build_batch_result_frame
+from omnitrain.domain.task_registry import get_inference_input_spec
 from omnitrain.jobs.executors import run_in_executor
-from omnitrain.services import video as video_media
-from omnitrain.services.predict import InferenceOutput, build_batch_result_frame
-from omnitrain.services.task_registry import get_inference_input_spec
 from omnitrain.settings import get_settings
 
 logger = logging.getLogger(__name__)

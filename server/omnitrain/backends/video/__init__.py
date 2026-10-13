@@ -42,8 +42,8 @@ from omnitrain.backends.video.compile import VideoHyperparameters, compile_video
 from omnitrain.backends.video.compile import hyperparameter_specs as _hyperparameter_specs
 from omnitrain.backends.video.manifest import METADATA_FILENAME
 from omnitrain.backends.video.tasks import VIDEO_MODELS, VIDEO_TASKS
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 
 class VideoBackend(TrainerBackend):

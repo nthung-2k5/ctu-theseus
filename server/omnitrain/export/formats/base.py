@@ -9,10 +9,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
+from omnitrain.core.plugins import Registry
+from omnitrain.domain.task_registry import TaskDescriptor
 from omnitrain.export.common import BundleFile, GoldenSample, dumps
 from omnitrain.export.readme import ReadmeVars, model_readme
-from omnitrain.plugins import Registry
-from omnitrain.services.task_registry import TaskDescriptor
 
 _registry: Registry["ExportFormat"] = Registry("export format", "omnitrain.export.formats")
 

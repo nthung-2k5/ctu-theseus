@@ -18,8 +18,8 @@ on them, so a new value is a code change in those places, not something a task p
 
 from typing import ClassVar, Literal
 
+from omnitrain.core.plugins import Registry
 from omnitrain.db.enums import AnnotationType, DatasetModality
-from omnitrain.plugins import Registry
 from omnitrain.schemas.common import ApiModel
 
 ColumnKind = Literal[

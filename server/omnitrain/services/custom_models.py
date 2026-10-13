@@ -32,8 +32,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from omnitrain import constants as C
 from omnitrain.backends.base import CustomModelRef
+from omnitrain.core import constants as C
 from omnitrain.db.models import CustomModel
 from omnitrain.model_sources.base import find_source
 from omnitrain.services import storage

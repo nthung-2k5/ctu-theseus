@@ -33,7 +33,7 @@ class ImageCaptioning(FileCaptionTask):
 
 class ObjectDetection(Task):
     """`boxes` holds a JSON list of {label, x, y, w, h} per image (normalised, top-left origin; see
-    services/boxes.py)."""
+    domain/boxes.py)."""
 
     id = "object_detection"
     label = "Object Detection"

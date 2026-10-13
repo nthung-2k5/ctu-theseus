@@ -8,10 +8,10 @@ import sqlalchemy as sa
 import yaml
 
 from omnitrain.db.models import DatasetVersion, RunEvaluation, RunEvent, Sweep, TrainingMetric, TrainingRun
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.events import get_event_writer
 from omnitrain.services import snapshot as snap
 from omnitrain.services import storage
-from omnitrain.services.task_registry import get_task_descriptor
 
 
 @pytest.fixture(autouse=True)

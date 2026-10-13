@@ -117,7 +117,7 @@ const api = await builder
     endpointName: 'http',
   })
   .withReference(db)
-  // server/omnitrain/telemetry.py uses the OTLP/HTTP exporters. The dashboard's default OTLP endpoint is gRPC-only
+  // server/omnitrain/core/telemetry.py uses the OTLP/HTTP exporters. The dashboard's default OTLP endpoint is gRPC-only
   // (it negotiates h2 over TLS), so HTTP clients fail the handshake with "tlsv1 alert no application protocol".
   // This needs ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL set in aspire.config.json.
   .withOtlpExporter({ protocol: OtlpProtocol.HttpProtobuf })

@@ -38,8 +38,8 @@ from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_co
 from omnitrain.backends.yolo.compile import hyperparameter_specs as _hyperparameter_specs
 from omnitrain.backends.yolo.manifest import METADATA_FILENAME
 from omnitrain.backends.yolo.tasks import YOLO_TASKS
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 
 class YoloBackend(TrainerBackend):

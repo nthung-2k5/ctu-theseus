@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import sqlalchemy as sa
 
-from omnitrain.plugins import Registry
+from omnitrain.core.plugins import Registry
 
 if TYPE_CHECKING:
     from pathlib import Path

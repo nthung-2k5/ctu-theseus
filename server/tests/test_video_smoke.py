@@ -20,7 +20,7 @@ from omnitrain.backends.video import VideoBackend, data, frames, runtime
 from omnitrain.backends.video import train as train_mod
 from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config
 from omnitrain.backends.video.model import VideoLoadedModel
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 pytestmark = pytest.mark.skipif(not os.environ.get("VIDEO_SMOKE"), reason="set VIDEO_SMOKE=1 to train for real")
 

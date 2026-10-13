@@ -1,7 +1,7 @@
 /**
  * ErrorAnalysisGrid – misclassified test-split items for a finished run,
  * most-confident-mistake first (a confident wrong answer is the most
- * informative one — see server/services/evaluate.py's `_top_errors`).
+ * informative one — see server/omnitrain/domain/evaluate.py's `_top_errors`).
  * Each row renders the item's own content (image/audio/text) alongside
  * actual vs. predicted label, so a suspected mislabel can be spotted without
  * leaving this tab — see server/routes/training.ts's

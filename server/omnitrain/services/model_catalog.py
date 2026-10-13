@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from omnitrain.backends.base import CustomModelKind, CustomModelRef, ModelChoice, TrainerBackend
 from omnitrain.backends.registry import enabled_builtin_models
 from omnitrain.db.models import CustomModel
+from omnitrain.domain.task_registry import TASK_REGISTRY, TaskDescriptor
 from omnitrain.services import custom_models
-from omnitrain.services.task_registry import TASK_REGISTRY, TaskDescriptor
 
 CUSTOM_PREFIX = "custom:"
 

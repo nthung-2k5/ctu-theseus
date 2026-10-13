@@ -21,9 +21,9 @@ from typing import Any, ClassVar
 
 # Reused as-is: a plugin's tunable-parameters wire model has nothing augmentation-specific about it.
 from omnitrain.augmentation.base import NoParams, ParamsModel
+from omnitrain.core.plugins import Registry
 from omnitrain.db.enums import DatasetModality
-from omnitrain.plugins import Registry
-from omnitrain.services.task_registry import TaskDescriptor
+from omnitrain.domain.task_registry import TaskDescriptor
 
 _registry: Registry["Preprocessing"] = Registry("preprocessing", "omnitrain.preprocessing.ops")
 

@@ -1176,7 +1176,7 @@
           "datasets"
         ],
         "summary": "Upload Items",
-        "description": "Upload files (vision/audio/video) into the pool and draft with one split (and optionally one class).\n\nFor an object-detection project, `boxes` labels the files instead of a class: a JSON list with one entry per file,\nin order, each either null (leave it unlabelled), `[]` (labelled, nothing in it) or a list of\n`{classId, x, y, w, h}` boxes (see services/boxes.py). As with `classId`, only a file that is new to the pool is\nlabelled; one already there keeps whatever labels it has.",
+        "description": "Upload files (vision/audio/video) into the pool and draft with one split (and optionally one class).\n\nFor an object-detection project, `boxes` labels the files instead of a class: a JSON list with one entry per file,\nin order, each either null (leave it unlabelled), `[]` (labelled, nothing in it) or a list of\n`{classId, x, y, w, h}` boxes (see domain/boxes.py). As with `classId`, only a file that is new to the pool is\nlabelled; one already there keeps whatever labels it has.",
         "operationId": "upload_items",
         "parameters": [
           {
@@ -8735,7 +8735,7 @@
           "default"
         ],
         "title": "ParamSpec",
-        "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `omnitrain.params`."
+        "description": "One tunable parameter of a plugin (an augmentation op, a trainer backend's hyperparameter,\n...), flattened so the web can render a form without knowing the plugin. See `omnitrain.domain.params`."
       },
       "PluginEntry": {
         "properties": {
@@ -8872,7 +8872,7 @@
           "output"
         ],
         "title": "PredictResponse",
-        "description": "One prediction. `output` is one of the framework-neutral shapes in services/predict.py, told\napart by `kind`: classification | regression | text | tokens | detections."
+        "description": "One prediction. `output` is one of the framework-neutral shapes in domain/predict.py, told\napart by `kind`: classification | regression | text | tokens | detections."
       },
       "PreprocessingConfig": {
         "properties": {

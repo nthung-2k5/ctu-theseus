@@ -15,7 +15,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain import constants as C
+from omnitrain.core import constants as C
 from omnitrain.db.models import DatasetItem, DatasetVersion, TrainingRun
 from omnitrain.services import storage
 

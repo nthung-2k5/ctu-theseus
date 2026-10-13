@@ -18,7 +18,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import sqlalchemy as sa
 
-from omnitrain import constants as C
+from omnitrain.core import constants as C
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import (
     Annotation,
@@ -30,12 +30,12 @@ from omnitrain.db.models import (
     TabularFeatures,
     TextFeatures,
 )
+from omnitrain.domain.boxes import boxes_json
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, TaskDescriptor, get_task_descriptor
 from omnitrain.services import storage
 from omnitrain.services.augmentation import materialize_augmentations
-from omnitrain.services.boxes import boxes_json
 from omnitrain.services.derived_items import delete_derived_items
 from omnitrain.services.preprocessing import materialize_preprocessing
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, TaskDescriptor, get_task_descriptor
 
 logger = logging.getLogger(__name__)
 

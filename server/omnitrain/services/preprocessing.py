@@ -24,10 +24,11 @@ from typing import Any
 import sqlalchemy as sa
 import uuid_utils
 
-from omnitrain import constants as C
 from omnitrain.augmentation import media
+from omnitrain.core import constants as C
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import DatasetItem, DatasetVersion, DatasetVersionItem, Project
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.preprocessing.config import PreprocessingConfig
 from omnitrain.preprocessing.pipeline import ConfiguredOp, build_plan, ops_for_split, preprocess
 from omnitrain.services import storage
@@ -40,7 +41,6 @@ from omnitrain.services.derived_items import (
     load_items,
     samples_for_fit,
 )
-from omnitrain.services.task_registry import get_task_descriptor
 
 logger = logging.getLogger(__name__)
 

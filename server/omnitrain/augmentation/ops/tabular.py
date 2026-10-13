@@ -6,10 +6,10 @@ from typing import Any
 from pydantic import Field
 
 from omnitrain.augmentation.base import Augmentation, ParamsModel
-from omnitrain.tabular_stats import ColumnStats
-from omnitrain.tabular_stats import column_stats as _column_stats
-from omnitrain.tabular_stats import is_number as _is_number
-from omnitrain.tabular_stats import like as _like
+from omnitrain.domain.tabular_stats import ColumnStats
+from omnitrain.domain.tabular_stats import column_stats as _column_stats
+from omnitrain.domain.tabular_stats import is_number as _is_number
+from omnitrain.domain.tabular_stats import like as _like
 
 
 class _NumericOp(Augmentation):

@@ -11,11 +11,11 @@ from fastapi import APIRouter, HTTPException
 from omnitrain.augmentation.registry import list_augmentations
 from omnitrain.backends.registry import list_backends
 from omnitrain.deps import AdminId, SessionDep
+from omnitrain.domain.task_registry import TASK_REGISTRY, TaskDescriptor
 from omnitrain.export.registry import list_export_formats
 from omnitrain.preprocessing.registry import list_preprocessing
 from omnitrain.schemas.admin import PluginEntry, PluginListResponse, PluginResponse, PluginTaskState, SetPluginBody
 from omnitrain.services import plugin_settings as ps
-from omnitrain.services.task_registry import TASK_REGISTRY, TaskDescriptor
 
 router = APIRouter(prefix="/plugins")
 

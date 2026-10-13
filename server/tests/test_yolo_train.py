@@ -10,13 +10,13 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from omnitrain import constants as C
 from omnitrain.backends.base import TrainContext
 from omnitrain.backends.yolo import data, runtime
 from omnitrain.backends.yolo import train as train_mod
 from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
+from omnitrain.core import constants as C
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 from omnitrain.jobs import abort
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 CLASSES = ["cat", "dog", "bird"]
 

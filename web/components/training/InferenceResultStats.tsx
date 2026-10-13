@@ -17,7 +17,7 @@ import { classColor, type DetectionsOutput } from '@public/lib/boxes'
 import { MONO_STACK } from '@public/theme'
 import { ConfidenceBars } from './ConfidenceBars'
 
-/** Mirrors the inference output schema (server/omnitrain/services/predict.py). */
+/** Mirrors the inference output schema (server/omnitrain/domain/predict.py). */
 export type InferenceOutput =
   | { kind: 'classification'; feature: string; classes: { label: string; confidence: number }[] }
   | { kind: 'regression'; feature: string; value: number }

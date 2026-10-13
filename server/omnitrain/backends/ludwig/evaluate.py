@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 from omnitrain.backends.base import EvalResult
-from omnitrain.services.evaluate import MAX_CLASSES_FOR_MATRIX, metric, pick_eval_split, top_errors
+from omnitrain.domain.evaluate import MAX_CLASSES_FOR_MATRIX, metric, pick_eval_split, top_errors
 
 
 def evaluate(model: Any, df: pd.DataFrame, split_column: str, item_id_column: str) -> EvalResult | None:

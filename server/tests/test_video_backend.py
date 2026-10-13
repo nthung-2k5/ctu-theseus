@@ -12,9 +12,9 @@ from omnitrain.backends.registry import get_backend, trainable_backends
 from omnitrain.backends.video import VideoBackend, frames
 from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config, hyperparameter_specs
 from omnitrain.backends.video.manifest import build_preprocessing_manifest
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 from omnitrain.export.formats._kits import supports_generated_clients
 from omnitrain.export.registry import list_export_formats
-from omnitrain.services.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 
 TASK = get_task_descriptor("video_classification")
 SNAPSHOT = SnapshotContext(

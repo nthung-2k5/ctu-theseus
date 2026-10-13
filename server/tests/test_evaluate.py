@@ -1,6 +1,6 @@
 import pandas as pd
 
-from omnitrain.services.evaluate import pick_eval_split
+from omnitrain.domain.evaluate import pick_eval_split
 
 SPLIT_COL = "split"
 

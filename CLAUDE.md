@@ -28,12 +28,20 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
 
 ## Conventions specific to this repo
 
+- **Layering inside `server/omnitrain/`.** `core/` imports nothing else from the package; `domain/` is
+  framework-neutral logic (no DB session, no HTTP) and may import `core/`, `schemas.common`, `db.enums` and plugin base classes;
+  trainer backends, export formats and the preprocessing/augmentation ops are plugins that should reach for
+  `core/` and `domain/`, not `services/`; `services/` is database + S3 orchestration. A new pure helper
+  (validation, shaping a prediction, a report) belongs in `domain/`, not in `services/`. Not yet clean, and
+  not enforced by a check: `backends/` and `export/` still import `services.storage`, `db` and `jobs.abort`
+  in places, and `services/` imports `jobs` (`nudge`, `abort`).
+
 - **No C#.** The Aspire AppHost is TypeScript (`apphost.mts`). If you're tempted to look for
   `Program.cs` or a `.csproj`, there isn't one.
 - **Tasks are plugins; the task registry is the source of truth for what a task's data looks like.**
   One `Task` subclass per task in `server/omnitrain/tasks/builtin/` (any module dropped there registers at class
   creation): `id`, `label`, `modality`, `item_spec`, `annotation`, snapshot `columns`, `output`, `input_fields`,
-  plus `order` for the picker. `services/task_registry.py` is the framework-neutral lookup facade over them
+  plus `order` for the picker. `domain/task_registry.py` is the framework-neutral lookup facade over them
   (`get_task_descriptor`, `TASK_REGISTRY`, ...): item payload shape, ground-truth/annotation type, snapshot
   columns and the inference request/response contract. Adding a task's data-side definition is one class, not
   five separate edits: no enum, migration or frontend edit, because `projects.task` is free text (a task id)
@@ -71,7 +79,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   validation loss so far as a task-agnostic definition of a run's best epoch.
 - **Video is a file modality with its own backend.** `video_classification` (one class per clip, like audio) is
   trained only by `backends/video/` (torchvision's Kinetics-400 classifiers, BSD-3). Decoding is OpenCV
-  (`services/video.py` to validate an upload and cut a poster frame; `backends/video/frames.py` to sample clips),
+  (`domain/video.py` to validate an upload and cut a poster frame; `backends/video/frames.py` to sample clips),
   deliberately not torchcodec, which needs FFmpeg shared libraries on the host. One sampling definition
   (`ClipSpec`: frames, stride, size, mean/std) serves training, evaluation, serving and the export manifest, and is
   written into `names.json` with the class order. Uploads of video go through the same `upload_to_pool` but are read
@@ -97,7 +105,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   fractions (0..1) of the displayed image. An image with nothing in it carries one class-less
   `{"background": true}` marker, which is what tells "labelled, empty" from "never labelled": the
   snapshot's `boxes` cell is `"[]"` for the first and `null` for the second, and a trainer must leave
-  the second out. All of it is validated in `services/boxes.py` (wired in through `AnnotationIn`), so
+  the second out. All of it is validated in `domain/boxes.py` (wired in through `AnnotationIn`), so
   nothing else should re-derive the rules. Several places assume one class per item and must go
   through `task_registry.class_annotation_type(task)` instead of hard-coding `classification`: the
   item filter, class stats, merges and the health report. A class belongs to one box, so the bulk

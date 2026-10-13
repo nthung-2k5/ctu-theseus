@@ -5,9 +5,9 @@
  * `@public` alias.
  */
 
-/** The server rejects anything larger (`MAX_UPLOAD_BYTES` in `routers/datasets.py`). */
+/** The server rejects anything larger (`MAX_UPLOAD_BYTES` in `routers/datasets/upload.py`). */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024
-/** The same for a video clip (`MAX_VIDEO_UPLOAD_BYTES` in `routers/datasets.py`). */
+/** The same for a video clip (`MAX_VIDEO_UPLOAD_BYTES` in `routers/datasets/upload.py`). */
 export const MAX_VIDEO_FILE_BYTES = 200 * 1024 * 1024
 
 const EXT_MIME: Record<string, string> = {

@@ -5,6 +5,7 @@ import pytest
 from PIL import Image
 
 from omnitrain.augmentation.media import AudioClip
+from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.preprocessing.base import NoParams, Preprocessing
 from omnitrain.preprocessing.config import PreprocessingConfig, PreprocessingOpConfig
 from omnitrain.preprocessing.pipeline import build_plan, ops_for_split, preprocess
@@ -16,7 +17,6 @@ from omnitrain.preprocessing.registry import (
     param_specs,
     validate_config,
 )
-from omnitrain.services.task_registry import get_task_descriptor
 
 IMAGE_TASK = get_task_descriptor("image_classification")
 TEXT_TASK = get_task_descriptor("text_classification")

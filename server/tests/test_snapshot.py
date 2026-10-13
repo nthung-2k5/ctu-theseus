@@ -18,9 +18,9 @@ from omnitrain.db.models import (
     TextFeatures,
     User,
 )
+from omnitrain.domain.task_registry import ColumnSpec, get_task_descriptor
 from omnitrain.services import snapshot as snap
 from omnitrain.services import storage
-from omnitrain.services.task_registry import ColumnSpec, get_task_descriptor
 
 CLASS_ID = uuid.uuid4()
 ITEM_ID = uuid.uuid4()

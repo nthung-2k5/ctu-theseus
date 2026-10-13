@@ -11,8 +11,9 @@ import logging
 import os
 import tempfile
 
-from omnitrain import constants as C
-from omnitrain.services import storage, video
+from omnitrain.core import constants as C
+from omnitrain.domain import video
+from omnitrain.services import storage
 
 logger = logging.getLogger(__name__)
 

@@ -11,8 +11,8 @@ import pytest
 from omnitrain.backends.base import ConfigError, CustomModelRef
 from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
 from omnitrain.backends.ludwig.custom import validate_custom_model
+from omnitrain.domain.task_registry import SnapshotContext, get_task_descriptor
 from omnitrain.services import custom_models as cm
-from omnitrain.services.task_registry import SnapshotContext, get_task_descriptor
 
 MB = 2**20
 

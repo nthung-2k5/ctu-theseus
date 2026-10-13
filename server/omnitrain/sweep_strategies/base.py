@@ -13,7 +13,7 @@ after another. It cannot look at earlier trials' results (nothing adaptive yet).
 import random
 from typing import Any, ClassVar
 
-from omnitrain.plugins import Registry
+from omnitrain.core.plugins import Registry
 from omnitrain.sweep_strategies._space import SearchSpace
 
 _registry: Registry["SweepStrategy"] = Registry("sweep strategy", "omnitrain.sweep_strategies")

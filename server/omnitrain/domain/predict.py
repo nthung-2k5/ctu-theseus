@@ -46,7 +46,7 @@ class TokensOutput(TypedDict):
 
 class BoundingBoxOut(TypedDict):
     """Normalised to the image (0..1), top-left corner and size: the convention bounding-box annotations use
-    (see services/boxes.py), so a box drawn by a user and a box predicted by a model are interchangeable."""
+    (see domain/boxes.py), so a box drawn by a user and a box predicted by a model are interchangeable."""
 
     x: float
     y: float
@@ -77,7 +77,7 @@ def build_batch_result_frame(input_df: pd.DataFrame, predictions: pd.DataFrame) 
     """Concatenate a batch inference job's original input rows with the backend's own postprocessed
     prediction columns (Ludwig: `{feature}_predictions`, `{feature}_probability`, ...) — the same
     "input + raw prediction columns" shape as the evaluation predictions.parquet (see
-    services/evaluate.py), so a batch result and an evaluation export read the same way. Both frames
+    domain/evaluate.py), so a batch result and an evaluation export read the same way. Both frames
     come from the same `LoadedModel.predict` call and are therefore already row-aligned; the index
     reset just avoids a spurious join on a non-default input index.
     """

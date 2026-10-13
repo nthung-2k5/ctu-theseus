@@ -15,8 +15,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain import constants as C
 from omnitrain.backends.registry import get_backend
+from omnitrain.core import constants as C
 from omnitrain.db.models import TrainingRun
 from omnitrain.services import storage
 

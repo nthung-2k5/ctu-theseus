@@ -2,10 +2,10 @@
 
 from typing import Any, ClassVar
 
+from omnitrain.domain.task_registry import TaskDescriptor
 from omnitrain.export.common import template
 from omnitrain.export.formats.base import BundleContext, ExportFormat
 from omnitrain.export.readme import app_readme, devkit_readme
-from omnitrain.services.task_registry import TaskDescriptor
 
 
 def supports_generated_clients(task: TaskDescriptor) -> bool:

@@ -36,8 +36,8 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from omnitrain.domain.boxes import parse_boxes
 from omnitrain.services import storage
-from omnitrain.services.boxes import parse_boxes
 
 logger = logging.getLogger(__name__)
 

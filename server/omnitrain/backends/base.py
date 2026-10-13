@@ -37,11 +37,11 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
-from omnitrain.params import param_specs
-from omnitrain.plugins import Registry
+from omnitrain.core.plugins import Registry
+from omnitrain.domain.params import param_specs
+from omnitrain.domain.predict import InferenceOutput
+from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.schemas.common import ParamSpec
-from omnitrain.services.predict import InferenceOutput
-from omnitrain.services.task_registry import SnapshotContext, TaskDescriptor
 
 _registry: Registry["TrainerBackend"] = Registry("trainer backend", "omnitrain.backends")
 
@@ -146,7 +146,7 @@ class OutputSpec:
 
 class LoadedModel(ABC):
     """A trained model resident in memory: the seam `services/model_cache.py`, `services/inference.py`,
-    `jobs/export.py` and `services/evaluate.py` use instead of talking to a specific framework."""
+    `jobs/export.py` and `domain/evaluate.py` use instead of talking to a specific framework."""
 
     input_columns: list[str]
     output: OutputSpec
@@ -252,7 +252,7 @@ class TrainerBackend(ABC):
     def hyperparameter_specs(cls, task: TaskDescriptor) -> list[ParamSpec]:
         """`ParamSpec`s for this backend's hyperparameters, for the create-run/create-sweep form.
 
-        Default: introspect `Hyperparameters` (see `omnitrain.params.param_specs`), leniently — a
+        Default: introspect `Hyperparameters` (see `omnitrain.domain.params.param_specs`), leniently — a
         field with no generic representation (a mixed type like `int | Literal["auto"]`) is
         skipped rather than raising, and `modelId` is always skipped since it's exposed via
         `models(task)` instead. Override this when defaults or bounds vary by task (Ludwig's
@@ -311,7 +311,7 @@ class TrainerBackend(ABC):
         cls, model: LoadedModel, df: pd.DataFrame, split_column: str, item_id_column: str
     ) -> EvalResult | None:
         """Build the evaluation report + predictions download for a trained model against `df`
-        (typically the test split, see `services/evaluate.pick_eval_split`). Returns None if there
+        (typically the test split, see `domain/evaluate.pick_eval_split`). Returns None if there
         is nothing to evaluate. Default: no evaluation report support."""
         return None
 
