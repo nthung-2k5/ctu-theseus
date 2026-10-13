@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException
 
 from omnitrain.db.models import DatasetVersion, RunEvaluation, Sweep, TrainingRun
-from omnitrain.deps import ProjectDep, SessionDep, SweepDep
+from omnitrain.deps import ProjectDep, SessionDep, SweepDep, UserId
 from omnitrain.schemas.training import (
     CreateSweepBody,
     RunRow,
@@ -17,14 +17,25 @@ from omnitrain.schemas.training import (
     SweepDetailResponse,
     SweepListResponse,
     SweepRow,
+    SweepStrategyListResponse,
+    SweepStrategyOut,
     SweepSummary,
     SweepTrial,
 )
 from omnitrain.services import training as training_service
 from omnitrain.services.evaluation_score import evaluation_brief
 from omnitrain.services.training import QueueError, queue_sweep, reconcile_sweep_status
+from omnitrain.sweep_strategies import list_strategies
 
 router = APIRouter(tags=["sweeps"])
+
+
+@router.get("/sweep-strategies", response_model=SweepStrategyListResponse)
+async def list_sweep_strategies(user_id: UserId) -> SweepStrategyListResponse:
+    """The installed sweep strategies (omnitrain/sweep_strategies/, one class each), in display order."""
+    return SweepStrategyListResponse(
+        strategies=[SweepStrategyOut(id=s.id, label=s.label, description=s.description) for s in list_strategies()]
+    )
 
 
 @router.post("/projects/{project_id}/sweeps", status_code=201, response_model=SweepCreatedResponse)

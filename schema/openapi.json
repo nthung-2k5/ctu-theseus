@@ -2180,6 +2180,28 @@
         }
       }
     },
+    "/api/sweep-strategies": {
+      "get": {
+        "tags": [
+          "sweeps"
+        ],
+        "summary": "List Sweep Strategies",
+        "description": "The installed sweep strategies (omnitrain/sweep_strategies/, one class each), in display order.",
+        "operationId": "list_sweep_strategies",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SweepStrategyListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{project_id}/sweeps": {
       "post": {
         "tags": [
@@ -6236,10 +6258,6 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "grid",
-              "random"
-            ],
             "title": "Strategy"
           },
           "maxTrials": {
@@ -10149,10 +10167,6 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "grid",
-              "random"
-            ],
             "title": "Strategy"
           },
           "maxTrials": {
@@ -10194,6 +10208,46 @@
         ],
         "title": "SweepRow"
       },
+      "SweepStrategyListResponse": {
+        "properties": {
+          "strategies": {
+            "items": {
+              "$ref": "#/components/schemas/SweepStrategyOut"
+            },
+            "type": "array",
+            "title": "Strategies"
+          }
+        },
+        "type": "object",
+        "required": [
+          "strategies"
+        ],
+        "title": "SweepStrategyListResponse"
+      },
+      "SweepStrategyOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description"
+        ],
+        "title": "SweepStrategyOut",
+        "description": "One way of turning a search space into trials, from the sweep strategy plugins."
+      },
       "SweepSummary": {
         "properties": {
           "id": {
@@ -10207,10 +10261,6 @@
           },
           "strategy": {
             "type": "string",
-            "enum": [
-              "grid",
-              "random"
-            ],
             "title": "Strategy"
           },
           "maxTrials": {

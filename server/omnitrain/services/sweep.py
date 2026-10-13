@@ -1,22 +1,24 @@
-"""Hyperparameter sweep search-space expansion.
+"""Hyperparameter sweep search-space validation and expansion.
 
 Deliberately not Ludwig's own hyperopt (Ray Tune-backed): that would contend with training for
 the single GPU, its progress is opaque to the run/metric/log event pipeline, and it reuses none
 of the cancel and recovery machinery an ordinary run already gets. Instead a sweep is just N
-ordinary training runs: this module turns a search space into that list of N selections, which
-the sweeps router then enqueues one after another through the normal training path.
+ordinary training runs: a sweep strategy plugin (`omnitrain/sweep_strategies/`) turns a search space into that
+list of N selections, which the sweeps router then enqueues one after another through the normal training path.
 
 Keys are the camelCase names of the chosen trainer backend's Hyperparameters model (learningRate,
 batchSize, encoderId, ...), exactly as they arrive in the API and are stored in sweeps.search_space.
 """
 
-import itertools
 import random
-from typing import Any, Literal
+from typing import Any
+
+from omnitrain.sweep_strategies import get_strategy
+from omnitrain.sweep_strategies._space import SearchSpace, expand_grid, sample_random
+
+__all__ = ["MAX_TRIALS_CAP", "SearchSpace", "expand_grid", "expand_sweep", "sample_random", "validate_search_space"]
 
 MAX_TRIALS_CAP = 50
-
-SearchSpace = dict[str, list[Any]]
 
 
 def validate_search_space(search_space: SearchSpace, max_trials: int) -> str | None:
@@ -31,30 +33,12 @@ def validate_search_space(search_space: SearchSpace, max_trials: int) -> str | N
     return None
 
 
-def expand_grid(search_space: SearchSpace) -> list[dict[str, Any]]:
-    """Every combination of the candidate values (cartesian product), in a stable order.
-
-    The first key varies slowest. An empty search space yields exactly one empty trial.
-    """
-    keys = list(search_space)
-    return [dict(zip(keys, combo, strict=True)) for combo in itertools.product(*(search_space[k] for k in keys))]
-
-
-def sample_random(search_space: SearchSpace, count: int, rng: random.Random | None = None) -> list[dict[str, Any]]:
-    """`count` combinations, each knob sampled independently and uniformly from its candidates."""
-    rng = rng or random.Random()
-    return [{key: rng.choice(values) for key, values in search_space.items()} for _ in range(count)]
-
-
 def expand_sweep(
-    search_space: SearchSpace, strategy: Literal["grid", "random"], max_trials: int, rng: random.Random | None = None
+    search_space: SearchSpace, strategy: str, max_trials: int, rng: random.Random | None = None
 ) -> list[dict[str, Any]]:
-    """Expand a search space into the trials to dispatch.
+    """Expand a search space into the trials to dispatch, using the installed strategy named `strategy`.
 
-    `grid` is capped at max_trials by truncating, not sampling down (a user who wants the full
-    grid sets max_trials to the product size), so a large space cannot accidentally enqueue
-    hundreds of runs against the single GPU.
+    Never more than `max_trials`, whatever the strategy returns, so a large space cannot accidentally enqueue
+    hundreds of runs against the single GPU. Raises KeyError for an id no installed strategy defines.
     """
-    if strategy == "grid":
-        return expand_grid(search_space)[:max_trials]
-    return sample_random(search_space, max_trials, rng)
+    return get_strategy(strategy).trials(search_space, max_trials, rng or random.Random())[:max_trials]

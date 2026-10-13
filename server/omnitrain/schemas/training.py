@@ -13,7 +13,6 @@ from omnitrain.db.enums import (
     EvaluationStatus,
     SplitType,
     SweepStatus,
-    SweepStrategy,
     TrainingStatus,
 )
 from omnitrain.schemas.common import ApiModel, ParamSpec
@@ -229,7 +228,7 @@ class CreateSweepBody(ApiModel):
     # dict rather than one fixed schema; each backend's own Hyperparameters model validates a
     # trial's picks when it is compiled.
     search_space: dict[str, Annotated[list[Any], Field(min_length=1)]]
-    strategy: SweepStrategy
+    strategy: str
     max_trials: int = Field(ge=1, le=50)
 
 
@@ -239,11 +238,23 @@ class SweepRow(ApiModel):
     dataset_version_id: uuid.UUID
     name: str
     search_space: Any
-    strategy: SweepStrategy
+    strategy: str
     max_trials: int
     status: SweepStatus
     created_at: datetime
     updated_at: datetime
+
+
+class SweepStrategyOut(ApiModel):
+    """One way of turning a search space into trials, from the sweep strategy plugins."""
+
+    id: str
+    label: str
+    description: str
+
+
+class SweepStrategyListResponse(ApiModel):
+    strategies: list[SweepStrategyOut]
 
 
 class SweepCreatedResponse(ApiModel):
@@ -254,7 +265,7 @@ class SweepCreatedResponse(ApiModel):
 class SweepSummary(ApiModel):
     id: uuid.UUID
     name: str
-    strategy: SweepStrategy
+    strategy: str
     max_trials: int
     status: SweepStatus
     created_at: datetime

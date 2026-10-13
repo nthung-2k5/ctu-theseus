@@ -421,6 +421,7 @@ server/               The backend (FastAPI + Ludwig); see server/README.md
   omnitrain/routers/        HTTP routes (auth, projects, datasets, classes, training, sweeps,
                           inference, export, api_keys, api_v1, models, admin/)
   omnitrain/tasks/          task plugins (base + builtin/), looked up via services/task_registry
+  omnitrain/sweep_strategies/  sweep strategy plugins (grid, random, random_unique, balanced, one_at_a_time)
   omnitrain/services/       task_registry (lookup), ludwig_config, snapshot, sweep,
                           plugin_settings, model_catalog, custom_models, ...
   omnitrain/jobs/           queue, dispatcher, lanes, run_core (train+evaluate, shared with workers),

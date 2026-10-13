@@ -405,6 +405,40 @@ async def test_sweep_validation_errors(client, new_user, db, fake_s3):
         assert (await s.execute(sa.select(sa.func.count()).select_from(Sweep))).scalar_one() == 0
 
 
+async def test_the_installed_sweep_strategies_are_listed_for_the_selector(client, new_user):
+    c = await new_user()
+    r = await c.get("/api/sweep-strategies")
+    assert r.status_code == 200
+    strategies = r.json()["strategies"]
+    assert [s["id"] for s in strategies] == ["grid", "random", "random_unique", "balanced", "one_at_a_time"]
+    assert all(s["label"] and s["description"] for s in strategies)
+    assert (await client.get("/api/sweep-strategies")).status_code == 401
+
+
+async def test_a_sweep_can_use_any_installed_strategy_and_an_unknown_one_is_refused(client, new_user, db, fake_s3):
+    c = await new_user()
+    p = await project(c)
+    vid = await ready_version(db, fake_s3, p["id"])
+    url = f"/api/projects/{p['id']}/sweeps"
+    space = {"learningRate": [0.01, 0.001, 0.0001], "batchSize": [16, 32]}
+    r = await c.post(url, json={"name": "ofat", "datasetVersionId": vid, "strategy": "one_at_a_time",
+                                "maxTrials": 10, "searchSpace": space})  # fmt: skip
+    assert r.status_code == 201, r.text
+    assert r.json()["sweep"]["strategy"] == "one_at_a_time"
+    assert [t["hyperparameters"] for t in r.json()["trials"]] == [
+        {"learningRate": 0.01, "batchSize": 16},
+        {"learningRate": 0.001, "batchSize": 16},
+        {"learningRate": 0.0001, "batchSize": 16},
+        {"learningRate": 0.01, "batchSize": 32},
+    ]
+
+    bad = await c.post(url, json={"name": "x", "datasetVersionId": vid, "strategy": "bayesian",
+                                  "maxTrials": 4, "searchSpace": space})  # fmt: skip
+    assert bad.status_code == 422 and "Unknown sweep strategy" in bad.json()["error"]["message"]
+    async with db() as s:
+        assert (await s.execute(sa.select(sa.func.count()).select_from(Sweep))).scalar_one() == 1
+
+
 async def test_a_trial_that_cannot_compile_is_kept_as_a_failed_trial_not_silently_dropped(
     client, new_user, db, fake_s3
 ):

@@ -28,6 +28,7 @@ from omnitrain.services import model_catalog, plugin_settings, storage
 from omnitrain.services.snapshot import read_snapshot_manifest
 from omnitrain.services.sweep import expand_sweep, validate_search_space
 from omnitrain.services.task_registry import get_task_descriptor
+from omnitrain.sweep_strategies import find_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,8 @@ async def queue_sweep(
         return QueueError(409, f"Dataset version is not ready for training (status: {version.status})")
     if error := validate_search_space(search_space, max_trials):
         return QueueError(400, error)
+    if find_strategy(strategy) is None:
+        return QueueError(422, f"Unknown sweep strategy '{strategy}'")
 
     if backend_id is not None:
         backend = get_backend(backend_id)
@@ -210,7 +213,7 @@ async def queue_sweep(
         if backend is None:
             return QueueError(400, f"No trainer backend is available for task '{task}'")
 
-    trials_selections = expand_sweep(search_space, strategy, max_trials)  # type: ignore[arg-type]
+    trials_selections = expand_sweep(search_space, strategy, max_trials)
     sweep = Sweep(
         project_id=project_id, dataset_version_id=dataset_version_id, name=name, backend=backend.id,
         search_space=search_space, strategy=strategy, max_trials=max_trials, status="running",

@@ -17,7 +17,6 @@ DatasetVersionStatus = Literal["draft", "building", "ready", "failed"]
 ExportStatus = Literal["pending", "converting", "assembling", "ready", "failed"]
 EvaluationSplit = Literal["train", "test", "validation", "full"]
 EvaluationStatus = Literal["success", "failed"]
-SweepStrategy = Literal["grid", "random"]
 SweepStatus = Literal["running", "completed", "canceled"]
 # Only what the browser consumes. Export and evaluation state live in their own tables.
 RunEventKind = Literal["status", "metric"]

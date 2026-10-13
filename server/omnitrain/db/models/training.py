@@ -11,7 +11,6 @@ from omnitrain.db.base import Base
 from omnitrain.db.models._common import created_at, pg_enum, updated_at, uuid_pk
 from omnitrain.db.models.dataset import split_type_t
 
-sweep_strategy_t = pg_enum(e.SweepStrategy, "sweep_strategy")
 sweep_status_t = pg_enum(e.SweepStatus, "sweep_status")
 training_status_t = pg_enum(e.TrainingStatus, "training_status")
 evaluation_split_t = pg_enum(e.EvaluationSplit, "evaluation_split")
@@ -42,7 +41,8 @@ class Sweep(Base):
     backend: Mapped[str] = mapped_column(sa.String(64), default="ludwig", server_default="ludwig")
     # Maps each trainer knob to its candidate values, see services/sweep.py.
     search_space: Mapped[Any] = mapped_column(JSONB)
-    strategy: Mapped[str] = mapped_column(sweep_strategy_t)
+    # A sweep strategy plugin id (omnitrain/sweep_strategies/), free text like `backend`, never a Postgres enum.
+    strategy: Mapped[str] = mapped_column(sa.String(64))
     max_trials: Mapped[int] = mapped_column(sa.Integer)
     status: Mapped[str] = mapped_column(sweep_status_t, server_default="running")
     created_at: Mapped[datetime] = created_at()

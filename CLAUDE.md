@@ -103,6 +103,13 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   item filter, class stats, merges and the health report. A class belongs to one box, so the bulk
   "classify" action refuses a detection project, and the upload route takes per-file `boxes`, never
   `classId`, for one.
+- **Sweep strategies are plugins.** One `SweepStrategy` subclass per strategy in
+  `server/omnitrain/sweep_strategies/` (`grid`, `random`, `random_unique`, `balanced`, `one_at_a_time`): `trials(space,
+  max_trials, rng)` returns the combinations to train, all up front, and `services/sweep.expand_sweep` truncates to the
+  budget. `sweeps.strategy` is free text (migration 0016), `GET /api/sweep-strategies` feeds the web's selector, and
+  `queue_sweep` refuses an unknown id. A strategy cannot see earlier trials' results: a sweep is N ordinary runs
+  enqueued at once, so an adaptive strategy (Bayesian, successive halving) would first need something that enqueues
+  more trials as runs finish.
 - **A run's headline score is not accuracy.** `services/evaluation_score.py` picks it from the evaluation report's
   `overall` block (accuracy for a classifier, mAP50 for a detector, R² for a regressor) and ships it as
   `evaluation.score` (`metric`, `label`, `value`, `higherIsBetter`) on every run summary. The runs list, the "best
