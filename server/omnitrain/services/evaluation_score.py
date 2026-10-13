@@ -2,22 +2,15 @@
 
 A classifier is judged by accuracy, a detector by mAP50, a regressor by R-squared. Which one applies is read off
 the evaluation report's `overall` block, which each backend fills with the metrics that fit its output, so the
-runs list, the "best run" marker and the comparison never hard-code accuracy.
+runs list, the "best run" marker and the comparison never hard-code accuracy. The metrics that can be the
+headline are plugins (`omnitrain/scoring/`); the first one, by priority, that the report carries wins.
 """
 
 from typing import Any
 
 from omnitrain.db.models import RunEvaluation
 from omnitrain.schemas.training import EvaluationBrief, EvaluationScore
-
-# (key in report["overall"], label, higher is better), most telling first.
-_SCORES: tuple[tuple[str, str, bool], ...] = (
-    ("accuracy", "Accuracy", True),
-    ("map50", "mAP50", True),
-    ("r2", "R²", True),
-    ("rmse", "RMSE", False),
-    ("mae", "MAE", False),
-)
+from omnitrain.scoring import list_scores
 
 
 def primary_score(evaluation: RunEvaluation) -> EvaluationScore | None:
@@ -26,10 +19,12 @@ def primary_score(evaluation: RunEvaluation) -> EvaluationScore | None:
         overall = evaluation.report["overall"]
     if evaluation.accuracy is not None:
         overall = {**overall, "accuracy": evaluation.accuracy}
-    for metric, label, higher_is_better in _SCORES:
-        value = overall.get(metric)
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return EvaluationScore(metric=metric, label=label, value=float(value), higher_is_better=higher_is_better)
+    for score in list_scores():
+        value = score.value(overall)
+        if value is not None:
+            return EvaluationScore(
+                metric=score.id, label=score.label, value=value, higher_is_better=score.higher_is_better
+            )
     return None
 
 

@@ -2,6 +2,8 @@
 
 import uuid
 
+import pytest
+
 from omnitrain.db.models import RunEvaluation
 from omnitrain.services.evaluation_score import evaluation_brief, primary_score
 
@@ -39,3 +41,63 @@ def test_a_failed_evaluation_carries_no_score():
     brief = evaluation_brief(_evaluation(status="failed", accuracy=0.9, report={"overall": {"accuracy": 0.9}}))
     assert brief is not None and brief.score is None
     assert evaluation_brief(None) is None
+
+
+class TestScorePlugins:
+    @pytest.fixture
+    def scores(self):
+        from omnitrain.scoring.base import _registry
+
+        _registry.ensure_loaded()
+        before = set(_registry._items)
+        yield _registry
+        for plugin_id in set(_registry._items) - before:
+            _registry.unregister(plugin_id)
+
+    def test_the_builtin_scores_are_tried_most_telling_first(self):
+        from omnitrain.scoring import list_scores
+
+        assert [s.id for s in list_scores()] == ["accuracy", "map50", "r2", "rmse", "mae"]
+
+    def test_a_new_class_becomes_a_headline_with_no_other_edit(self, scores):
+        from omnitrain.scoring import HeadlineScore
+
+        class Ndcg(HeadlineScore):
+            id = "ndcg"
+            label = "NDCG@10"
+            order = 15
+
+        score = primary_score(_evaluation(report={"overall": {"ndcg": 0.62, "r2": 0.4}}))
+        assert score is not None and (score.metric, score.label, score.value) == ("ndcg", "NDCG@10", 0.62)
+        # A built-in with a lower `order` still wins when the report carries it.
+        score = primary_score(_evaluation(accuracy=0.9, report={"overall": {"ndcg": 0.62}}))
+        assert score is not None and score.metric == "accuracy"
+
+    def test_a_score_can_read_its_value_from_somewhere_else(self, scores):
+        from omnitrain.scoring import HeadlineScore
+
+        class Nested(HeadlineScore):
+            id = "bleu"
+            label = "BLEU"
+
+            @classmethod
+            def value(cls, overall):
+                raw = overall.get("text", {}).get("bleu")
+                return float(raw) if raw is not None else None
+
+        score = primary_score(_evaluation(report={"overall": {"text": {"bleu": 0.3}}}))
+        assert score is not None and (score.metric, score.value) == ("bleu", 0.3)
+
+    def test_a_score_without_a_label_is_refused_and_so_is_a_duplicate_id(self, scores):
+        from omnitrain.scoring import HeadlineScore
+
+        with pytest.raises(TypeError, match="needs a label"):
+
+            class Unlabelled(HeadlineScore):
+                id = "unlabelled"
+
+        with pytest.raises(ValueError, match="Duplicate headline score id"):
+
+            class Again(HeadlineScore):
+                id = "accuracy"
+                label = "Accuracy again"

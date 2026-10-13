@@ -107,7 +107,9 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `overall` block (accuracy for a classifier, mAP50 for a detector, R² for a regressor) and ships it as
   `evaluation.score` (`metric`, `label`, `value`, `higherIsBetter`) on every run summary. The runs list, the "best
   run" marker, the overview and the comparison read that via `web/lib/runScore.ts`; don't hard-code `accuracy` in a
-  new place. A backend that reports a new kind of metric adds a row to `_SCORES` there.
+  new place. The metrics that can be the headline are plugins (`server/omnitrain/scoring/`, one `HeadlineScore` subclass per
+  metric key in `overall`, `order` = priority): a backend that reports a new kind of metric adds a class there, and
+  the web needs no edit because it reads the label and direction off `evaluation.score`.
 - **Some `theseus` names are deliberately kept** after the rename to OmniTrain, because they identify stored data:
   the `theseus-datasets` / `theseus-training` / `theseus-models` buckets (snapshot parquets embed `s3://theseus-datasets/...`
   URIs), the `_theseus_item_id` snapshot column, the `ctu-theseus-*` Docker volumes and Postgres database, the HKDF info
