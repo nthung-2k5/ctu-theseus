@@ -8,7 +8,8 @@ from pydantic import Field, model_validator
 
 from omnitrain.schemas.common import ApiModel
 
-SourceKind = Literal["hub", "upload"]
+# An id from the model source plugins (omnitrain/model_sources/), not a closed set.
+SourceKind = str
 Scope = Literal["global", "private"]
 
 

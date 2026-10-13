@@ -84,7 +84,8 @@ secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, t
 Hugging Face video model is saved as a self-contained folder, so it never needs the base model's files again).
 The run spec then carries a `customModel` description; the worker fetches the files with the server's own code
 (`custom_models.ensure_local`: an uploaded bundle from S3 with its checksum re-checked, or a public Hub model at
-its pinned revision, fetched anonymously whatever token the machine has) into its own temp dir and swaps the
+its pinned revision, fetched anonymously whatever token the machine has; each `ModelSource` in `omnitrain/model_sources/` declares which
+of its models qualify) into its own temp dir and swaps the
 server's path for that one in the config. Everything else trains on the server: a private or gated Hub model
 (it needs its owner's saved token, which never leaves the server), and every Ludwig custom model (its checkpoint
 re-reads the model from the path in its config, which would be the worker's). The two sides

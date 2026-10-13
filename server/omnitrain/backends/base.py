@@ -87,7 +87,7 @@ class CustomModelKind(BaseModel):
     description: str = ""
     modality: str
     # Where its weights may come from: a Hub reference, an uploaded bundle, or both.
-    source_kinds: list[Literal["hub", "upload"]]
+    source_kinds: list[str]
     status: Literal["stable", "experimental"] = "stable"
     # None when this kind can be used right now, else a user-facing reason (e.g. an optional
     # dependency that is not installed).
@@ -109,7 +109,7 @@ class CustomModelRef(BaseModel):
 
     id: str
     kind: str
-    source_kind: Literal["hub", "upload"]
+    source_kind: str
     source_ref: str | None = None
     revision: str | None = None
     local_path: str

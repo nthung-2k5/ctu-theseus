@@ -25,6 +25,7 @@ from sqlalchemy.orm import aliased
 
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel, ModelExport, TrainingRun, TrainingWorker
+from omnitrain.model_sources import list_sources
 from omnitrain.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -46,26 +47,19 @@ def _worker_can_take_model(custom_backends: Sequence[str]) -> Any:
     """SQL condition: a worker may train this queued run as far as its model goes.
 
     True for a run on a built-in model. For a bring-your-own model it must be one the worker can fetch by itself,
-    because a worker has no database and never gets anyone's Hugging Face token: an uploaded bundle (from S3, with
-    its checksum re-checked) or a public Hub model at its pinned revision; a private or gated Hub model stays on the
-    server. And the run's backend must have opted in (`custom_backends`): it has to save a trained model that does not
+    because a worker has no database and never gets anyone's Hugging Face token. Each model source (`model_sources/`)
+    says which of its models qualify (`worker_fetchable`): an uploaded bundle (from S3, with its checksum re-checked)
+    or a public Hub model at its pinned revision; a private or gated Hub model stays on the server.
+    And the run's backend must have opted in (`custom_backends`): it has to save a trained model that does not
     point back at the model's files, since those live at a different path on the worker.
     """
     run = TrainingRun
     model = aliased(CustomModel)
-    fetchable = (
-        sa.select(model.id)
-        .where(
-            model.id == run.custom_model_id,
-            sa.or_(
-                model.source_kind == "upload",
-                sa.and_(
-                    model.source_kind == "hub", sa.func.coalesce(model.spec["private"].as_boolean(), False).is_(False)
-                ),
-            ),
-        )
-        .exists()
+    # Each model source says which of its models a worker can fetch with no secret (an upload, a public Hub model).
+    by_source = sa.or_(
+        sa.false(), *(sa.and_(model.source_kind == s.id, s.worker_fetchable(model)) for s in list_sources())
     )
+    fetchable = sa.select(model.id).where(model.id == run.custom_model_id, by_source).exists()
     return sa.or_(run.custom_model_id.is_(None), sa.and_(run.backend.in_(list(custom_backends)), fetchable))
 
 

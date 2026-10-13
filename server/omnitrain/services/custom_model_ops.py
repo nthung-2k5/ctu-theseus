@@ -11,7 +11,6 @@ of which model it used never changes meaning underneath it.
 
 import asyncio
 import logging
-import re
 import shutil
 import uuid
 from typing import Any
@@ -25,6 +24,7 @@ from omnitrain.backends.base import CustomModelKind
 from omnitrain.backends.registry import find_backend, list_backends
 from omnitrain.db.models import CustomModel, TrainingRun, User
 from omnitrain.jobs.dispatcher import nudge
+from omnitrain.model_sources import SourceRefError, find_source, get_source
 from omnitrain.schemas.custom_models import (
     CreateCustomModelBody,
     CustomModelKindOut,
@@ -42,7 +42,6 @@ from omnitrain.settings import get_settings
 logger = logging.getLogger(__name__)
 
 # A Hugging Face repo id ("org/name", or a bare legacy name) or a timm name ("resnet50.a1_in1k").
-_SOURCE_REF = re.compile(r"^[A-Za-z0-9][\w.\-]*(/[\w.\-]+)?$")
 _UPLOAD_FILENAME = "bundle.zip"
 _UPLOAD_URL_TTL_SECONDS = 3600
 _VALIDATION_ATTEMPTS = 3
@@ -243,9 +242,11 @@ async def inspect_model(body: InspectModelBody, token: str | None = None) -> Ins
         out = _new_inspection(None)
         _describe_config(out, body.config)
         return out
-    source_ref = (body.source_ref or "").strip()
-    if not _SOURCE_REF.match(source_ref):
-        raise HTTPException(400, "Enter the model's Hugging Face repository id (e.g. bert-base-uncased or org/name)")
+    try:
+        source_ref = get_source("hub").normalize_ref(body.source_ref)
+    except SourceRefError as e:
+        raise HTTPException(400, str(e)) from None
+    assert source_ref is not None
     return await asyncio.to_thread(_inspect_hub_sync, source_ref, token)
 
 
@@ -274,17 +275,13 @@ async def create(
     session: AsyncSession, body: CreateCustomModelBody, actor_id: uuid.UUID, *, global_: bool
 ) -> CustomModel:
     _, kind = _kind_for(body.backend, body.kind)
-    if body.source_kind not in kind.source_kinds:
+    source = find_source(body.source_kind)
+    if source is None or body.source_kind not in kind.source_kinds:
         raise HTTPException(400, f"A '{kind.id}' model cannot come from source '{body.source_kind}'")
-
-    source_ref = (body.source_ref or "").strip() or None
-    if body.source_kind == "hub":
-        if source_ref is None or not _SOURCE_REF.match(source_ref):
-            raise HTTPException(
-                400, "Enter the model's Hugging Face repository id (e.g. bert-base-uncased or org/name)"
-            )
-    elif source_ref is not None:
-        raise HTTPException(400, "An uploaded model has no source reference")
+    try:
+        source_ref = source.normalize_ref(body.source_ref)
+    except SourceRefError as e:
+        raise HTTPException(400, str(e)) from None
 
     row = CustomModel(
         owner_user_id=None if global_ else actor_id,
@@ -296,8 +293,8 @@ async def create(
         source_kind=body.source_kind,
         source_ref=source_ref,
         spec={"materialize": kind.materialize},
-        # A Hub model needs nothing more from the user, so it goes straight to validation.
-        status="uploaded" if body.source_kind == "hub" else "pending_upload",
+        # A source that needs no upload (a Hub reference) goes straight to validation.
+        status="pending_upload" if source.needs_upload else "uploaded",
         max_attempts=_VALIDATION_ATTEMPTS,
     )
     session.add(row)
@@ -323,7 +320,8 @@ async def update(session: AsyncSession, row: CustomModel, body: UpdateCustomMode
 
 
 async def upload_url(session: AsyncSession, row: CustomModel, body: UploadUrlBody) -> dict[str, Any]:
-    if row.source_kind != "upload" or row.status != "pending_upload":
+    source = find_source(row.source_kind)
+    if source is None or not source.needs_upload or row.status != "pending_upload":
         raise HTTPException(409, "This model is not waiting for an upload")
     limit = get_settings().max_custom_model_bytes
     if body.size_bytes > limit:

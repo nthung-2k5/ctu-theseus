@@ -6093,10 +6093,6 @@
           },
           "sourceKind": {
             "type": "string",
-            "enum": [
-              "hub",
-              "upload"
-            ],
             "title": "Sourcekind"
           },
           "sourceRef": {
@@ -6409,11 +6405,7 @@
           },
           "sourceKinds": {
             "items": {
-              "type": "string",
-              "enum": [
-                "hub",
-                "upload"
-              ]
+              "type": "string"
             },
             "type": "array",
             "title": "Sourcekinds"
@@ -6507,10 +6499,6 @@
           },
           "sourceKind": {
             "type": "string",
-            "enum": [
-              "hub",
-              "upload"
-            ],
             "title": "Sourcekind"
           },
           "sourceRef": {
@@ -11903,10 +11891,6 @@
           },
           "sourceKind": {
             "type": "string",
-            "enum": [
-              "hub",
-              "upload"
-            ],
             "title": "Sourcekind"
           },
           "sourceRef": {

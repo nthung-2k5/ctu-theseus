@@ -163,8 +163,11 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
 - **Bring-your-own models have one door.** Who may see or use a custom model is decided in
   `services/model_catalog.py` (global or owner-only, `ready`, enabled, not archived, kind offered for the task),
   and ownership of the row in `services/custom_model_ops.py` (someone else's id is a 404, never a 403). Never
-  trust a `custom:{uuid}` id from a request: `model_catalog.resolve` it. Files are only ever put on disk by
-  `services/custom_models.ensure_local` / `import_upload` (deterministic path, sha256 re-check, no pickles or
+  trust a `custom:{uuid}` id from a request: `model_catalog.resolve` it. Where the files come from is a plugin: one
+  `ModelSource` subclass per source in `server/omnitrain/model_sources/` (`hub`, `upload`; `source_kind` is free text, an
+  id), which owns reference validation, first-contact pinning, fetching, whose token it uses and which of its models a
+  remote worker may fetch (`worker_fetchable`, default none). A source never decides the safety rules: files are only
+  ever put on disk by `services/custom_models.ensure_local` / `import_upload` (deterministic path, sha256 re-check, no pickles or
   code, no symlinks or zip-slip), and every place that trains, loads or exports a run calls
   `services/run_models.ensure_run_custom_model` first. What a model *is* (backend, kind, source, revision,
   checksum) is immutable after creation, and `training_runs.custom_model_id` is `ON DELETE RESTRICT`: a model a

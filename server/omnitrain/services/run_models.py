@@ -15,7 +15,8 @@ import sqlalchemy as sa
 
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel, TrainingRun
-from omnitrain.services import custom_models, integrations
+from omnitrain.model_sources import find_source
+from omnitrain.services import custom_models
 
 
 async def ensure_run_custom_model(run_id: uuid.UUID | str) -> None:
@@ -36,5 +37,6 @@ async def ensure_run_custom_model(run_id: uuid.UUID | str) -> None:
         ).scalar_one_or_none()
     if row is not None:
         # A private Hub model is fetched again with its owner's token (the files are temporary).
-        token = await integrations.huggingface_token_for(row.owner_user_id) if row.source_kind == "hub" else None
+        source = find_source(row.source_kind)
+        token = await source.token_for(row.owner_user_id) if source is not None else None
         await asyncio.to_thread(custom_models.ensure_local, row, token)

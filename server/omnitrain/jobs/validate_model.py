@@ -3,8 +3,9 @@
 A custom model row is created `uploaded` (a Hub reference, or an upload the browser has finished) and
 claimed off the `custom_models` table like any other job (see jobs/queue.py). The job:
 
-  1. Hub: look the repo up, refuse a private/gated or oversized one, and PIN the commit sha as the
-     model's revision. Upload: download the bundle once, hash it and unpack it (`import_upload`).
+  1. The model's source (`omnitrain/model_sources/`) makes first contact. Hub: look the repo up, refuse an
+     oversized one, and PIN the commit sha as the model's revision. Upload: download the bundle once, hash it
+     and unpack it (`import_upload`).
   2. Generic safety checks on the files (`custom_models.check_tree`): no pickles or code, no symlinks,
      within the size limit.
   3. The backend's own check (`TrainerBackend.validate_custom_model`) for every task the model is offered
@@ -19,7 +20,6 @@ model once attempts run out.
 import logging
 import shutil
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,22 +31,14 @@ from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel
 from omnitrain.jobs import queue
 from omnitrain.jobs.executors import run_in_executor, validate_executor
-from omnitrain.services import custom_models, integrations
+from omnitrain.model_sources import Validated, find_source
+from omnitrain.services import custom_models
 from omnitrain.services.custom_models import CustomModelFileError
 from omnitrain.services.model_catalog import kind_and_tasks
 from omnitrain.services.task_registry import get_task_descriptor
 from omnitrain.settings import get_settings
 
 logger = logging.getLogger("omnitrain.jobs.validate_model")
-
-
-@dataclass
-class Validated:
-    revision: str | None = None
-    sha256: str | None = None
-    size_bytes: int | None = None
-    # A Hub model that needs its owner's token. Lives in the row's `spec`, not a column.
-    private: bool | None = None
 
 
 def _kind_for(row: CustomModel) -> tuple[CustomModelKind, list[str]]:
@@ -69,20 +61,12 @@ def validate_sync(row: CustomModel, token: str | None = None) -> Validated:
     result = Validated()
     if not kind.materialize:
         pass  # the framework fetches its own weights by name; nothing to pin or check on disk
-    elif row.source_kind == "hub":
-        pin = custom_models.hub_pin(row.source_ref, token)
-        if pin.size_bytes > limit:
-            raise CustomModelFileError(
-                f"The model is {pin.size_bytes // 2**20} MiB, over the {limit // 2**20} MiB limit"
-            )
-        row.revision = result.revision = pin.revision
-        result.private = pin.private
-        path = custom_models.ensure_local(row, token)
-        result.size_bytes = custom_models.check_tree(path, max_bytes=limit)
     else:
-        imported = custom_models.import_upload(row)
-        row.sha256 = result.sha256 = imported.sha256
-        result.size_bytes = custom_models.check_tree(imported.path, max_bytes=limit)
+        source = find_source(row.source_kind)
+        if source is None:
+            raise CustomModelFileError(f"'{row.source_kind}' is not an installed model source")
+        result, path = source.validate(row, token, limit)
+        result.size_bytes = custom_models.check_tree(path, max_bytes=limit)
 
     ref = custom_models.ref_for(row)
     for task_id in tasks:
@@ -113,14 +97,15 @@ async def run_validate(model_id: uuid.UUID) -> None:
         s.expunge(row)  # detached: the worker thread reads and updates it without a session
 
     # Only the model's own owner's token is ever used: a global model has no owner, so it never carries one.
-    token = await integrations.huggingface_token_for(row.owner_user_id) if row.source_kind == "hub" else None
+    source = find_source(row.source_kind)
+    token = await source.token_for(row.owner_user_id) if source is not None else None
     try:
         result = await run_in_executor(validate_executor, validate_sync, row, token)
     except (CustomModelFileError, ConfigError) as e:
         logger.info("Custom model %s failed validation: %s", model_id, e)
         message = str(e)
-        if row.source_kind == "hub" and row.owner_user_id is None and token is None:
-            message += " (Models shared with everyone can only come from public repositories.)"
+        if source is not None and source.shared_failure_hint and row.owner_user_id is None and token is None:
+            message += f" ({source.shared_failure_hint})"
         await _finish(model_id, status="failed", last_error=message[:2000])
         _forget(row)
         return

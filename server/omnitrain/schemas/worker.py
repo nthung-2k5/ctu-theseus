@@ -34,7 +34,7 @@ class WorkerCustomModel(ApiModel):
 
     id: uuid.UUID
     kind: str
-    source_kind: Literal["hub", "upload"]
+    source_kind: str
     source_ref: str | None = None
     revision: str | None = None
     sha256: str | None = None

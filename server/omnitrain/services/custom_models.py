@@ -1,9 +1,12 @@
 """Bring-your-own models: where their files live locally, putting them there, and the generic file checks.
 
-A custom model's weights are either on the Hugging Face Hub (fetched at a pinned commit) or an uploaded
-bundle in `theseus-models/custom/{modelId}/`. A Hub model may be private or gated: it is then fetched with
-the OWNER's saved Hugging Face token (`services/integrations.py`), which callers pass in as `token`. With no
-token the Hub is asked anonymously, never with whatever token happens to be configured on the server.
+A custom model's weights come from a model source plugin (`omnitrain/model_sources/`): today the Hugging Face
+Hub (fetched at a pinned commit) or an uploaded bundle in `theseus-models/custom/{modelId}/`. This module holds
+what every source shares plus the Hub and upload clients the two shipped sources call.
+
+A Hub model may be private or gated: it is then fetched with the OWNER's saved Hugging Face token
+(`services/integrations.py`), which callers pass in as `token`. With no token the Hub is asked anonymously,
+never with whatever token happens to be configured on the server.
 
 A trainer backend reads the files from a local directory whose path is written into the compiled config, so
 that path is DETERMINISTIC (model id + pinned revision or content hash) and `ensure_local` recreates it on
@@ -32,6 +35,7 @@ from pathlib import Path, PurePosixPath
 from omnitrain import constants as C
 from omnitrain.backends.base import CustomModelRef
 from omnitrain.db.models import CustomModel
+from omnitrain.model_sources.base import find_source
 from omnitrain.services import storage
 from omnitrain.settings import get_settings
 
@@ -99,10 +103,10 @@ def ensure_local(row: CustomModel, token: str | None = None) -> Path:
         return dest
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
-    if row.source_kind == "hub":
-        _fetch_hub(row, dest, token)
-    else:
-        _fetch_upload(row, dest)
+    source = find_source(row.source_kind)
+    if source is None:
+        raise CustomModelFileError(f"This model comes from '{row.source_kind}', which is not an installed source")
+    source.fetch(row, dest, token)
     (dest / _COMPLETE_MARKER).touch()
     return dest
 
