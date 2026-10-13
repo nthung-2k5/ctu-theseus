@@ -19,6 +19,7 @@ import sqlalchemy as sa
 
 from omnitrain.backends.base import ARTIFACT_FILENAMES
 from omnitrain.core import constants as C
+from omnitrain.core.executors import export_executor, run_in_executor
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import ModelExport, Project, TrainingRun
 from omnitrain.domain.task_registry import get_task_descriptor
@@ -26,7 +27,6 @@ from omnitrain.export.common import TEMPLATES, BundleFile, GoldenSample, dart_pa
 from omnitrain.export.formats.base import BundleContext
 from omnitrain.export.metadata import extract_preprocessing
 from omnitrain.export.registry import get_export_format
-from omnitrain.jobs.executors import export_executor, run_in_executor
 from omnitrain.services import storage
 
 logger = logging.getLogger(__name__)

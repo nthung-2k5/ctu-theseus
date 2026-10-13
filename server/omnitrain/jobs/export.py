@@ -26,12 +26,12 @@ import sqlalchemy as sa
 from omnitrain.backends.base import TrainerBackend
 from omnitrain.backends.registry import get_backend
 from omnitrain.core import constants as C
+from omnitrain.core.executors import export_executor, run_in_executor
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import ModelExport, TrainingRun
 from omnitrain.export import bundle
 from omnitrain.export.registry import find_export_format
 from omnitrain.jobs import queue
-from omnitrain.jobs.executors import export_executor, run_in_executor
 from omnitrain.services import storage
 from omnitrain.services.run_models import ensure_run_custom_model
 from omnitrain.settings import get_settings

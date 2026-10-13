@@ -418,7 +418,7 @@ the container (`./schema` is bind-mounted read-only there).
 apphost.mts               Aspire AppHost, the only place resources are provisioned
 schema/                   constants.json (shared), openapi.json + task_registry.json (generated)
 server/               The backend (FastAPI + Ludwig); see server/README.md
-  omnitrain/core/           constants, the plugin Registry, telemetry, metrics; imports nothing else
+  omnitrain/core/           constants, the plugin Registry, executors, telemetry, metrics; imports nothing else
   omnitrain/domain/         framework-neutral logic with no DB session or HTTP (task_registry, boxes, predict, params,
                           evaluate, video, ...); plugins may import it
   omnitrain/routers/        HTTP routes (auth, projects, datasets/ (one module per concern), classes, training,

@@ -28,14 +28,16 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
 
 ## Conventions specific to this repo
 
-- **Layering inside `server/omnitrain/`.** `core/` imports nothing else from the package; `domain/` is
-  framework-neutral logic (no DB session, no HTTP) and may import `core/`, `schemas.common`, `db.enums` and plugin base classes;
-  trainer backends, export formats and the preprocessing/augmentation ops are plugins that should reach for
-  `core/` and `domain/`, not `services/`; `services/` is database + S3 orchestration. A new pure helper
-  (validation, shaping a prediction, a report) belongs in `domain/`, not in `services/`. Not yet clean, and
-  not enforced by a check: `backends/` and `export/` still import `services.storage`, `db` and `jobs.abort`
-  in places, and `services/` imports `jobs` (`nudge`, `abort`).
-
+- **Layering inside `server/omnitrain/`, enforced by `tests/test_layering.py`.** `core/` (constants, the plugin
+  `Registry`, executors, telemetry) imports nothing else from the package; `domain/` is framework-neutral logic (no DB
+  session, no HTTP) and may import `core/`, `schemas`, `db.enums`, `tasks` and `backends` types; trainer backends,
+  export formats and the preprocessing/augmentation ops are plugins that reach for `core/` and `domain/`, not
+  `services/`; `services/` is database + S3 orchestration. A new pure helper (validation, shaping a prediction, a
+  report) belongs in `domain/`, not in `services/`. Only `app.py` imports `routers`. The test holds each layer to an
+  allowlist and spells out the deliberate exceptions: plugins may use `services.storage` (S3) and
+  `services.plugin_settings` (the admin on/off filter), `export` still reads `db.base`/`db.models` to assemble a
+  bundle, and `services` may use only `jobs.abort` and `jobs.dispatcher` (enqueue and wake; the reverse direction is
+  how the work runs). Widen an allowlist only with a reason in the test.
 - **No C#.** The Aspire AppHost is TypeScript (`apphost.mts`). If you're tempted to look for
   `Program.cs` or a `.csproj`, there isn't one.
 - **Tasks are plugins; the task registry is the source of truth for what a task's data looks like.**

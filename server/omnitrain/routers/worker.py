@@ -17,12 +17,12 @@ from fastapi import APIRouter, HTTPException, Response
 
 from omnitrain import __version__
 from omnitrain.core import constants as C
+from omnitrain.core.executors import run_in_executor
 from omnitrain.db.enums import TERMINAL_RUN_STATUSES
 from omnitrain.db.models import CustomModel, TrainingRun, TrainingWorker
 from omnitrain.deps import SessionDep, WorkerDep, WorkerRunDep
 from omnitrain.events import get_event_writer
 from omnitrain.jobs import queue
-from omnitrain.jobs.executors import run_in_executor
 from omnitrain.schemas.worker import (
     PROTOCOL_VERSION,
     WorkerClaimBody,

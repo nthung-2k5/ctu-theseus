@@ -17,11 +17,11 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+from omnitrain.core.executors import run_in_executor, train_executor
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import TrainingRun
 from omnitrain.events import get_event_writer
 from omnitrain.jobs import abort, run_core
-from omnitrain.jobs.executors import run_in_executor, train_executor
 from omnitrain.services.run_evaluation_store import record_evaluation
 from omnitrain.services.run_models import ensure_run_custom_model
 

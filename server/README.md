@@ -49,7 +49,7 @@ omnitrain/
   lifespan.py           startup: single-process check, event writer, log handler, recovery,
                         dispatcher, reapers
   settings.py, errors.py, deps.py
-  core/                 constants, plugins.py (the Registry), telemetry, metrics; imports nothing
+  core/                 constants, plugins.py (the Registry), executors, telemetry, metrics; imports nothing
                         else from omnitrain
   domain/               framework-neutral logic, no DB session or HTTP: task_registry, boxes, predict,
                         evaluate, classification_report, image_size, video, params, tabular_stats

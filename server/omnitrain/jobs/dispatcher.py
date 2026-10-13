@@ -1,7 +1,7 @@
 """Lane loops: claim queued jobs from Postgres and run them in this process.
 
-Lanes (see executors.py): train (1 at a time, GPU), export (2), validate (1, custom models), inference (N). Each lane
-loop does, in this order:
+Lanes (see core/executors.py): train (1 at a time, GPU), export (2), validate (1, custom models), inference (N).
+Each lane loop does, in this order:
 
     acquire a lane slot  ->  claim one job  ->  run it  ->  release the slot
 

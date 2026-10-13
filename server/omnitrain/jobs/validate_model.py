@@ -27,11 +27,11 @@ import sqlalchemy as sa
 
 from omnitrain.backends.base import ConfigError, CustomModelKind
 from omnitrain.backends.registry import get_backend
+from omnitrain.core.executors import run_in_executor, validate_executor
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel
 from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.jobs import queue
-from omnitrain.jobs.executors import run_in_executor, validate_executor
 from omnitrain.model_sources import Validated, find_source
 from omnitrain.services import custom_models
 from omnitrain.services.custom_models import CustomModelFileError
