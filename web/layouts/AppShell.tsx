@@ -30,6 +30,7 @@ import {
   SunIcon,
 } from '@phosphor-icons/react'
 import Logo from '@public/assets/CTU_logo.png'
+import { UploadTray } from '@public/components/dataset/UploadTray'
 import { SectionLabel } from '@public/components/ui'
 import { logout } from '@public/lib/api/generated/auth/auth'
 import { isAdmin, sessionQueryOptions } from '@public/lib/auth'
@@ -282,7 +283,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </MantineAppShell.Navbar>
 
       {/* ─── Main ─── */}
-      <MantineAppShell.Main>{children}</MantineAppShell.Main>
+      <MantineAppShell.Main>
+        {children}
+        {/* Outside the pages, so an upload keeps running (and stays visible) while the user moves around. */}
+        <UploadTray />
+      </MantineAppShell.Main>
     </MantineAppShell>
   )
 }

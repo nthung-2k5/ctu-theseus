@@ -29,3 +29,6 @@ export const SPLIT_OPTIONS = [
   { value: 'validation', label: 'Validation' },
   { value: 'test', label: 'Test' },
 ]
+
+/** The same, plus "auto": the split is drawn from the ratios when the batch is uploaded. */
+export const STAGED_SPLIT_OPTIONS = [{ value: 'auto', label: 'Auto-split' }, ...SPLIT_OPTIONS]

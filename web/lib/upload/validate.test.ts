@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { findDuplicates, validateFile } from './validate'
+import { validateFile } from './validate'
 
 const IMAGES = ['image/jpeg', 'image/png']
 const VIDEOS = ['video/mp4', 'video/webm']
@@ -31,16 +31,6 @@ test('warns when content and name disagree, errors when the content is unsupport
 
 test('any file passes when the task has no accept list', async () => {
   expect(await validateFile(new File(['x'], 'whatever.bin'), undefined)).toEqual([])
-})
-
-test('finds duplicates by content, not just size', async () => {
-  const files = [
-    { id: 'a', file: new File(['same!'], 'a.png') },
-    { id: 'b', file: new File(['same!'], 'b.png') },
-    { id: 'c', file: new File(['other'], 'c.png') },
-    { id: 'd', file: new File(['unique-size'], 'd.png') },
-  ]
-  expect([...(await findDuplicates(files))]).toEqual([['b', 'a']])
 })
 
 test('accepts real mp4 and webm clips for a video task', async () => {

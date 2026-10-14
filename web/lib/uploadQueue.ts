@@ -1,16 +1,14 @@
 /**
- * The staging queue behind the add-data panel's preview pane for text and tabular tasks.
+ * The staging queue behind the add-data panel for text and tabular tasks.
  *
- * Nothing here talks to the server: the left-hand panels turn typed text and
- * parsed CSV rows into `StagedItem`s, the preview pane lets the user retarget
- * each one's split/class, and only then does `UploadQueuePanel` send the batch.
- * State is in-memory on purpose, so a half-staged queue never looks restorable.
+ * Nothing here talks to the server: the left-hand panels turn typed text and parsed CSV rows into `StagedItem`s, the
+ * review table lets the user retarget each one's split/class, and only then is the batch committed as an upload job
+ * (see `lib/upload/jobs.ts`). State is in-memory on purpose, so a half-staged queue never looks restorable.
  *
- * File tasks (vision/audio) don't use this: their staging lives in
- * `lib/upload/`, behind the filesystem view.
+ * File tasks (vision/audio) don't use this: their staging lives in `lib/upload/`, behind the filesystem view.
  */
 
-import type { SplitType } from '@public/store/types'
+import type { StagedSplit } from '@public/lib/upload/types'
 import { useCallback, useState } from 'react'
 
 export interface StagedItem {
@@ -23,7 +21,8 @@ export interface StagedItem {
   detail?: string
   /** Originating file name, when it differs from `name` (CSV rows). Feeds the upload-history entry. */
   sourceName?: string
-  split: SplitType
+  /** `auto` = drawn when the batch is committed. */
+  split: StagedSplit
   /** `null` = no class assigned yet. Only meaningful when the task has label classes. */
   classId: string | null
   /** kind: 'text' */
@@ -47,19 +46,17 @@ export function useUploadQueue() {
     setItems((prev) => [...prev, ...drafts.map((draft) => ({ ...draft, id: crypto.randomUUID() }))])
   }, [])
 
-  const edit = useCallback((id: string, patch: StagedEdit) => {
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)))
+  const edit = useCallback((ids: string[], patch: StagedEdit) => {
+    const targets = new Set(ids)
+    setItems((prev) => prev.map((item) => (targets.has(item.id) ? { ...item, ...patch } : item)))
   }, [])
 
-  const editAll = useCallback((patch: StagedEdit) => {
-    setItems((prev) => prev.map((item) => ({ ...item, ...patch })))
-  }, [])
-
-  const remove = useCallback((id: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== id))
+  const remove = useCallback((ids: string[]) => {
+    const targets = new Set(ids)
+    setItems((prev) => prev.filter((item) => !targets.has(item.id)))
   }, [])
 
   const clear = useCallback(() => setItems([]), [])
 
-  return { items, stage, edit, editAll, remove, clear }
+  return { items, stage, edit, remove, clear }
 }

@@ -187,6 +187,15 @@ theseus-models/
 Dataset pool uploads are deduplicated per-project by sha256: the same file uploaded twice
 (or referenced from two dataset versions) is stored once.
 
+The **Add data** drawer is one flow for every task: stage (drop files and folders, type or paste text, import a CSV),
+review (a summary card over class lanes of previews to spot a misfiled picture by eye, or the folders, or a flat filterable table), upload.
+After a drop the browser hashes each file and asks `POST /api/projects/{id}/items/preflight` which contents the draft
+already holds, so those are marked "not sent" before any bytes move (advisory: the upload route still dedups on its
+own). A split left on *auto-split* is drawn in the browser when Upload is pressed (stratified by class, default
+80/10/10, only over the files being added). Pressing Upload hands the batch to a background job, shown in the upload
+tray at the corner of the app, so it carries on if the drawer is closed; failed or unsent files stay in the job for a
+retry. Jobs live in memory, so a page reload ends one.
+
 ### Snapshot preprocessing and augmentation
 
 Both are chosen when a **snapshot** is created, not when training, and preprocessing runs first.

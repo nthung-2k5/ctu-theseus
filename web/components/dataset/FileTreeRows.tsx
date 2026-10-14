@@ -32,7 +32,7 @@ import { type CSSProperties, createContext, type DragEvent, type MouseEvent, typ
 export const ROW_HEIGHT = 32
 const INDENT = 22
 
-const SPLIT_LABEL = { train: 'train', validation: 'validation', test: 'test' } as const
+const SPLIT_LABEL = { train: 'train', validation: 'validation', test: 'test', auto: 'auto-split' } as const
 
 /** What a folder row can do to its own contents. `onPick` opens the file or folder picker aimed at this folder. */
 export interface FolderActions {
@@ -45,7 +45,7 @@ export interface FolderActions {
 
 /**
  * Which row this is and whether it is the tree's one tabbable row (a roving tabindex): Tab then enters and
- * leaves the whole tree in one stop, and the arrow keys move between rows (see FileTreeView). The row index
+ * leaves the whole tree in one stop, and the arrow keys move between rows (see FolderTree). The row index
  * rides in context so the three row kinds below need no extra props.
  */
 export const RowNavContext = createContext<{ index: number; tabbable: boolean; onFocus: () => void } | null>(null)
@@ -79,7 +79,7 @@ function RowFrame({ depth, expanded, selected, dropActive, children, onClick, dr
     outlineOffset: -1,
   }
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Enter/Space/arrows are handled once, on the tree container (FileTreeView's onTreeKeyDown), so every row doesn't carry its own handler
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Enter/Space/arrows are handled once, on the tree container (FolderTree's onTreeKeyDown), so every row doesn't carry its own handler
     <div
       role="treeitem"
       aria-selected={selected}

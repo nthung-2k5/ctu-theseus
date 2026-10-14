@@ -17,9 +17,10 @@ import { Alert, Button, Group, Select, Stack, Table, Text } from '@mantine/core'
 import { Dropzone } from '@mantine/dropzone'
 import { notifications } from '@mantine/notifications'
 import { CloudArrowUpIcon, WarningCircleIcon } from '@phosphor-icons/react'
-import { SPLIT_OPTIONS } from '@public/lib/constants'
+import { STAGED_SPLIT_OPTIONS } from '@public/lib/constants'
+import type { StagedSplit } from '@public/lib/upload/types'
 import type { StagedDraft } from '@public/lib/uploadQueue'
-import type { LabelClass, SplitType } from '@public/store/types'
+import type { LabelClass } from '@public/store/types'
 import Papa from 'papaparse'
 import { useMemo, useState } from 'react'
 
@@ -42,7 +43,7 @@ export function TabularCsvImporter({
   const [headers, setHeaders] = useState<string[]>([])
   const [rows, setRows] = useState<Record<string, string>[]>([])
   const [targetColumn, setTargetColumn] = useState<string | null>(null)
-  const [split, setSplit] = useState<SplitType>('train')
+  const [split, setSplit] = useState<StagedSplit>('auto')
   const [fileName, setFileName] = useState<string>('')
 
   const handleDrop = (files: File[]) => {
@@ -139,9 +140,9 @@ export function TabularCsvImporter({
             <Select
               label="Split"
               description="Editable per row in the preview"
-              data={SPLIT_OPTIONS}
+              data={STAGED_SPLIT_OPTIONS}
               value={split}
-              onChange={(v) => setSplit((v ?? 'train') as SplitType)}
+              onChange={(v) => setSplit((v ?? 'auto') as StagedSplit)}
               allowDeselect={false}
             />
           </Group>

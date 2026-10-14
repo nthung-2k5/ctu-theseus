@@ -19,8 +19,9 @@ import { notifications } from '@mantine/notifications'
 import { CloudArrowUpIcon, WarningCircleIcon } from '@phosphor-icons/react'
 import { createClass } from '@public/lib/api/generated/classes/classes'
 import { invalidateProjectScope } from '@public/lib/queries'
+import type { StagedSplit } from '@public/lib/upload/types'
 import type { StagedDraft } from '@public/lib/uploadQueue'
-import type { LabelClass, SplitType } from '@public/store/types'
+import type { LabelClass } from '@public/store/types'
 import { useQueryClient } from '@tanstack/react-query'
 import Papa from 'papaparse'
 import { useMemo, useState } from 'react'
@@ -44,7 +45,7 @@ interface ParsedTable {
 
 const extensionOf = (name: string) => name.slice(name.lastIndexOf('.') + 1).toLowerCase()
 
-function toDraft(text: string, sourceName: string, split: SplitType, classId: string | null): StagedDraft {
+function toDraft(text: string, sourceName: string, split: StagedSplit, classId: string | null): StagedDraft {
   return {
     kind: 'text',
     name: text.length > 80 ? `${text.slice(0, 80)}…` : text,
@@ -100,7 +101,7 @@ export function TextBatchImporter({
   /** Whether the task labels items with classes at all — decides if the class column can be picked. */
   taskUsesClasses: boolean
   /** Defaults from the panel above; every staged item can still be retargeted in the preview. */
-  split: SplitType
+  split: StagedSplit
   classId: string | null
   classes: LabelClass[]
   onStage: (drafts: StagedDraft[]) => void

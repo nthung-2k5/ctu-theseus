@@ -5,11 +5,13 @@ import {
   existingKey,
   fileIssues,
   initialState,
+  isUploadable,
   type StageOptions,
   stageBatch,
   treeReducer,
 } from './fileTree'
-import type { RawEntry } from './types'
+import { flattenTree } from './rows'
+import type { RawEntry, StagedFile } from './types'
 
 const classes: ClassRef[] = [
   { classId: '1', name: 'Cat' },
@@ -42,8 +44,8 @@ test('stages class/split folders, matching existing classes ignoring case', () =
   expect(byName['b.jpg'].split).toBe('validation')
   expect(byName['c.jpg'].classKey).toBe('n:bird')
   expect([...state.pending.values()].map((p) => p.name)).toEqual(['Bird'])
-  // `cat/x.jpg` has no split folder: it lands in train and is flagged as one folder short of the layout.
-  expect(byName['x.jpg'].split).toBe('train')
+  // `cat/x.jpg` has no split folder: its split is left to be drawn at upload, and it is flagged as one folder short.
+  expect(byName['x.jpg'].split).toBe('auto')
 })
 
 test('dropping onto a folder fixes its levels', () => {
@@ -116,4 +118,49 @@ test('index lists every existing class and counts problems', () => {
   // The bird file has an error, so its class isn't needed yet.
   expect(index.totals.newClassNames).toEqual([])
   expect(index.totals).toMatchObject({ files: 2, uploadable: 1, withErrors: 1, unclassified: 0 })
+})
+
+test('files without a split folder wait in auto, and only show as a bucket while something is in it', () => {
+  const state = stage(raw('cat/a.jpg', 'cat/b.jpg'))
+  expect([...state.files.values()].map((f) => f.split)).toEqual(['auto', 'auto'])
+  const index = buildIndex(state, classes, true)
+  expect(index.totals.bySplit).toEqual({ train: 0, validation: 0, test: 0, auto: 2 })
+  const splits = (i: typeof index) =>
+    flattenTree(i.folders, {}, true).flatMap((r) => (r.type === 'split' ? [r.split] : []))
+  // Only the populated class is open (the empty one stays collapsed), and its `auto` bucket is listed last.
+  expect(splits(index)).toEqual(['train', 'validation', 'test', 'auto'])
+
+  const placed = treeReducer(state, { type: 'move', ids: [...state.files.keys()], split: 'validation' })
+  expect(splits(buildIndex(placed, classes, true))).toEqual(['train', 'validation', 'test'])
+})
+
+test('hashes are recorded, and skip reasons set and cleared as a whole', () => {
+  let state = stage(raw('cat/train/a.jpg', 'cat/train/b.jpg'))
+  const [a, b] = [...state.files.keys()]
+  state = treeReducer(state, { type: 'hashed', hashes: { [a]: 'h', [b]: 'h', nope: 'x' } })
+  expect(state.files.get(a)?.hash).toBe('h')
+  expect(state.files.has('nope')).toBe(false)
+
+  state = treeReducer(state, { type: 'skip', reasons: { [b]: 'Same content as a.jpg' } })
+  expect(state.files.get(b)?.skip).toBe('Same content as a.jpg')
+  expect(state.files.get(a)?.skip).toBeUndefined()
+  const totals = buildIndex(state, classes, true).totals
+  expect(totals).toMatchObject({ files: 2, uploadable: 1, skipped: 1, withErrors: 0 })
+  expect(isUploadable(state.files.get(b) as StagedFile)).toBe(false)
+  expect(fileIssues(state.files.get(b) as StagedFile, true).map((i) => i.message)).toContain(
+    'Same content as a.jpg, so it is not sent',
+  )
+
+  // Its twin was removed: the next plan has no reason for it, so the skip goes.
+  state = treeReducer(state, { type: 'skip', reasons: {} })
+  expect(state.files.get(b)?.skip).toBeUndefined()
+  expect(buildIndex(state, classes, true).totals.skipped).toBe(0)
+})
+
+test('a file that is both broken and a duplicate is counted as broken, not skipped', () => {
+  const staged = stageBatch(raw('cat/train/a.jpg'), [[{ severity: 'error', message: 'bad' }]], 1, options)
+  let state = treeReducer(initialState(), { type: 'add', staged, junk: 0, skipped: [] })
+  const [id] = [...state.files.keys()]
+  state = treeReducer(state, { type: 'skip', reasons: { [id]: 'Already in this dataset' } })
+  expect(buildIndex(state, classes, true).totals).toMatchObject({ withErrors: 1, skipped: 0, uploadable: 0 })
 })

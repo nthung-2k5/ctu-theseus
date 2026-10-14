@@ -10,10 +10,20 @@ import type { SplitType } from '../../store/types'
 import type { Skipped } from './archive'
 import { candidateLayouts, detectLayout, placeEntry } from './layout'
 import { normalizeClassName } from './paths'
-import type { DropContext, Issue, LayoutKind, PendingFolder, RawEntry, StagedFile } from './types'
+import {
+  AUTO_SPLIT,
+  type DropContext,
+  type Issue,
+  type LayoutKind,
+  type PendingFolder,
+  type RawEntry,
+  type StagedFile,
+  type StagedSplit,
+} from './types'
 
-export const DEFAULT_SPLIT: SplitType = 'train'
 export const SPLITS: SplitType[] = ['train', 'validation', 'test']
+/** Every split a staged file can sit in; `auto` last, as the bucket for files nobody has placed yet. */
+export const STAGED_SPLITS: StagedSplit[] = [...SPLITS, AUTO_SPLIT]
 /** Tree key for files with no class, and for the single root folder of tasks without classes. */
 export const NO_CLASS_KEY = '__none__'
 export const NO_CLASS_MESSAGE = 'No class assigned'
@@ -75,7 +85,7 @@ export interface StageOptions {
 
 interface Placed {
   classKey: string | null
-  split: SplitType
+  split: StagedSplit
   extraDepth: number
 }
 
@@ -93,7 +103,7 @@ function place(
       : taskUsesClasses && p.className
         ? resolveClassKey(p.className, classes, pending)
         : null
-  return { classKey, split: drop.split ?? p.split ?? DEFAULT_SPLIT, extraDepth: p.extraDepth }
+  return { classKey, split: drop.split ?? p.split ?? AUTO_SPLIT, extraDepth: p.extraDepth }
 }
 
 export interface StagedBatch {
@@ -134,14 +144,13 @@ export function stageBatch(raw: RawEntry[], issues: Issue[][], batchId: number, 
 export type TreeAction =
   | { type: 'add'; staged: StagedBatch; junk: number; skipped: Skipped[] }
   | { type: 'relayout'; kind: LayoutKind; options: StageOptions }
-  | { type: 'move'; ids: string[]; classKey?: string | null; split?: SplitType }
+  | { type: 'move'; ids: string[]; classKey?: string | null; split?: StagedSplit }
   | { type: 'remove'; ids: string[] }
   | { type: 'renameFolder'; key: string; name: string; classes: ClassRef[] }
   | { type: 'mapFolder'; from: string; to: string | null }
   | { type: 'reconcile'; classes: ClassRef[] }
-  | { type: 'duplicates'; duplicates: Record<string, string> }
-  | { type: 'serverErrors'; errors: Record<string, string> }
-  | { type: 'clearServerErrors' }
+  | { type: 'hashed'; hashes: Record<string, string> }
+  | { type: 'skip'; reasons: Record<string, string> }
   | { type: 'clear' }
 
 /** Drops pending folders that no file points at any more. */
@@ -158,8 +167,6 @@ function retarget(files: Map<string, StagedFile>, from: string, to: string | nul
   for (const [id, file] of files) if (file.classKey === from) next.set(id, { ...file, classKey: to })
   return next
 }
-
-const DUPLICATE_PREFIX = 'Same content as '
 
 export function treeReducer(state: TreeState, action: TreeAction): TreeState {
   switch (action.type) {
@@ -235,33 +242,25 @@ export function treeReducer(state: TreeState, action: TreeAction): TreeState {
       return files === state.files ? state : gcPending({ ...state, files })
     }
 
-    case 'duplicates': {
+    case 'hashed': {
       const files = new Map(state.files)
-      for (const [id, of] of Object.entries(action.duplicates)) {
+      for (const [id, hash] of Object.entries(action.hashes)) {
         const file = state.files.get(id)
-        const original = state.files.get(of)
-        if (!file || !original || file.issues.some((i) => i.message.startsWith(DUPLICATE_PREFIX))) continue
-        files.set(id, {
-          ...file,
-          issues: [...file.issues, { severity: 'warning', message: `${DUPLICATE_PREFIX}${original.name}` }],
-        })
+        if (file) files.set(id, { ...file, hash })
       }
       return { ...state, files }
     }
 
-    case 'serverErrors': {
-      const files = new Map(state.files)
-      for (const [id, error] of Object.entries(action.errors)) {
-        const file = state.files.get(id)
-        if (file) files.set(id, { ...file, serverError: error })
+    case 'skip': {
+      // The reasons cover every hashed file, so a file that is no longer a duplicate (its twin was removed) is cleared.
+      let files: Map<string, StagedFile> | null = null
+      for (const [id, file] of state.files) {
+        const skip = action.reasons[id]
+        if (file.skip === skip) continue
+        files ??= new Map(state.files)
+        files.set(id, { ...file, skip })
       }
-      return { ...state, files }
-    }
-
-    case 'clearServerErrors': {
-      const files = new Map(state.files)
-      for (const [id, file] of state.files) if (file.serverError) files.set(id, { ...file, serverError: undefined })
-      return { ...state, files }
+      return files ? { ...state, files } : state
     }
 
     case 'clear':
@@ -281,12 +280,15 @@ export function fileIssues(file: StagedFile, taskUsesClasses: boolean): Issue[] 
     })
   }
   if (taskUsesClasses && file.classKey === null) issues.push({ severity: 'warning', message: NO_CLASS_MESSAGE })
-  if (file.serverError) issues.push({ severity: 'error', message: file.serverError })
+  if (file.skip) issues.push({ severity: 'warning', message: `${file.skip}, so it is not sent` })
   return issues
 }
 
-/** Files with an error stay out of an upload — except a server error, which is worth retrying. */
-export const isUploadable = (file: StagedFile): boolean => !file.issues.some((i) => i.severity === 'error')
+/** A file that can never upload as it is (wrong type, too big, empty). */
+export const hasBlockingError = (file: StagedFile): boolean => file.issues.some((i) => i.severity === 'error')
+
+/** Files with an error stay out of an upload, and so do files whose content is already there. */
+export const isUploadable = (file: StagedFile): boolean => !hasBlockingError(file) && !file.skip
 
 export interface FolderNode {
   key: string
@@ -296,7 +298,7 @@ export interface FolderNode {
   pending: boolean
   /** The no-class folder, or the single root folder of a task without classes. */
   isNone: boolean
-  files: Record<SplitType, StagedFile[]>
+  files: Record<StagedSplit, StagedFile[]>
   total: number
 }
 
@@ -308,8 +310,9 @@ export interface Totals {
   unclassified: number
   /** Names of folders that will be created as classes: pending folders with at least one file that will upload. */
   newClassNames: string[]
-  serverFailures: number
-  bySplit: Record<SplitType, number>
+  /** Files left out because the dataset already has their content (or an earlier staged file does). */
+  skipped: number
+  bySplit: Record<StagedSplit, number>
 }
 
 export interface TreeIndex {
@@ -317,7 +320,7 @@ export interface TreeIndex {
   totals: Totals
 }
 
-const emptySplits = (): Record<SplitType, StagedFile[]> => ({ train: [], validation: [], test: [] })
+const emptySplits = (): Record<StagedSplit, StagedFile[]> => ({ train: [], validation: [], test: [], auto: [] })
 
 function newNode(key: string, name: string, extra: Partial<FolderNode> = {}): FolderNode {
   return { key, name, classId: null, pending: false, isNone: false, files: emptySplits(), total: 0, ...extra }
@@ -345,8 +348,8 @@ export function buildIndex(state: TreeState, classes: ClassRef[], taskUsesClasse
     withWarnings: 0,
     unclassified: 0,
     newClassNames: [],
-    serverFailures: 0,
-    bySplit: { train: 0, validation: 0, test: 0 },
+    skipped: 0,
+    bySplit: { train: 0, validation: 0, test: 0, auto: 0 },
   }
 
   const needed = new Set<string>()
@@ -363,13 +366,13 @@ export function buildIndex(state: TreeState, classes: ClassRef[], taskUsesClasse
 
     totals.files++
     totals.bySplit[file.split]++
+    if (file.skip && !hasBlockingError(file)) totals.skipped++
     if (isUploadable(file)) {
       totals.uploadable++
       if (isPendingKey(file.classKey)) needed.add(file.classKey)
     }
-    if (file.serverError) totals.serverFailures++
     if (taskUsesClasses && file.classKey === null) totals.unclassified++
-    if (file.issues.some((i) => i.severity === 'error')) totals.withErrors++
+    if (hasBlockingError(file)) totals.withErrors++
     if (file.issues.some((i) => i.severity === 'warning') || file.extraDepth > 0) totals.withWarnings++
   }
 

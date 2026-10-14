@@ -219,6 +219,13 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
 - **Content-addressed storage.** Dataset pool uploads are deduped per-project by sha256
   (`upload_to_pool` in `server/omnitrain/services/storage.py`). If you add a new upload path,
   reuse that helper rather than writing directly, or dedup silently breaks for that path.
+- **The add-data flow is stage → review → job.** `web/lib/upload/` holds the logic and `components/dataset/` the UI.
+  Staged files (`fileTree.ts`) and inline rows (`uploadQueue.ts`) both reach `ReviewTable` as `ReviewRow`s
+  (`review.ts`) and the same `CommitBar`; pressing Upload runs `commit.ts` (draws every `auto` split with
+  `splitPlan.ts`, a port of the server's `plan_split`; drops what the preflight marked as already present) and hands
+  the units to `jobs.ts`, whose runners (`uploadStaged.ts` for files, `uploadInline.ts` for rows) send them. Anything
+  that should not need a browser to test stays free of the `@public/` alias (bun test does not resolve it): the
+  generated client is bound in `api.ts` / `preflightRequest.ts` and injected into the runners.
 - **`web/` and the repo root are independent Bun installs**, not a workspace with `server/`.
   `server/` is a separate `uv`-managed Python project; the web app talks to it only over HTTP,
   via a generated client (`web/lib/api/generated`, from `schema/openapi.json`).

@@ -1,45 +1,25 @@
 /**
- * The add-data panel's filesystem view for file-based tasks (vision / audio).
+ * The folder view of the staged files: class folders, each holding `train` / `validation` / `test` folders (and an
+ * `auto-split` bucket for files whose split is still to be drawn).
  *
- * Class folders are the parents and `train` / `validation` / `test` their children. Files, folders and
- * archives are added by dropping them anywhere in the tree (the layout is detected from their paths) or onto
- * a specific folder (which then fixes that level), or through the "Add" buttons and each folder's menu.
- *
- * Nothing is sent from here: the view only stages and edits. Rendering goes through a virtualizer over a
- * flattened row list, so the DOM cost follows the viewport, not the number of files.
+ * It is the detail view for fixing things by folder. The shell around it (`FileImport`) owns adding files, the
+ * pickers and the drop target, and hands in what the folder rows need to accept a drop of their own. Nothing is
+ * sent from here. Rendering goes through a virtualizer over a flattened row list, so the DOM cost follows the
+ * viewport, not the number of files.
  */
 
-import {
-  Alert,
-  Badge,
-  Box,
-  Button,
-  Group,
-  Loader,
-  Popover,
-  Progress,
-  ScrollArea,
-  Select,
-  Stack,
-  Text,
-} from '@mantine/core'
-import { CloudArrowUpIcon, FolderSimplePlusIcon, TrashIcon, UploadSimpleIcon, XIcon } from '@phosphor-icons/react'
-import { NO_CLASS_KEY, SPLITS } from '@public/lib/upload/fileTree'
-import { LAYOUT_LABELS, LAYOUT_LEVELS } from '@public/lib/upload/layout'
+import { Badge, Box, Button, Group, Popover, ScrollArea, Select, Stack } from '@mantine/core'
+import { TrashIcon, XIcon } from '@phosphor-icons/react'
+import { NO_CLASS_KEY, STAGED_SPLITS } from '@public/lib/upload/fileTree'
 import { filesUnder, flattenTree, type TreeRow } from '@public/lib/upload/rows'
-import type { DropContext, LayoutKind } from '@public/lib/upload/types'
+import type { DropContext, StagedSplit } from '@public/lib/upload/types'
 import type { FileStaging } from '@public/lib/upload/useFileStaging'
-import type { LabelClass, SplitType } from '@public/store/types'
+import type { LabelClass } from '@public/store/types'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { type ChangeEvent, type DragEvent, type KeyboardEvent, type MouseEvent, useMemo, useRef, useState } from 'react'
+import { type DragEvent, type KeyboardEvent, type MouseEvent, useMemo, useRef, useState } from 'react'
 import { FilePreview } from './FilePreview'
 import { ClassRow, FileRow, type FolderActions, ROW_HEIGHT, RowNavContext, SplitRow } from './FileTreeRows'
 import { openMapToClass, openRenameFolder } from './FolderModals'
-
-/** Extensions that always go through the file picker, whatever the task accepts. */
-const ARCHIVE_ACCEPT = ['.zip', '.tar', '.tar.gz', '.tgz', '.gz']
-
-const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes('Files')
 
 function MoveControls({
   classOptions,
@@ -48,11 +28,11 @@ function MoveControls({
 }: {
   classOptions: { value: string; label: string }[]
   taskUsesClasses: boolean
-  onMove: (target: { classKey?: string | null; split?: SplitType }) => void
+  onMove: (target: { classKey?: string | null; split?: StagedSplit }) => void
 }) {
   const [opened, setOpened] = useState(false)
   const [classKey, setClassKey] = useState<string | null>(null)
-  const [split, setSplit] = useState<SplitType | null>(null)
+  const [split, setSplit] = useState<StagedSplit | null>(null)
   return (
     <Popover opened={opened} onChange={setOpened} position="bottom-start" withArrow shadow="md">
       <Popover.Target>
@@ -78,9 +58,9 @@ function MoveControls({
             size="xs"
             label="Split"
             placeholder="Keep current"
-            data={SPLITS.map((s) => ({ value: s, label: s }))}
+            data={STAGED_SPLITS.map((s) => ({ value: s, label: s === 'auto' ? 'auto-split' : s }))}
             value={split}
-            onChange={(v) => setSplit(v as SplitType | null)}
+            onChange={(v) => setSplit(v as StagedSplit | null)}
             clearable
           />
           <Button
@@ -104,37 +84,40 @@ function MoveControls({
   )
 }
 
-export function FileTreeView({
+export function FolderTree({
   staging,
   classes,
   taskUsesClasses,
-  accept,
-  disabled,
+  locked,
+  openPicker,
+  dropHandlers,
+  dropKey,
 }: {
   staging: FileStaging
   classes: LabelClass[]
   taskUsesClasses: boolean
-  accept?: string[]
-  /** An upload is running: the tree is read-only until it finishes. */
-  disabled: boolean
+  /** Something is being read or started, so the tree is read-only. */
+  locked: boolean
+  /** Opens the file or folder picker aimed at a class / split folder. */
+  openPicker: (kind: 'files' | 'folder', drop: DropContext) => void
+  /** Drag handlers that stage dropped files into the folder `drop` names (`key` highlights it while dragged over). */
+  dropHandlers: (
+    key: string,
+    drop: DropContext,
+  ) => { onDragOver: (e: DragEvent) => void; onDrop: (e: DragEvent) => void }
+  dropKey: string | null
 }) {
   // TanStack Virtual returns functions the React Compiler would otherwise memoize away. That also switches off
   // its automatic memoization here, so everything that scales with the file count is memoized by hand below:
   // this component re-renders on every scroll frame.
   'use no memo'
 
-  const { state, index, busy, stageFiles, stageDrop, relayout, renameFolder, cancel, move, remove, mapFolder } = staging
-  const locked = disabled || busy !== null
+  const { state, index, renameFolder, move, remove, mapFolder } = staging
 
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchor, setAnchor] = useState<number | null>(null)
-  const [dropKey, setDropKey] = useState<string | null>(null)
-
   const parentRef = useRef<HTMLDivElement>(null)
-  const filesInput = useRef<HTMLInputElement>(null)
-  const folderInput = useRef<HTMLInputElement>(null)
-  const pickerDrop = useRef<DropContext>({})
 
   const rows = useMemo(
     () => flattenTree(index.folders, overrides, taskUsesClasses),
@@ -210,37 +193,6 @@ export function FileTreeView({
         .map((f) => ({ value: f.key, label: f.pending ? `${f.name} (new class)` : f.name })),
     [index.folders],
   )
-
-  /* ── Adding files ── */
-
-  const openPicker = (kind: 'files' | 'folder', drop: DropContext) => {
-    pickerDrop.current = drop
-    ;(kind === 'files' ? filesInput : folderInput).current?.click()
-  }
-
-  const onPicked = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.currentTarget.files ?? [])
-    event.currentTarget.value = '' // lets the same folder be picked again
-    void stageFiles(files, pickerDrop.current)
-  }
-
-  const dropHandlers = (key: string, drop: DropContext) => ({
-    onDragOver: (event: DragEvent) => {
-      if (locked || !hasFiles(event)) return
-      event.preventDefault()
-      event.stopPropagation()
-      event.dataTransfer.dropEffect = 'copy'
-      setDropKey(key)
-    },
-    onDrop: (event: DragEvent) => {
-      if (locked || !hasFiles(event)) return
-      event.preventDefault()
-      event.stopPropagation()
-      setDropKey(null)
-      void stageDrop(event.dataTransfer, drop)
-    },
-  })
-  const rootDrop = dropHandlers('root', {})
 
   /* ── Selection ── */
 
@@ -340,75 +292,8 @@ export function FileTreeView({
     }
   }
 
-  const batch = state.lastBatch
-  const acceptAttr = [...(accept ?? []), ...ARCHIVE_ACCEPT].join(',')
-
   return (
     <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
-      <Group justify="space-between" wrap="nowrap" align="flex-end">
-        <Group gap="xs">
-          <Button
-            size="xs"
-            variant="default"
-            leftSection={<UploadSimpleIcon size={14} />}
-            disabled={locked}
-            onClick={() => openPicker('files', {})}
-          >
-            Add files or archives
-          </Button>
-          <Button
-            size="xs"
-            variant="default"
-            leftSection={<FolderSimplePlusIcon size={14} />}
-            disabled={locked}
-            onClick={() => openPicker('folder', {})}
-          >
-            Add folder
-          </Button>
-          <Text size="xs" c="dimmed" visibleFrom="md">
-            or drop them anywhere below — onto a folder to put them there
-          </Text>
-        </Group>
-        {batch && batch.candidates.length > 1 && (
-          <Group gap="xs" wrap="nowrap">
-            <Text size="xs" c="dimmed">
-              Last drop ({batch.count.toLocaleString()} files) read as
-            </Text>
-            <Select
-              size="xs"
-              w={180}
-              data={batch.candidates.map((kind) => ({ value: kind, label: LAYOUT_LABELS[kind] }))}
-              value={batch.kind}
-              onChange={(kind) => kind && relayout(kind as LayoutKind)}
-              allowDeselect={false}
-              disabled={locked}
-            />
-          </Group>
-        )}
-      </Group>
-
-      {batch && batch.drop.split === undefined && !LAYOUT_LEVELS[batch.kind].includes('split') && batch.count > 0 && (
-        <Text size="xs" c="dimmed">
-          No train / validation / test folders found in the last drop, so its files went to <b>train</b>. Move them from
-          the toolbar, or drop them onto a split folder.
-        </Text>
-      )}
-
-      {busy && (
-        <Alert variant="light" p="xs">
-          <Group gap="sm" wrap="nowrap">
-            <Loader size="xs" />
-            <Text size="sm" style={{ flex: 1 }} truncate>
-              {busy.label}…
-            </Text>
-            <Progress value={busy.fraction * 100} w={160} size="sm" />
-            <Button size="compact-xs" variant="subtle" color="red" onClick={cancel}>
-              Cancel
-            </Button>
-          </Group>
-        </Alert>
-      )}
-
       {selectedIds.length > 0 && (
         <Group gap="xs" wrap="nowrap">
           <Badge variant="light">{selectedIds.length.toLocaleString()} selected</Badge>
@@ -451,33 +336,15 @@ export function FileTreeView({
           role="tree"
           aria-label="Files to upload"
           onKeyDown={onTreeKeyDown}
-          onDragOver={rootDrop.onDragOver}
-          onDrop={rootDrop.onDrop}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropKey(null)
-          }}
           style={{
             flex: 1,
             minWidth: 0,
             overflow: 'auto',
-            border: `1px ${dropKey === 'root' ? 'dashed' : 'solid'} ${
-              dropKey === 'root' ? 'var(--mantine-primary-color-filled)' : 'var(--mantine-color-default-border)'
-            }`,
+            border: '1px solid var(--mantine-color-default-border)',
             borderRadius: 'var(--mantine-radius-md)',
-            background: dropKey === 'root' ? 'var(--mantine-primary-color-light)' : undefined,
           }}
         >
-          {rows.length === 0 ? (
-            <Stack align="center" justify="center" gap="xs" h="100%" p="xl" style={{ pointerEvents: 'none' }}>
-              <CloudArrowUpIcon size={36} />
-              <Text fw={600}>Drop files, folders or archives here</Text>
-              <Text size="xs" c="dimmed" ta="center" maw={420}>
-                Organize them as {taskUsesClasses ? 'class / train, validation, test' : 'train, validation, test'}{' '}
-                folders and they are sorted for you. .zip, .tar and .tar.gz are unpacked here in your browser. Nothing
-                is uploaded until you press Upload.
-              </Text>
-            </Stack>
-          ) : (
+          {rows.length === 0 ? null : (
             <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
               {virtualizer.getVirtualItems().map((item) => (
                 <div
@@ -514,57 +381,6 @@ export function FileTreeView({
           </Box>
         )}
       </Group>
-
-      {(state.junk > 0 || state.skipped.length > 0) && (
-        <Group gap="md">
-          {state.junk > 0 && (
-            <Text size="xs" c="dimmed">
-              {state.junk.toLocaleString()} system file{state.junk === 1 ? '' : 's'} ignored (.DS_Store, __MACOSX…)
-            </Text>
-          )}
-          {state.skipped.length > 0 && (
-            <Popover width={420} position="top-start" withArrow shadow="md">
-              <Popover.Target>
-                <Button size="compact-xs" variant="subtle" color="yellow">
-                  {state.skipped.length.toLocaleString()} skipped — details
-                </Button>
-              </Popover.Target>
-              <Popover.Dropdown>
-                <ScrollArea.Autosize mah={240}>
-                  <Stack gap={6}>
-                    {state.skipped.slice(0, 100).map((s, i) => (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: a static, append-only list of paths that may repeat
-                      <div key={i}>
-                        <Text size="xs" fw={500} style={{ wordBreak: 'break-all' }}>
-                          {s.path}
-                        </Text>
-                        <Text size="xs" c="dimmed">
-                          {s.reason}
-                        </Text>
-                      </div>
-                    ))}
-                    {state.skipped.length > 100 && (
-                      <Text size="xs" c="dimmed">
-                        …and {state.skipped.length - 100} more
-                      </Text>
-                    )}
-                  </Stack>
-                </ScrollArea.Autosize>
-              </Popover.Dropdown>
-            </Popover>
-          )}
-        </Group>
-      )}
-
-      <input ref={filesInput} type="file" multiple accept={acceptAttr} hidden onChange={onPicked} />
-      <input
-        ref={folderInput}
-        type="file"
-        multiple
-        hidden
-        onChange={onPicked}
-        {...({ webkitdirectory: '' } as Record<string, string>)}
-      />
     </Stack>
   )
 }
