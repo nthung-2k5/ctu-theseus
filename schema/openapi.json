@@ -1170,6 +1170,60 @@
         }
       }
     },
+    "/api/projects/{project_id}/items/preflight": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Preflight Items",
+        "description": "Tell the client which files it need not send: their content is already in the draft.\n\nThe client hashes files in the browser (SHA-256, the same digest `upload_to_pool` addresses the pool by) and asks\nhere before moving any bytes. It is advisory: `upload_items` still dedups on its own, so a stale answer only costs a\nredundant upload, never a duplicate item.",
+        "operationId": "preflight_items",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreflightBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreflightResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{project_id}/upload": {
       "post": {
         "tags": [
@@ -8873,6 +8927,41 @@
         ],
         "title": "PredictResponse",
         "description": "One prediction. `output` is one of the framework-neutral shapes in domain/predict.py, told\napart by `kind`: classification | regression | text | tokens | detections."
+      },
+      "PreflightBody": {
+        "properties": {
+          "hashes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 5000,
+            "title": "Hashes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hashes"
+        ],
+        "title": "PreflightBody",
+        "description": "SHA-256 digests (hex) of files the client is about to upload."
+      },
+      "PreflightResponse": {
+        "properties": {
+          "existing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Existing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "existing"
+        ],
+        "title": "PreflightResponse",
+        "description": "The digests whose content is already a live item of the draft: sending them again changes nothing."
       },
       "PreprocessingConfig": {
         "properties": {

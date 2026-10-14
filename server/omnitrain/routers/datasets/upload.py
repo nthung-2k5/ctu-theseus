@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
@@ -33,6 +34,8 @@ from omnitrain.schemas.datasets import (
     ItemFailure,
     ItemRow,
     ItemRowWithDuplicate,
+    PreflightBody,
+    PreflightResponse,
     UploadResponse,
     UploadResult,
 )
@@ -42,6 +45,8 @@ from omnitrain.services import storage
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+_SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}")
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 # Clips are far larger than images or audio. The upload route holds one in memory at a time (see `upload_items`).
@@ -81,6 +86,19 @@ async def create_items(body: CreateItemsBody, draft: DraftDep, session: SessionD
                 failed.append(ItemFailure(index=index, message=svc.safe_item_error(e)))
     await session.commit()
     return CreateItemsResponse(created=created, failed=failed)
+
+
+@router.post("/projects/{project_id}/items/preflight", response_model=PreflightResponse)
+async def preflight_items(body: PreflightBody, draft: DraftDep, session: SessionDep) -> PreflightResponse:
+    """Tell the client which files it need not send: their content is already in the draft.
+
+    The client hashes files in the browser (SHA-256, the same digest `upload_to_pool` addresses the pool by) and asks
+    here before moving any bytes. It is advisory: `upload_items` still dedups on its own, so a stale answer only costs a
+    redundant upload, never a duplicate item.
+    """
+    wanted = list(dict.fromkeys(h.lower() for h in body.hashes if _SHA256_HEX.fullmatch(h)))
+    existing = await svc.hashes_in_draft(session, draft.project.id, draft.draft.id, wanted)
+    return PreflightResponse(existing=sorted(existing))
 
 
 class _UploadBox(BaseModel):

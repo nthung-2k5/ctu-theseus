@@ -4,6 +4,7 @@ Ports server/routes/datasets.integration.test.ts and covers the file-upload and 
 """
 
 import asyncio
+import hashlib
 import struct
 import uuid
 
@@ -321,6 +322,51 @@ async def test_re_uploading_identical_bytes_is_a_duplicate_that_is_not_relabeled
     assert len(fake_s3.puts) == 1  # the object already existed: the second upload wrote nothing
     item = (await listing(c, p["id"]))["items"][0]
     assert item["annotations"][0]["classId"] == cat and item["splitType"] == "train"  # neither label nor split changed
+
+
+async def test_preflight_names_exactly_the_hashes_whose_upload_would_change_nothing(client, new_user, fake_s3):
+    c = await new_user()
+    p = await project(c, "image_classification")
+    pid = p["id"]
+    url = f"/api/projects/{pid}/items/preflight"
+    here, gone = png(8, 8), png(9, 9)
+    uploaded = (
+        await c.post(
+            f"/api/projects/{pid}/upload",
+            data={"split": "train"},
+            files=[("files", ("a.png", here, "image/png")), ("files", ("b.png", gone, "image/png"))],
+        )
+    ).json()["results"]
+    here_hash, gone_hash = hashlib.sha256(here).hexdigest(), hashlib.sha256(gone).hexdigest()
+    never = hashlib.sha256(b"never uploaded").hexdigest()
+
+    r = await c.post(url, json={"hashes": [here_hash, gone_hash, never, here_hash.upper(), "not-a-hash"]})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"existing": sorted([here_hash, gone_hash])}
+
+    # A deleted item is restored by uploading it again, so it is not something the client may skip.
+    assert (await c.delete(f"/api/items/{uploaded[1]['value']['id']}")).status_code == 204
+    assert (await c.post(url, json={"hashes": [here_hash, gone_hash]})).json() == {"existing": [here_hash]}
+    assert (await c.post(url, json={"hashes": []})).json() == {"existing": []}
+
+
+async def test_preflight_never_reveals_another_projects_content(client, new_user, fake_s3):
+    owner, stranger = await new_user(), await new_user()
+    mine, theirs = await project(owner, "image_classification"), await project(stranger, "image_classification")
+    data = png(5, 5)
+    await owner.post(
+        f"/api/projects/{mine['id']}/upload", data={"split": "train"}, files=[("files", ("a.png", data, "image/png"))]
+    )
+    digest = hashlib.sha256(data).hexdigest()
+    # Another project of someone else: the same bytes are new there, and asking about a foreign project is refused.
+    assert (await stranger.post(f"/api/projects/{theirs['id']}/items/preflight", json={"hashes": [digest]})).json() == {
+        "existing": []
+    }
+    assert (
+        await stranger.post(f"/api/projects/{mine['id']}/items/preflight", json={"hashes": [digest]})
+    ).status_code == 403
+    too_many = {"hashes": [digest] * 5001}
+    assert (await owner.post(f"/api/projects/{mine['id']}/items/preflight", json=too_many)).status_code == 422
 
 
 async def test_a_mixed_batch_reports_each_file_and_only_the_failing_one_fails(client, new_user, db, monkeypatch):

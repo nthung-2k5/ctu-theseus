@@ -104,6 +104,32 @@ async def class_in_dataset(session: AsyncSession, class_id: uuid.UUID, dataset_i
     return found is not None
 
 
+async def hashes_in_draft(
+    session: AsyncSession, dataset_id: uuid.UUID, draft_id: uuid.UUID, hashes: Sequence[str]
+) -> set[str]:
+    """Which of these content hashes are already a live item of the draft.
+
+    Exactly the files whose upload would be a no-op: `upload_items` finds the pool item, and the membership insert is
+    ON CONFLICT DO NOTHING (the first split wins, a dedup hit is never relabelled). A hash that is in the pool but not
+    in the draft (removed, or soft-deleted) is deliberately absent: uploading it again restores it.
+    """
+    found: set[str] = set()
+    for start in range(0, len(hashes), _CHUNK):
+        rows = await session.execute(
+            sa.select(DatasetItem.content_hash)
+            .join(DatasetVersionItem, DatasetVersionItem.item_id == DatasetItem.id)
+            .where(
+                DatasetItem.dataset_id == dataset_id,
+                DatasetItem.content_hash.in_(hashes[start : start + _CHUNK]),
+                DatasetItem.source_item_id.is_(None),
+                DatasetItem.deleted_at.is_(None),
+                DatasetVersionItem.version_id == draft_id,
+            )
+        )
+        found.update(h for h in rows.scalars() if h)
+    return found
+
+
 # -- Item creation ---------------------------------------------------------------------------
 
 

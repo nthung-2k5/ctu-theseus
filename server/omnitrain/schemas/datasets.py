@@ -250,6 +250,18 @@ class UploadResponse(ApiModel):
     results: list[UploadResult]
 
 
+class PreflightBody(ApiModel):
+    """SHA-256 digests (hex) of files the client is about to upload."""
+
+    hashes: list[str] = Field(max_length=5000)
+
+
+class PreflightResponse(ApiModel):
+    """The digests whose content is already a live item of the draft: sending them again changes nothing."""
+
+    existing: list[str]
+
+
 class ItemFilter(ApiModel):
     """The item listing's filters, to act on "everything matching" instead of on listed ids."""
 
