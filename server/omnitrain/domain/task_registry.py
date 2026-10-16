@@ -11,7 +11,7 @@ and export READMEs on the backend, and (via schema/task_registry.json, generated
 scripts/export_schema.py) the task picker and per-modality UI on the frontend.
 
 Whether a task is actually trainable right now is a runtime question, not a static one: see
-`omnitrain.backends.registry.trainable_backends`. `status` only distinguishes tasks OmniTrain can represent at
+`omnitrain.plugins.backends.registry.trainable_backends`. `status` only distinguishes tasks OmniTrain can represent at
 all ("planned" ones have no annotation/columns story yet) from ones that are just waiting on a backend plugin.
 """
 

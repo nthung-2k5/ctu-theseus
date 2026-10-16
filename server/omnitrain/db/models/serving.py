@@ -27,7 +27,7 @@ class ModelExport(JobColumns, Base):
     id: Mapped[uuid.UUID] = uuid_pk()
     run_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("training_runs.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("users.id", ondelete="CASCADE"))
-    # An export format plugin id (omnitrain/export/formats/). Deliberately free text, not a Postgres
+    # An export format plugin id (omnitrain/plugins/export/formats/). Deliberately free text, not a Postgres
     # enum: adding a format is a new Python class, never a migration.
     format: Mapped[str] = mapped_column(sa.String(64))
     status: Mapped[str] = mapped_column(export_status_t, server_default="pending", index=True)

@@ -9,9 +9,9 @@ from datetime import datetime
 
 from pydantic import Field, field_validator
 
-from omnitrain.augmentation.config import AugmentationConfig
 from omnitrain.db.enums import DatasetModality, DatasetVersionStatus, SplitType, TrainingStatus
-from omnitrain.preprocessing.config import PreprocessingConfig
+from omnitrain.plugins.augmentation.config import AugmentationConfig
+from omnitrain.plugins.preprocessing.config import PreprocessingConfig
 from omnitrain.schemas.common import ApiModel
 
 HEX_COLOR = r"^#[0-9a-fA-F]{6}$"

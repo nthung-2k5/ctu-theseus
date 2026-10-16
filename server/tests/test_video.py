@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from omnitrain.api.routers.datasets import upload as datasets_router
 from omnitrain.domain import task_registry as tr
 from omnitrain.domain import video as video_media
-from omnitrain.routers.datasets import upload as datasets_router
 from omnitrain.services import storage
 
 

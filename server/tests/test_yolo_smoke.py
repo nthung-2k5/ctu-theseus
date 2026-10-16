@@ -17,12 +17,12 @@ import pandas as pd
 import pytest
 from PIL import Image
 
-from omnitrain.backends.base import TrainContext
-from omnitrain.backends.yolo import YoloBackend, data, runtime
-from omnitrain.backends.yolo import train as train_mod
-from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
-from omnitrain.backends.yolo.model import YoloLoadedModel
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.plugins.backends.base import TrainContext
+from omnitrain.plugins.backends.yolo import YoloBackend, data, runtime
+from omnitrain.plugins.backends.yolo import train as train_mod
+from omnitrain.plugins.backends.yolo.compile import YoloHyperparameters, compile_yolo_config
+from omnitrain.plugins.backends.yolo.model import YoloLoadedModel
 
 pytestmark = pytest.mark.skipif(not os.environ.get("YOLO_SMOKE"), reason="set YOLO_SMOKE=1 to train for real")
 
@@ -162,9 +162,9 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
     import json
     import types
 
-    import omnitrain.export
+    import omnitrain.plugins.export
 
-    client_path = Path(omnitrain.export.__file__).parent / "templates" / "python" / "omnitrain_client.py"
+    client_path = Path(omnitrain.plugins.export.__file__).parent / "templates" / "python" / "omnitrain_client.py"
     # Compiled from source, not imported: an import would leave a __pycache__ inside the templates directory.
     client_module = types.ModuleType("generated_client")
     client_module.__file__ = str(client_path)  # the template locates model.onnx next to itself

@@ -16,7 +16,7 @@ def test_training_saves_the_model_under_an_absolute_output_directory(tmp_path):
     import pandas as pd
     from ludwig.api import LudwigModel
 
-    from omnitrain.backends.ludwig import compat  # noqa: F401
+    from omnitrain.plugins.backends.ludwig import compat  # noqa: F401
 
     rng = np.random.default_rng(0)
     df = pd.DataFrame({"a": rng.random(60)})
@@ -38,7 +38,7 @@ def test_training_saves_the_model_under_an_absolute_output_directory(tmp_path):
 
 
 def test_drive_letter_paths_go_straight_to_the_local_filesystem():
-    from omnitrain.backends.ludwig.compat import _keep_windows_drive_letter
+    from omnitrain.plugins.backends.ludwig.compat import _keep_windows_drive_letter
 
     calls = []
 
@@ -62,7 +62,7 @@ def test_drive_letter_paths_go_straight_to_the_local_filesystem():
 def test_ludwig_keeps_the_drive_letter_once_patched():
     from ludwig.utils import fs_utils
 
-    from omnitrain.backends.ludwig import compat  # noqa: F401
+    from omnitrain.plugins.backends.ludwig import compat  # noqa: F401
 
     _, path = fs_utils.get_fs_and_path("C:\\Users\\x\\out")
     assert path.replace("\\", "/").lower().startswith("c:/users/x/out")
@@ -71,7 +71,7 @@ def test_ludwig_keeps_the_drive_letter_once_patched():
 def test_other_oserrors_still_propagate():
     import errno
 
-    from omnitrain.backends.ludwig.compat import _tolerate_fsync_on_read_only_handle
+    from omnitrain.plugins.backends.ludwig.compat import _tolerate_fsync_on_read_only_handle
 
     def boom(self, path):
         raise OSError(errno.ENOSPC, "No space left on device")

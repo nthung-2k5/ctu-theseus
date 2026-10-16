@@ -18,9 +18,9 @@ from typing import Any, Protocol
 import pandas as pd
 from opentelemetry import trace
 
-from omnitrain.backends.base import LoadedModel, TrainContext, TrainerBackend
-from omnitrain.backends.registry import get_backend
 from omnitrain.core import constants as C
+from omnitrain.plugins.backends.base import LoadedModel, TrainContext, TrainerBackend
+from omnitrain.plugins.backends.registry import get_backend
 from omnitrain.services import storage
 from omnitrain.settings import get_settings
 

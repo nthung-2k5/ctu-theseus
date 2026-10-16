@@ -9,10 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from omnitrain.backends.base import TrainContext
-from omnitrain.backends.ludwig import train as train_mod
-from omnitrain.backends.ludwig.model import LudwigLoadedModel
 from omnitrain.jobs import abort
+from omnitrain.plugins.backends.base import TrainContext
+from omnitrain.plugins.backends.ludwig import train as train_mod
+from omnitrain.plugins.backends.ludwig.model import LudwigLoadedModel
 
 
 class Metric:

@@ -1,6 +1,6 @@
 """Bring-your-own models: where their files live locally, putting them there, and the generic file checks.
 
-A custom model's weights come from a model source plugin (`omnitrain/model_sources/`): today the Hugging Face
+A custom model's weights come from a model source plugin (`omnitrain/plugins/model_sources/`): today the Hugging Face
 Hub (fetched at a pinned commit) or an uploaded bundle in `theseus-models/custom/{modelId}/`. This module holds
 what every source shares plus the Hub and upload clients the two shipped sources call.
 
@@ -32,10 +32,10 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from omnitrain.backends.base import CustomModelRef
 from omnitrain.core import constants as C
 from omnitrain.db.models import CustomModel
-from omnitrain.model_sources.base import find_source
+from omnitrain.plugins.backends.base import CustomModelRef
+from omnitrain.plugins.model_sources.base import find_source
 from omnitrain.services import storage
 from omnitrain.settings import get_settings
 

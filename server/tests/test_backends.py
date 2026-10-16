@@ -1,11 +1,11 @@
 """Contract tests over every registered trainer backend, plus the generic parts of the plugin
 base class itself (a backend that doesn't override anything beyond the abstract methods)."""
 
-from omnitrain.backends.base import HyperparamsBase, ModelChoice, TrainerBackend
-from omnitrain.backends.base import _registry as backend_registry
-from omnitrain.backends.registry import list_backends
 from omnitrain.domain.task_registry import TASK_REGISTRY, get_task_descriptor
-from omnitrain.export.registry import list_export_formats
+from omnitrain.plugins.backends.base import HyperparamsBase, ModelChoice, TrainerBackend
+from omnitrain.plugins.backends.base import _registry as backend_registry
+from omnitrain.plugins.backends.registry import list_backends
+from omnitrain.plugins.export.registry import list_export_formats
 
 
 def test_every_registered_backend_has_a_hyperparameters_model_and_sane_artifacts():

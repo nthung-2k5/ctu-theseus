@@ -8,10 +8,10 @@ from functools import lru_cache
 import sqlalchemy as sa
 import torch
 
-from omnitrain.backends.base import LoadedModel
-from omnitrain.backends.registry import get_backend
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import TrainingRun
+from omnitrain.plugins.backends.base import LoadedModel
+from omnitrain.plugins.backends.registry import get_backend
 from omnitrain.services.run_models import ensure_run_custom_model
 from omnitrain.services.storage import cleanup_temp, download_model, find_model_dir
 from omnitrain.settings import get_settings

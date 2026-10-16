@@ -14,13 +14,13 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from omnitrain.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
-from omnitrain.backends.base import _registry as backend_registry
 from omnitrain.db.models import RunEvaluation, RunEvent, TrainingMetric, TrainingRun
 from omnitrain.events import InProcessRunEventBus, set_event_writer
 from omnitrain.events.writer import EventWriter
 from omnitrain.jobs import abort, run_core
 from omnitrain.jobs import train as train_job
+from omnitrain.plugins.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
+from omnitrain.plugins.backends.base import _registry as backend_registry
 from omnitrain.services import storage
 from omnitrain.settings import get_settings
 

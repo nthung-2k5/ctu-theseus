@@ -7,14 +7,14 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from omnitrain.backends.base import ConfigError, CustomModelRef
-from omnitrain.backends.registry import get_backend, trainable_backends
-from omnitrain.backends.video import VideoBackend, frames
-from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config, hyperparameter_specs
-from omnitrain.backends.video.manifest import build_preprocessing_manifest
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
-from omnitrain.export.formats._kits import supports_generated_clients
-from omnitrain.export.registry import list_export_formats
+from omnitrain.plugins.backends.base import ConfigError, CustomModelRef
+from omnitrain.plugins.backends.registry import get_backend, trainable_backends
+from omnitrain.plugins.backends.video import VideoBackend, frames
+from omnitrain.plugins.backends.video.compile import VideoHyperparameters, compile_video_config, hyperparameter_specs
+from omnitrain.plugins.backends.video.manifest import build_preprocessing_manifest
+from omnitrain.plugins.export.formats._kits import supports_generated_clients
+from omnitrain.plugins.export.registry import list_export_formats
 
 TASK = get_task_descriptor("video_classification")
 SNAPSHOT = SnapshotContext(
@@ -48,7 +48,7 @@ class TestRegistration:
         import sys
 
         code = (
-            "import sys; from omnitrain.backends.registry import list_backends; "
+            "import sys; from omnitrain.plugins.backends.registry import list_backends; "
             "[b.available() for b in list_backends()]; print('torch' in sys.modules)"
         )
         out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)

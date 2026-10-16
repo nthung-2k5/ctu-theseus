@@ -7,7 +7,6 @@ from typing import Any
 
 from pydantic import Field, model_validator
 
-from omnitrain.augmentation.config import AugmentationConfig, AugmentationInfo
 from omnitrain.db.enums import (
     AnnotationType,
     AudioCodec,
@@ -17,7 +16,8 @@ from omnitrain.db.enums import (
     VideoContainer,
 )
 from omnitrain.domain.boxes import validate_box_annotation
-from omnitrain.preprocessing.config import PreprocessingConfig, PreprocessingInfo
+from omnitrain.plugins.augmentation.config import AugmentationConfig, AugmentationInfo
+from omnitrain.plugins.preprocessing.config import PreprocessingConfig, PreprocessingInfo
 from omnitrain.schemas.common import ApiModel
 from omnitrain.schemas.projects import VersionOut
 

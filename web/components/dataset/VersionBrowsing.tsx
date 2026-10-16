@@ -8,7 +8,7 @@ export const SPLIT_TYPES = ['train', 'validation', 'test'] as const
 
 /**
  * Per-split membership counts, computed server-side (see
- * `server/omnitrain/routers/projects.py`). This used to tally a raw `version.items`
+ * `server/omnitrain/api/routers/projects.py`). This used to tally a raw `version.items`
  * array, which meant every project navigation shipped the entire membership
  * table just so the UI could count it.
  */

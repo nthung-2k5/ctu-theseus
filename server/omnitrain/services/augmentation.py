@@ -29,13 +29,13 @@ from typing import Any
 import uuid_utils
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain.augmentation import media
-from omnitrain.augmentation.config import AugmentationConfig
-from omnitrain.augmentation.pipeline import ConfiguredOp, augment, build_plan, seed_for
 from omnitrain.core import constants as C
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import DatasetItem, DatasetVersion, DatasetVersionItem, Project
 from omnitrain.domain.task_registry import get_task_descriptor
+from omnitrain.plugins.augmentation import media
+from omnitrain.plugins.augmentation.config import AugmentationConfig
+from omnitrain.plugins.augmentation.pipeline import ConfiguredOp, augment, build_plan, seed_for
 from omnitrain.services import storage
 from omnitrain.services.datasets import canonical_json
 from omnitrain.services.derived_items import (

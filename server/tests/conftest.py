@@ -92,7 +92,7 @@ async def db(database_url, monkeypatch):
 @pytest.fixture
 async def app(db):
     """The real app with a started event writer (routes that cancel or emit need one)."""
-    from omnitrain.app import create_app
+    from omnitrain.api.app import create_app
     from omnitrain.events import InProcessRunEventBus, set_event_bus, set_event_writer
     from omnitrain.events.writer import EventWriter
 
@@ -105,7 +105,7 @@ async def app(db):
     # A snapshot build is started as a background task (routers/datasets/versions.py) that no request waits for. If
     # the test ends first, the `db` fixture drops the database under it and the event loop then cannot finish
     # cancelling it, which hangs pytest at teardown. Let in-flight builds finish while the database still exists.
-    from omnitrain.routers.datasets import versions
+    from omnitrain.api.routers.datasets import versions
 
     pending = list(versions._background)
     if pending:

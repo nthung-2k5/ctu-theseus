@@ -12,10 +12,6 @@ import pyarrow.parquet as pq
 import pytest
 import sqlalchemy as sa
 
-from omnitrain.augmentation import media
-from omnitrain.augmentation.media import VideoClip
-from omnitrain.augmentation.ops import video as aug_ops
-from omnitrain.augmentation.registry import list_augmentations
 from omnitrain.db.models import (
     Annotation,
     Dataset,
@@ -29,8 +25,12 @@ from omnitrain.db.models import (
 )
 from omnitrain.domain import video as video_service
 from omnitrain.domain.task_registry import get_task_descriptor
-from omnitrain.preprocessing.ops import video as pre_ops
-from omnitrain.preprocessing.registry import list_preprocessing
+from omnitrain.plugins.augmentation import media
+from omnitrain.plugins.augmentation.media import VideoClip
+from omnitrain.plugins.augmentation.ops import video as aug_ops
+from omnitrain.plugins.augmentation.registry import list_augmentations
+from omnitrain.plugins.preprocessing.ops import video as pre_ops
+from omnitrain.plugins.preprocessing.registry import list_preprocessing
 from omnitrain.services import snapshot as snap
 from omnitrain.services import storage
 

@@ -84,7 +84,7 @@ secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, t
 Hugging Face video model is saved as a self-contained folder, so it never needs the base model's files again).
 The run spec then carries a `customModel` description; the worker fetches the files with the server's own code
 (`custom_models.ensure_local`: an uploaded bundle from S3 with its checksum re-checked, or a public Hub model at
-its pinned revision, fetched anonymously whatever token the machine has; each `ModelSource` in `omnitrain/model_sources/` declares which
+its pinned revision, fetched anonymously whatever token the machine has; each `ModelSource` in `omnitrain/plugins/model_sources/` declares which
 of its models qualify) into its own temp dir and swaps the
 server's path for that one in the config. Everything else trains on the server: a private or gated Hub model
 (it needs its owner's saved token, which never leaves the server), and every Ludwig custom model (its checkpoint
@@ -135,7 +135,7 @@ there registers on the next backend restart), and `server/omnitrain/domain/task_
 lookup over them and the single source of truth every other piece derives from. A task declares, per task, which modality it belongs to, what shape a dataset item takes
 (`itemSpec.payload`: `file` / `inline_text` / `record`), what annotation type it needs, the snapshot
 columns, and the inference input/output kinds. It says nothing about how a task is *trained*: that is a
-trainer backend's job (`server/omnitrain/backends/`, one package per framework). The frontend's task
+trainer backend's job (`server/omnitrain/plugins/backends/`, one package per framework). The frontend's task
 picker, the per-modality upload/labeling UI and snapshot column derivation are all driven off this one
 descriptor per task, so adding a new task's data side means adding one class, not touching five files:
 `projects.task` is free text, so there is no enum or migration, and `POST /api/projects` rejects an id
@@ -229,10 +229,10 @@ originals (`source_item_id IS NULL`), and deleting the snapshot deletes them
 (`services/derived_items.delete_derived_items`). Augmented copies are seeded from (snapshot, item, copy
 index), so a rebuild reproduces them.
 
-**Adding a preprocessing op:** create a module in `server/omnitrain/preprocessing/ops/` with a
+**Adding a preprocessing op:** create a module in `server/omnitrain/plugins/preprocessing/ops/` with a
 subclass of `Preprocessing` that sets `id`, `label`, `modality`, a pydantic `Params` model and
 implements `apply(sample, params, state)` (no rng: it must be deterministic). **Adding an
-augmentation:** the same shape in `server/omnitrain/augmentation/ops/`, subclassing `Augmentation`
+augmentation:** the same shape in `server/omnitrain/plugins/augmentation/ops/`, subclassing `Augmentation`
 and implementing `apply(sample, params, rng, state)`. Either way, restart the backend:
 `GET /api/projects/{id}/preprocessing` or `/augmentations` returns it for projects whose task it
 supports (by default label-preserving classification and regression tasks of its modality) and the
@@ -242,7 +242,7 @@ snapshot dialog renders its parameters, with no frontend change.
 
 "Download the ONNX file," "give me code I can drop into my own project," and "give me something end
 users can just open" are different products with different constraints, so each is its own **export
-format**: one Python class in `server/omnitrain/export/formats/`. The web app has a single
+format**: one Python class in `server/omnitrain/plugins/export/formats/`. The web app has a single
 "Export format" combobox filled from `GET /api/export-formats`.
 
 | Group | Formats (ids) | Contents |
@@ -263,7 +263,7 @@ reference code to integrate, not a standalone scaffold. The apps are the excepti
 `pubspec.yaml` (Flutter) and the PWA's `index.html`/manifest are the app's actual required entry
 points, not incidental build tooling, so those do ship.
 
-**Adding a format:** create a module in `omnitrain/export/formats/` with a subclass of `ExportFormat`
+**Adding a format:** create a module in `omnitrain/plugins/export/formats/` with a subclass of `ExportFormat`
 that sets `id`, `label`, `group` and `artifact` (a key of `ARTIFACT_FILENAMES` in `backends/base.py`; the
 conversion itself is `TrainerBackend.convert`) and implements `assemble(ctx)`. Restart the backend. The
 format shows up in `GET /api/export-formats` and in the web combobox; there is no enum, migration or
@@ -282,12 +282,12 @@ golden sample (`expected.json`) plus a verify path (a script for devkit langs, a
 self-check screen/button for the PWA/Flutter apps) so a consumer can confirm the reimplementation
 actually matches the platform's own inference output before trusting it.
 
-Export is two-phase (`server/omnitrain/jobs/export.py`, `omnitrain/export/`): the export lane
+Export is two-phase (`server/omnitrain/jobs/export.py`, `omnitrain/plugins/export/`): the export lane
 converts the model (`pending → converting`), then a guarded `converting → assembling` transition
 hands off to bundle assembly, which zips (reproducibly: fixed timestamps, model stored
 uncompressed), uploads, and records `ready` or `failed` with a checksum. Both final transitions
 are compare-and-swap on status, so a stale result never overwrites a row that startup recovery has
-already re-queued. Templates ship as package data under `omnitrain/export/templates/`.
+already re-queued. Templates ship as package data under `omnitrain/plugins/export/templates/`.
 
 ### Administration
 
@@ -430,8 +430,11 @@ server/               The backend (FastAPI + Ludwig); see server/README.md
   omnitrain/core/           constants, the plugin Registry, executors, telemetry, metrics; imports nothing else
   omnitrain/domain/         framework-neutral logic with no DB session or HTTP (task_registry, boxes, predict, params,
                           evaluate, video, ...); plugins may import it
-  omnitrain/routers/        HTTP routes (auth, projects, datasets/ (one module per concern), classes, training,
-                          sweeps, inference, export, api_keys, api_v1, models, admin/)
+  omnitrain/api/            the HTTP layer: app, lifespan, deps, errors and routers/ (auth, projects, datasets/ (one
+                          module per concern), classes, training, sweeps, inference, export, api_keys, api_v1,
+                          models, admin/)
+  omnitrain/plugins/        backends/ (trainer backends), export/ (formats + bundle assembly), preprocessing/,
+                          augmentation/, model_sources/: drop a class in, restart, it shows up
   omnitrain/tasks/          task plugins (base + builtin/), looked up via domain/task_registry
   omnitrain/sweep_strategies/  sweep strategy plugins (grid, random, random_unique, balanced, one_at_a_time)
   omnitrain/services/       database + S3 orchestration: snapshot, sweep, training, plugin_settings,
@@ -440,7 +443,6 @@ server/               The backend (FastAPI + Ludwig); see server/README.md
                           train/export/validate_model, recovery, reapers
   omnitrain/worker/         the remote training worker (`python -m omnitrain.worker`)
   omnitrain/events/         run-event writer, in-process bus, SSE stream
-  omnitrain/export/         devkit/app bundle assembly + templates
   omnitrain/db/, migrations/  SQLAlchemy models + Alembic
 web/                      React SPA
   lib/api/                axios client + Orval output (generated/ is gitignored)

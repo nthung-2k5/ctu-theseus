@@ -15,12 +15,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from omnitrain.backends.base import TrainContext
-from omnitrain.backends.video import VideoBackend, data, frames, runtime
-from omnitrain.backends.video import train as train_mod
-from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config
-from omnitrain.backends.video.model import VideoLoadedModel
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
+from omnitrain.plugins.backends.base import TrainContext
+from omnitrain.plugins.backends.video import VideoBackend, data, frames, runtime
+from omnitrain.plugins.backends.video import train as train_mod
+from omnitrain.plugins.backends.video.compile import VideoHyperparameters, compile_video_config
+from omnitrain.plugins.backends.video.model import VideoLoadedModel
 
 pytestmark = pytest.mark.skipif(not os.environ.get("VIDEO_SMOKE"), reason="set VIDEO_SMOKE=1 to train for real")
 

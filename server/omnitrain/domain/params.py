@@ -2,8 +2,8 @@
 knowing anything about what the model is for.
 
 Shared by every plugin system whose UI needs "here are this thing's tunable parameters, generate
-a form": augmentation ops (`omnitrain/augmentation/registry.py`) and trainer backend hyperparameters
-(`omnitrain/backends/registry.py`).
+a form": augmentation ops (`omnitrain/plugins/augmentation/registry.py`) and trainer backend hyperparameters
+(`omnitrain/plugins/backends/registry.py`).
 """
 
 import types

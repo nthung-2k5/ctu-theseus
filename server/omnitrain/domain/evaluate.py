@@ -1,6 +1,6 @@
 """Evaluation-report building blocks shared by every trainer backend.
 
-A backend's own `evaluate()` (see `omnitrain/backends/ludwig/evaluate.py` for the reference
+A backend's own `evaluate()` (see `omnitrain/plugins/backends/ludwig/evaluate.py` for the reference
 implementation) builds the bounded confusion-matrix / per-class-metrics report; these are the
 parts of that job that don't depend on which framework trained the model: which split to
 evaluate against, and picking the most informative misclassified rows out of a raw predictions

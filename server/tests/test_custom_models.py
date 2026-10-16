@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 import sqlalchemy as sa
 
-from omnitrain.backends.registry import get_backend
 from omnitrain.db.models import CustomModel, DatasetVersion, TrainingRun
 from omnitrain.domain.task_registry import SnapshotContext, get_task_descriptor
 from omnitrain.jobs import queue, validate_model
 from omnitrain.jobs.recovery import recover_on_startup
+from omnitrain.plugins.backends.registry import get_backend
 from omnitrain.services import custom_models as cm
 from omnitrain.services import run_models, storage
 from omnitrain.services import training as training_service
@@ -772,7 +772,7 @@ async def test_a_run_on_a_custom_model_gets_its_files_back_before_loading(db, ma
 
 
 async def test_the_backend_contract_defaults_offer_no_custom_models():
-    from omnitrain.backends.base import TrainerBackend
+    from omnitrain.plugins.backends.base import TrainerBackend
 
     assert TrainerBackend.custom_model_kinds.__func__(TrainerBackend, get_task_descriptor(TEXT)) == []
     assert get_backend("ludwig").custom_model_kinds(get_task_descriptor("tabular_classification")) == []

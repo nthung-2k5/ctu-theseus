@@ -19,13 +19,13 @@ import sqlalchemy as sa
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain.backends.base import CustomModelKind
-from omnitrain.backends.registry import find_backend, list_backends
 from omnitrain.core import constants as C
 from omnitrain.db.models import CustomModel, TrainingRun, User
 from omnitrain.domain.task_registry import TASK_REGISTRY
 from omnitrain.jobs.dispatcher import nudge
-from omnitrain.model_sources import SourceRefError, find_source, get_source
+from omnitrain.plugins.backends.base import CustomModelKind
+from omnitrain.plugins.backends.registry import find_backend, list_backends
+from omnitrain.plugins.model_sources import SourceRefError, find_source, get_source
 from omnitrain.schemas.custom_models import (
     CreateCustomModelBody,
     CustomModelKindOut,

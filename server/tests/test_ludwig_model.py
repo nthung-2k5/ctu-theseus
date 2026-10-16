@@ -1,6 +1,6 @@
 import pandas as pd
 
-from omnitrain.backends.ludwig.model import build_inference_output, parse_prediction_row
+from omnitrain.plugins.backends.ludwig.model import build_inference_output, parse_prediction_row
 
 
 def test_category_with_idx2str_list():

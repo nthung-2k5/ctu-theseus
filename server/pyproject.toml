@@ -89,10 +89,10 @@ explicit = true
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["migrations/versions", "schema", "omnitrain/export/templates"]
+extend-exclude = ["migrations/versions", "schema", "omnitrain/plugins/export/templates"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-"omnitrain/export/readme.py" = ["E501"] # README prose
+"omnitrain/plugins/export/readme.py" = ["E501"] # README prose

@@ -7,7 +7,7 @@ after a backend restart; `projects.task` is free text, so there is no enum or mi
 
 This is the data side only: what a dataset item looks like, its ground truth, the snapshot columns the
 builder emits and the inference contract. How a task is *trained* is a trainer backend's business
-(`omnitrain/backends/`), and whether it is trainable right now depends on which backends are installed
+(`omnitrain/plugins/backends/`), and whether it is trainable right now depends on which backends are installed
 (`backends.registry.trainable_backends`). `status` only separates tasks OmniTrain can represent at all
 ("planned" ones have no annotation/columns story yet) from ones that are just waiting on a backend.
 

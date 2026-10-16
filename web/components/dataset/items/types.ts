@@ -6,7 +6,7 @@ import type { SPLIT_TYPES } from '../VersionBrowsing'
  * The item shape both the Data page's draft viewer and the Snapshot detail
  * page's per-version viewer render — a superset of every modality's fields,
  * since `GET /projects/{id}/items` always joins all four feature tables
- * regardless of the dataset's modality (see server/omnitrain/routers/datasets/).
+ * regardless of the dataset's modality (see server/omnitrain/api/routers/datasets/).
  */
 export interface DatasetListItem {
   id: string

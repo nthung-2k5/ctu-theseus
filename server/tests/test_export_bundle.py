@@ -9,17 +9,17 @@ import zipfile
 import pytest
 import sqlalchemy as sa
 
-from omnitrain.backends.ludwig.manifest import build_preprocessing_manifest as build_manifest
 from omnitrain.db.models import LabelClass, ModelExport, TrainingRun
-from omnitrain.export import bundle as B
-from omnitrain.export.formats.base import ExportFormat, _registry
-from omnitrain.export.formats.csharp_devkit import CSharpDevkit
-from omnitrain.export.formats.pwa_app import PwaApp
-from omnitrain.export.formats.python_devkit import PythonDevkit
-from omnitrain.export.metadata import extract_preprocessing
-from omnitrain.export.readme import ReadmeVars, app_readme, devkit_readme, model_readme
-from omnitrain.export.registry import get_export_format, list_export_formats
 from omnitrain.jobs import export as export_job
+from omnitrain.plugins.backends.ludwig.manifest import build_preprocessing_manifest as build_manifest
+from omnitrain.plugins.export import bundle as B
+from omnitrain.plugins.export.formats.base import ExportFormat, _registry
+from omnitrain.plugins.export.formats.csharp_devkit import CSharpDevkit
+from omnitrain.plugins.export.formats.pwa_app import PwaApp
+from omnitrain.plugins.export.formats.python_devkit import PythonDevkit
+from omnitrain.plugins.export.metadata import extract_preprocessing
+from omnitrain.plugins.export.readme import ReadmeVars, app_readme, devkit_readme, model_readme
+from omnitrain.plugins.export.registry import get_export_format, list_export_formats
 from omnitrain.services import storage
 
 CLASSES = ["dog", "cat"]  # Ludwig order: deliberately NOT alphabetical

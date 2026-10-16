@@ -1,7 +1,7 @@
 import pytest
 
-from omnitrain.backends.yolo import YoloBackend
-from omnitrain.backends.yolo.manifest import METADATA_FILENAME, build_preprocessing_manifest
+from omnitrain.plugins.backends.yolo import YoloBackend
+from omnitrain.plugins.backends.yolo.manifest import METADATA_FILENAME, build_preprocessing_manifest
 
 META = {
     "schemaVersion": 1,

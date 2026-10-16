@@ -3,7 +3,7 @@
 A custom model row is created `uploaded` (a Hub reference, or an upload the browser has finished) and
 claimed off the `custom_models` table like any other job (see jobs/queue.py). The job:
 
-  1. The model's source (`omnitrain/model_sources/`) makes first contact. Hub: look the repo up, refuse an
+  1. The model's source (`omnitrain/plugins/model_sources/`) makes first contact. Hub: look the repo up, refuse an
      oversized one, and PIN the commit sha as the model's revision. Upload: download the bundle once, hash it
      and unpack it (`import_upload`).
   2. Generic safety checks on the files (`custom_models.check_tree`): no pickles or code, no symlinks,
@@ -25,14 +25,14 @@ from typing import Any
 
 import sqlalchemy as sa
 
-from omnitrain.backends.base import ConfigError, CustomModelKind
-from omnitrain.backends.registry import get_backend
 from omnitrain.core.executors import run_in_executor, validate_executor
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel
 from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.jobs import queue
-from omnitrain.model_sources import Validated, find_source
+from omnitrain.plugins.backends.base import ConfigError, CustomModelKind
+from omnitrain.plugins.backends.registry import get_backend
+from omnitrain.plugins.model_sources import Validated, find_source
 from omnitrain.services import custom_models
 from omnitrain.services.custom_models import CustomModelFileError
 from omnitrain.services.model_catalog import kind_and_tasks

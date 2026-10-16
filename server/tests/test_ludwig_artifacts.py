@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from omnitrain.backends.ludwig import artifacts
-from omnitrain.backends.ludwig.artifacts import ARTIFACTS, convert
+from omnitrain.plugins.backends.ludwig import artifacts
+from omnitrain.plugins.backends.ludwig.artifacts import ARTIFACTS, convert
 
 
 class FakeLudwigModel:

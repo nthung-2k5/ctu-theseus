@@ -14,8 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from omnitrain.backends.base import EvalResult, LoadedModel
 from omnitrain.domain.evaluate import pick_eval_split, top_errors
+from omnitrain.plugins.backends.base import EvalResult, LoadedModel
 
 
 def _ratio(numerator: float, denominator: float) -> float:

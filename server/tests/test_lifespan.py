@@ -7,7 +7,7 @@ import pytest
 import sqlalchemy as sa
 
 from omnitrain import events as events_pkg
-from omnitrain.app import create_app
+from omnitrain.api.app import create_app
 from omnitrain.db.models import TrainingRun
 from omnitrain.events import get_event_bus
 from omnitrain.events.stream import stream_run_events

@@ -163,7 +163,7 @@ class RunDetailResponse(ApiModel):
 class TrainBody(ApiModel):
     name: str = Field(min_length=1, max_length=255)
     dataset_version_id: uuid.UUID
-    # A trainer backend plugin id (omnitrain/backends/); defaults to the project task's sole or
+    # A trainer backend plugin id (omnitrain/plugins/backends/); defaults to the project task's sole or
     # first available backend when omitted.
     backend: str | None = None
     # Raw camelCase hyperparameters, validated server-side against the chosen backend's own

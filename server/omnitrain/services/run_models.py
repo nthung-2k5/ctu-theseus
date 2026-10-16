@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel, TrainingRun
-from omnitrain.model_sources import find_source
+from omnitrain.plugins.model_sources import find_source
 from omnitrain.services import custom_models
 
 

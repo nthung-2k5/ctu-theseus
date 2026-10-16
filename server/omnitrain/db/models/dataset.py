@@ -64,12 +64,12 @@ class DatasetVersion(Base):
     item_count: Mapped[int | None] = mapped_column(sa.Integer)
     class_count: Mapped[int | None] = mapped_column(sa.Integer)
     parquet_key: Mapped[str | None] = mapped_column(sa.Text)
-    # What the snapshot was built with (omnitrain.preprocessing.config.PreprocessingConfig), NULL for none.
+    # What the snapshot was built with (omnitrain.plugins.preprocessing.config.PreprocessingConfig), NULL for none.
     preprocessing_config: Mapped[Any | None] = mapped_column(JSONB)
     # Pool items replaced by a preprocessed copy in at least one split; NOT included in item_count
     # (preprocessing replaces, it never adds).
     preprocessed_count: Mapped[int] = mapped_column(sa.Integer, server_default="0")
-    # What the snapshot was built with (omnitrain.augmentation.config.AugmentationConfig), NULL for none.
+    # What the snapshot was built with (omnitrain.plugins.augmentation.config.AugmentationConfig), NULL for none.
     augmentation_config: Mapped[Any | None] = mapped_column(JSONB)
     # Augmented copies added to the train split; included in item_count.
     augmented_count: Mapped[int] = mapped_column(sa.Integer, server_default="0")

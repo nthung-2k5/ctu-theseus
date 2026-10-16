@@ -4,7 +4,9 @@ Plain `ast`, no extra dependency. Imports inside a function count too: a lazy im
 
 A target is a top-level package/module (`core`, `domain`, `settings`), except under `services`, `jobs` and `db`, where
 it is the submodule (`services.storage`, `db.enums`): those three packages are mixed, so the rule has to say which part
-a layer may use. Every exception below is deliberate and has a reason; a new violation fails here instead of landing.
+a layer may use. `plugins/` and `api/` are only namespaces: `plugins/backends` is the layer `backends`, and
+`api/routers` is the layer `routers`. Every exception below is deliberate and has a reason; a new violation fails
+here instead of landing.
 """
 
 import ast
@@ -15,6 +17,9 @@ import pytest
 
 PKG = Path(__file__).resolve().parents[1] / "omnitrain"
 SPLIT_PACKAGES = {"services", "jobs", "db"}
+NAMESPACES = {"plugins", "api"}
+# The HTTP layer: nothing outside it may import it.
+HTTP = {"app", "deps", "lifespan", "errors", "routers"}
 
 
 def _targets(node: ast.AST) -> list[str]:
@@ -33,6 +38,11 @@ def _targets(node: ast.AST) -> list[str]:
 
 
 def _target(parts: list[str], names: list[str] | None) -> str:
+    if parts[0] in NAMESPACES:
+        if len(parts) > 1:
+            parts = parts[1:]
+        elif names:  # `from omnitrain.api import deps`
+            parts = [names[0]]
     head = parts[0]
     if head in SPLIT_PACKAGES:
         if len(parts) > 1:
@@ -47,7 +57,12 @@ def _imports() -> dict[str, dict[str, list[str]]]:
     found: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     for path in sorted(PKG.rglob("*.py")):
         rel = path.relative_to(PKG)
-        layer = rel.parts[0] if len(rel.parts) > 1 else rel.stem
+        if rel.parts[0] in NAMESPACES:
+            layer = rel.parts[1] if len(rel.parts) > 2 else rel.stem
+        else:
+            layer = rel.parts[0] if len(rel.parts) > 1 else rel.stem
+        if layer == "__init__":
+            continue
         for node in ast.walk(ast.parse(path.read_text("utf-8"))):
             for target in _targets(node):
                 if target.split(".")[0] != layer:
@@ -133,11 +148,11 @@ def test_services_use_only_the_abort_registry_and_the_dispatcher_from_jobs(impor
     assert jobs <= SERVICES_MAY_USE_JOBS, f"services may use {sorted(SERVICES_MAY_USE_JOBS)} from jobs, not {jobs}"
 
 
-def test_only_the_app_imports_the_routers(imports):
+def test_only_the_http_layer_imports_the_http_layer(imports):
     offenders = [
         (layer, where[0])
         for layer, targets in imports.items()
         for target, where in targets.items()
-        if target == "routers" and layer not in {"app"}
+        if target in HTTP and layer not in HTTP
     ]
-    assert not offenders, f"only app.py may import routers: {offenders}"
+    assert not offenders, f"only app/deps/lifespan/errors/routers may import each other, not: {offenders}"

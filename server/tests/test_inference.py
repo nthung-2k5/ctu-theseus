@@ -14,9 +14,9 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
+from omnitrain.api.routers import inference as inference_router
 from omnitrain.auth import rate_limit
 from omnitrain.db.models import DatasetVersion, TrainingRun
-from omnitrain.routers import inference as inference_router
 from omnitrain.services import inference as svc
 from omnitrain.settings import get_settings
 
@@ -424,7 +424,7 @@ async def test_a_revoked_key_stops_working_and_last_used_is_recorded(client, new
 async def test_the_rate_limit_is_per_key_with_retry_after_and_applies_before_the_database(
     client, new_user, db, model, monkeypatch
 ):
-    from omnitrain import deps
+    from omnitrain.api import deps
 
     monkeypatch.setattr(deps, "API_KEY_RATE_LIMIT_MAX", 2)
     c = await new_user()

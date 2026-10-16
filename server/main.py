@@ -5,7 +5,7 @@
 Migrations run here, before uvicorn starts, and NOT in the FastAPI lifespan: a slow migration
 inside lifespan would fail the health check, and it is the wrong place for it structurally.
 
-The service must run as exactly ONE process (see omnitrain.lifespan.assert_single_process), so this
+The service must run as exactly ONE process (see omnitrain.api.lifespan.assert_single_process), so this
 never passes workers or reload to uvicorn.
 """
 
@@ -33,7 +33,7 @@ def main() -> None:
     settings = get_settings()
     if not os.environ.get("SKIP_MIGRATIONS"):
         run_migrations()
-    from omnitrain.app import app
+    from omnitrain.api.app import app
 
     uvicorn.run(app, host="0.0.0.0", port=settings.port, log_config=None)
 

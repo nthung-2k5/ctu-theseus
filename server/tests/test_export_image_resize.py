@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-import omnitrain.export
+import omnitrain.plugins.export
 
-CLIENT_PATH = Path(omnitrain.export.__file__).parent / "templates" / "python" / "omnitrain_client.py"
+CLIENT_PATH = Path(omnitrain.plugins.export.__file__).parent / "templates" / "python" / "omnitrain_client.py"
 
 NORMALIZATION = {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]}
 CROP = {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"}

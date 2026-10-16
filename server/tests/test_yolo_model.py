@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from omnitrain.backends.base import LoadedModel
-from omnitrain.backends.yolo import model as model_mod
-from omnitrain.backends.yolo import runtime
-from omnitrain.backends.yolo.model import YoloLoadedModel
+from omnitrain.plugins.backends.base import LoadedModel
+from omnitrain.plugins.backends.yolo import model as model_mod
+from omnitrain.plugins.backends.yolo import runtime
+from omnitrain.plugins.backends.yolo.model import YoloLoadedModel
 
 META = {
     "schemaVersion": 1,

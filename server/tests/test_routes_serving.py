@@ -38,7 +38,7 @@ async def succeeded_run(c, db, task="text_classification", status="succeeded"):
 
 
 async def test_export_formats_are_listed_grouped_and_task_filtered(client, new_user, db):
-    from omnitrain.export.formats.base import ExportFormat, _registry
+    from omnitrain.plugins.export.formats.base import ExportFormat, _registry
 
     def modality_only(fmt_id, modality):
         class OnlyFor(ExportFormat):
@@ -89,7 +89,7 @@ async def test_export_validation_rules(client, new_user, db):
 
 
 async def test_an_export_that_does_not_support_the_projects_task_is_rejected(client, new_user, db):
-    from omnitrain.export.formats.base import ExportFormat, _registry
+    from omnitrain.plugins.export.formats.base import ExportFormat, _registry
 
     class NeverSupported(ExportFormat):
         id = "test_never_supported"

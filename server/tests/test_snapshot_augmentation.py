@@ -11,8 +11,6 @@ import pytest
 import sqlalchemy as sa
 from PIL import Image
 
-from omnitrain.augmentation import media
-from omnitrain.augmentation.media import AudioClip
 from omnitrain.db.models import (
     Annotation,
     AudioFeatures,
@@ -27,6 +25,8 @@ from omnitrain.db.models import (
     User,
     VisionFeatures,
 )
+from omnitrain.plugins.augmentation import media
+from omnitrain.plugins.augmentation.media import AudioClip
 from omnitrain.services import augmentation as aug_service
 from omnitrain.services import snapshot as snap
 from omnitrain.services import storage

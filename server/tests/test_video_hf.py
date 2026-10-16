@@ -13,13 +13,13 @@ import pytest
 
 pytest.importorskip("transformers")
 
-from omnitrain.backends.base import ConfigError, CustomModelRef, TrainContext  # noqa: E402
-from omnitrain.backends.registry import get_backend  # noqa: E402
-from omnitrain.backends.video import VideoBackend, custom, data, frames, runtime  # noqa: E402
-from omnitrain.backends.video import train as train_mod  # noqa: E402
-from omnitrain.backends.video.compile import VideoHyperparameters, compile_video_config  # noqa: E402
-from omnitrain.backends.video.model import VideoLoadedModel  # noqa: E402
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor  # noqa: E402
+from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, TrainContext  # noqa: E402
+from omnitrain.plugins.backends.registry import get_backend  # noqa: E402
+from omnitrain.plugins.backends.video import VideoBackend, custom, data, frames, runtime  # noqa: E402
+from omnitrain.plugins.backends.video import train as train_mod  # noqa: E402
+from omnitrain.plugins.backends.video.compile import VideoHyperparameters, compile_video_config  # noqa: E402
+from omnitrain.plugins.backends.video.model import VideoLoadedModel  # noqa: E402
 
 TASK = get_task_descriptor("video_classification")
 CLASSES = ["red", "green", "blue"]

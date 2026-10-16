@@ -4,9 +4,9 @@ import onnxruntime as ort
 import pytest
 from onnx import TensorProto, helper, numpy_helper
 
-from omnitrain.backends.base import ARTIFACT_FILENAMES
-from omnitrain.backends.yolo import YoloBackend
-from omnitrain.backends.yolo.artifacts import ARTIFACTS, strip_final_softmax
+from omnitrain.plugins.backends.base import ARTIFACT_FILENAMES
+from omnitrain.plugins.backends.yolo import YoloBackend
+from omnitrain.plugins.backends.yolo.artifacts import ARTIFACTS, strip_final_softmax
 
 W = np.array([[1.0, -1.0], [0.5, 2.0], [-1.0, 0.5]], dtype=np.float32)
 B = np.array([0.1, -0.2], dtype=np.float32)

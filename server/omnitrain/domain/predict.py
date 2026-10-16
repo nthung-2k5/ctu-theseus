@@ -2,7 +2,7 @@
 
 Every backend's `LoadedModel.to_output` must produce one of these. The shaping logic itself (how
 to read a `category`/`number`/`sequence` prediction column, say) is necessarily framework-specific
-and lives with each backend (see `omnitrain/backends/ludwig/model.py` for Ludwig's).
+and lives with each backend (see `omnitrain/plugins/backends/ludwig/model.py` for Ludwig's).
 """
 
 from typing import Literal, TypedDict

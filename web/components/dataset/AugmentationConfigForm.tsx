@@ -3,7 +3,7 @@
  *
  * Nothing here knows about a specific augmentation: the list of ops and every
  * op's tunable parameters come from GET /projects/:id/augmentations, where
- * each op is a Python class (server/omnitrain/augmentation/ops/). A new op
+ * each op is a Python class (server/omnitrain/plugins/augmentation/ops/). A new op
  * class shows up in this form after a backend restart with no frontend change.
  */
 

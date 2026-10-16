@@ -25,7 +25,7 @@ from sqlalchemy.orm import aliased
 
 from omnitrain.db.base import get_sessionmaker
 from omnitrain.db.models import CustomModel, ModelExport, TrainingRun, TrainingWorker
-from omnitrain.model_sources import list_sources
+from omnitrain.plugins.model_sources import list_sources
 from omnitrain.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def _seconds(n: float) -> Any:
 def remote_custom_backends() -> list[str]:
     """Ids of the installed backends that can train a bring-your-own model on a remote worker
     (`TrainerBackend.remote_custom_models`). Looked up when needed: the registry imports the backends."""
-    from omnitrain.backends.registry import list_backends
+    from omnitrain.plugins.backends.registry import list_backends
 
     return [b.id for b in list_backends() if b.remote_custom_models]
 

@@ -11,17 +11,17 @@ import pandas as pd
 import pytest
 import yaml
 
-from omnitrain.backends.base import ConfigError, TrainContext
-from omnitrain.backends.yolo import YoloBackend, data, runtime
-from omnitrain.backends.yolo import train as train_mod
-from omnitrain.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
-from omnitrain.backends.yolo.evaluate import EVALUATION_CONFIDENCE
-from omnitrain.backends.yolo.evaluate import evaluate as evaluate_detection
-from omnitrain.backends.yolo.manifest import build_preprocessing_manifest
-from omnitrain.backends.yolo.model import DETECT_CONFIDENCE, YoloLoadedModel
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
-from omnitrain.export.registry import list_export_formats
 from omnitrain.jobs import abort
+from omnitrain.plugins.backends.base import ConfigError, TrainContext
+from omnitrain.plugins.backends.yolo import YoloBackend, data, runtime
+from omnitrain.plugins.backends.yolo import train as train_mod
+from omnitrain.plugins.backends.yolo.compile import YoloHyperparameters, compile_yolo_config, hyperparameter_specs
+from omnitrain.plugins.backends.yolo.evaluate import EVALUATION_CONFIDENCE
+from omnitrain.plugins.backends.yolo.evaluate import evaluate as evaluate_detection
+from omnitrain.plugins.backends.yolo.manifest import build_preprocessing_manifest
+from omnitrain.plugins.backends.yolo.model import DETECT_CONFIDENCE, YoloLoadedModel
+from omnitrain.plugins.export.registry import list_export_formats
 
 TASK = get_task_descriptor("object_detection")
 CLASSES = ["cat", "dog"]

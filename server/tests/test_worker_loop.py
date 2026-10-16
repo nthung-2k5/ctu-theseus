@@ -16,11 +16,11 @@ import pandas as pd
 import pytest
 import sqlalchemy as sa
 
-from omnitrain.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
-from omnitrain.backends.base import _registry as backend_registry
 from omnitrain.db.models import CustomModel, RunEvaluation, TrainingMetric, TrainingRun
 from omnitrain.events import get_event_writer
 from omnitrain.jobs import abort, run_core
+from omnitrain.plugins.backends.base import EvalResult, LoadedModel, OutputSpec, TrainContext, TrainerBackend
+from omnitrain.plugins.backends.base import _registry as backend_registry
 from omnitrain.services import custom_models, storage
 from omnitrain.settings import get_settings
 from omnitrain.worker.client import ApiClient

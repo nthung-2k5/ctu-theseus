@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from omnitrain.backends.yolo import evaluate as evaluate_mod
-from omnitrain.backends.yolo import runtime
-from omnitrain.backends.yolo.model import YoloLoadedModel
+from omnitrain.plugins.backends.yolo import evaluate as evaluate_mod
+from omnitrain.plugins.backends.yolo import runtime
+from omnitrain.plugins.backends.yolo.model import YoloLoadedModel
 
 LABELS = ["cat", "dog", "bird"]
 META = {"task": "classify", "imgsz": 32, "imageColumn": "image_path", "outputName": "class", "names": LABELS}

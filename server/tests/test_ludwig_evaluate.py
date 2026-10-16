@@ -1,7 +1,7 @@
 import pandas as pd
 
-from omnitrain.backends.ludwig.evaluate import evaluate as build_evaluation_report
 from omnitrain.domain.evaluate import MAX_TOP_ERRORS
+from omnitrain.plugins.backends.ludwig.evaluate import evaluate as build_evaluation_report
 
 SPLIT_COL = "split"
 ITEM_ID_COL = "_theseus_item_id"

@@ -14,11 +14,11 @@ pytest.importorskip("ludwig")
 
 from PIL import Image  # noqa: E402
 
-from omnitrain.backends.base import CustomModelRef  # noqa: E402
-from omnitrain.backends.ludwig import model as ludwig_model  # noqa: E402  (registers the encoder)
-from omnitrain.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config  # noqa: E402
 from omnitrain.core import constants as C  # noqa: E402
 from omnitrain.domain.task_registry import SnapshotContext, get_task_descriptor  # noqa: E402
+from omnitrain.plugins.backends.base import CustomModelRef  # noqa: E402
+from omnitrain.plugins.backends.ludwig import model as ludwig_model  # noqa: E402  (registers the encoder)
+from omnitrain.plugins.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config  # noqa: E402
 from omnitrain.services.storage import find_model_dir  # noqa: E402
 
 

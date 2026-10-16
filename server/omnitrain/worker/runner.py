@@ -10,9 +10,9 @@ import uuid
 from typing import Any
 
 from omnitrain import __version__
-from omnitrain.backends.registry import list_backends
 from omnitrain.jobs import run_core
 from omnitrain.jobs.abort import TrainingAborted
+from omnitrain.plugins.backends.registry import list_backends
 from omnitrain.schemas.worker import PROTOCOL_VERSION
 from omnitrain.worker import custom
 from omnitrain.worker.client import ApiClient, ApiError, Unauthorized, is_transient

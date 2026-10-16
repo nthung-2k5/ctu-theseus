@@ -19,10 +19,10 @@ import uuid
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from omnitrain.backends.base import CustomModelKind, CustomModelRef, ModelChoice, TrainerBackend
-from omnitrain.backends.registry import enabled_builtin_models
 from omnitrain.db.models import CustomModel
 from omnitrain.domain.task_registry import TASK_REGISTRY, TaskDescriptor
+from omnitrain.plugins.backends.base import CustomModelKind, CustomModelRef, ModelChoice, TrainerBackend
+from omnitrain.plugins.backends.registry import enabled_builtin_models
 from omnitrain.services import custom_models
 
 CUSTOM_PREFIX = "custom:"

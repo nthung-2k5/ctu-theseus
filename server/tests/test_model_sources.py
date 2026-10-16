@@ -1,4 +1,4 @@
-"""Where a bring-your-own model comes from is a plugin: `omnitrain/model_sources/`."""
+"""Where a bring-your-own model comes from is a plugin: `omnitrain/plugins/model_sources/`."""
 
 import uuid
 
@@ -6,8 +6,15 @@ import pytest
 import sqlalchemy as sa
 
 from omnitrain.db.models import CustomModel
-from omnitrain.model_sources import ModelSource, SourceRefError, Validated, find_source, get_source, list_sources
-from omnitrain.model_sources.base import _registry
+from omnitrain.plugins.model_sources import (
+    ModelSource,
+    SourceRefError,
+    Validated,
+    find_source,
+    get_source,
+    list_sources,
+)
+from omnitrain.plugins.model_sources.base import _registry
 from omnitrain.services import custom_models
 from omnitrain.services.custom_models import CustomModelFileError
 

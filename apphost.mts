@@ -99,7 +99,7 @@ const s3Endpoint = await rustfs.getEndpoint('http') // https://github.com/Commun
 //   ... (same health check, withReference(db), S3_* / JWT_SECRET / ALLOWED_ORIGINS / OMNITRAIN_ADMIN_EMAILS env and waitFor as below)
 
 // The whole backend: the REST API, the job queue and Ludwig training/export/inference run in this one
-// process (a hard requirement, see omnitrain.lifespan.assert_single_process). It now runs on the host through
+// process (a hard requirement, see omnitrain.api.lifespan.assert_single_process). It now runs on the host through
 // Aspire's Python support (`uv sync` from server/pyproject.toml, then `main.py`), so it uses the host's
 // Python and GPU directly. Postgres and S3 stay in containers; Aspire hands the host process their
 // localhost addresses.

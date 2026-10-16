@@ -55,7 +55,7 @@ export const METRIC_LABELS: Record<string, string> = {
   corn: 'CORN Loss',
   anomaly_auroc: 'Anomaly ROC AUC',
   f1_max: 'F1 (max)',
-  // The YOLO backend's own metric names (see server/omnitrain/backends/yolo/train.py).
+  // The YOLO backend's own metric names (see server/omnitrain/plugins/backends/yolo/train.py).
   top5Accuracy: 'Top-5 accuracy',
   box_loss: 'Box loss',
   cls_loss: 'Class loss',
