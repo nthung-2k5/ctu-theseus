@@ -82,10 +82,12 @@ body {
 
 /* ---------- Custom component classes ---------- */
 @layer components {
+  /* The centred column every page sits in (see AppShell). Pages carry their own padding. A page that wants to be
+     narrower than this caps itself and centres with mx-auto; a max-width alone would hug the left edge. */
   .page-container {
+    width: 100%;
     max-width: 1440px;
     margin-inline: auto;
-    padding-inline: 1.5rem;
   }
 
   .card-elevated {

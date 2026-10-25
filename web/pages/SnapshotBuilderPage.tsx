@@ -103,7 +103,7 @@ export function SnapshotBuilderPage() {
   })
 
   return (
-    <div className="flex flex-col gap-3 p-3 max-w-6xl">
+    <div className="flex flex-col gap-3 p-3 max-w-6xl mx-auto">
       <PageHeader
         title="New snapshot"
         description="Freeze the current draft as an immutable, versioned dataset for training."

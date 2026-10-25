@@ -35,7 +35,7 @@ export function SettingsPage() {
   const { data: user } = useQuery(sessionQueryOptions)
 
   return (
-    <div className="flex flex-col gap-5 p-3">
+    <div className="flex flex-col gap-5 p-3 max-w-6xl mx-auto">
       <PageHeader title="Settings" description="Your account, connected services and API access." />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">

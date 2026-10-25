@@ -284,7 +284,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* ─── Main ─── */}
       <MantineAppShell.Main>
-        {children}
+        {/* Every page shares one centred, width-capped column, so wide screens do not stretch content edge to edge. */}
+        <div className="page-container">{children}</div>
         {/* Outside the pages, so an upload keeps running (and stays visible) while the user moves around. */}
         <UploadTray />
       </MantineAppShell.Main>
