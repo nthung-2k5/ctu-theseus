@@ -1,6 +1,7 @@
 # CTU OmniTrain
 
-An AutoML platform for training, evaluating, and exporting models (Ludwig, and Ultralytics YOLO for
+An AutoML platform for training, evaluating, and exporting models (Ludwig, scikit-learn for quick tabular and text
+baselines, and Ultralytics YOLO for
 image classification and object detection) without writing config by hand. A user creates a **project** bound to one of a fixed set of **tasks** (e.g. image
 classification, text classification, tabular regression); each task is pinned to one of four
 **modalities** (vision / text / audio / tabular). From there the flow is: upload data into the

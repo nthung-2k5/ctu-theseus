@@ -52,6 +52,12 @@ dependencies = [
   'onnx',
   'onnxscript',
 
+  # scikit-learn trainer backend (BSD-3). skops stores its models without pickle's code execution;
+  # skl2onnx converts them to ONNX for export
+  'scikit-learn>=1.9.0',
+  'skops>=0.16.0',
+  'skl2onnx>=1.20.0',
+
   # Telemetry
   "opentelemetry-sdk>=1.44.0",
   "opentelemetry-exporter-otlp-proto-http>=1.44.0",

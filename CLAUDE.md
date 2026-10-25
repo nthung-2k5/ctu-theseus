@@ -81,6 +81,20 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   order a run assigned each class — see the export bullet below); and `train()` should report a
   `validation`-split `loss` metric wherever possible, since `events/writer.py` uses the lowest
   validation loss so far as a task-agnostic definition of a run's best epoch.
+- **The scikit-learn backend (`plugins/backends/scikit/`, id `sklearn`) fits once, on a CPU.** Tabular classification and
+  regression (gradient-boosted trees, random forest, a linear model) and text classification (TF-IDF with logistic
+  regression or naive Bayes). There are no epochs, so the shared `epochs`/`batchSize`/`earlyStopPatience`/optimisation
+  fields are refused in `compile`, while a knob that belongs to one model family (trees, regularisation) is ignored by
+  the others so a sweep over the model and a knob still runs. A fit is reported as epoch 1 so the best-epoch logic works.
+  A model is stored with **skops, never pickle**: a remote worker's file is loaded on the API host, and skops refuses any
+  type outside `estimators.TRUSTED` (reviewed: tree node tables and `numpy.dtype`; widen it only with a reason). The class
+  order is the fitted `classes_`, written to `names.json`. Its ONNX export (`skl2onnx`, `scikit/artifacts.py`) is shaped to
+  what the generated clients already do for a tabular Ludwig model: one float input per column, one output named by the
+  label column, **logits** for a classifier (`log(max(p, 1e-9))`, so the client's softmax gives back the probabilities).
+  Imputation and scaling live in the graph, so its manifest has no `numberNormalization`. A text model takes a raw string
+  and only runs in onnxruntime (it uses the `com.microsoft.Tokenizer` operator); a character-n-gram text model cannot be
+  exported. skl2onnx needs `onnx.helper.make_attribute` patched for a tree ensemble with missing values (bools in an int
+  list); the patch is scoped to one conversion.
 - **Video is a file modality with its own backend.** `video_classification` (one class per clip, like audio) is
   trained only by `plugins/backends/video/` (torchvision's Kinetics-400 classifiers, BSD-3). Decoding is OpenCV
   (`domain/video.py` to validate an upload and cut a poster frame; `plugins/backends/video/frames.py` to sample clips),
