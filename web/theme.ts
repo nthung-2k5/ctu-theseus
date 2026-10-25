@@ -105,6 +105,13 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
   variables: {},
   dark: {},
   light: {
+    // Cards and tables get their own slate tint (see the surface rules in global.css): Mantine's light cards are
+    // the same near-white as the page, which left them indistinguishable. The page itself is unchanged.
+    '--ot-surface': '#eef2f7',
+    '--ot-surface-strong': '#e2e8f0',
+    '--ot-surface-shadow': '0 1px 2px rgb(15 23 42 / 0.06)',
+    // Hover and selected tints must stay visible on those surfaces (Mantine's gray-0 is lighter than them).
+    '--mantine-color-default-hover': '#e2e8f0',
     '--mantine-color-dimmed': '#5c636a',
     '--mantine-color-error': '#c92a2a',
     ...Object.fromEntries(

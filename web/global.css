@@ -99,6 +99,30 @@ body {
     border-color: var(--mantine-color-cyan-5);
   }
 
+  /* Light mode only (the --ot-surface variables are not defined in dark, so these fall back to what they were):
+     cards and tables get a tint of their own against the page. Floating layers (menus, dropdowns, modals,
+     drawers) are Papers too and stay as they were. A Paper given its own shadow keeps it via --paper-shadow. */
+  .card-elevated,
+  .mantine-Paper-root:not([class*="-dropdown"], [class*="-content"], [class*="-popover"]) {
+    background: var(--ot-surface, var(--mantine-color-body));
+    box-shadow: var(--paper-shadow, var(--ot-surface-shadow, none));
+  }
+
+  /* A table sits straight on the page, so give it the same surface, with a stronger header row. */
+  .mantine-Table-table {
+    --table-hover-color: var(--ot-surface-strong, var(--mantine-color-default-hover));
+    background: var(--ot-surface, transparent);
+  }
+
+  .mantine-Table-thead {
+    background: var(--ot-surface-strong, transparent);
+  }
+
+  /* A table inside a card is already on a surface: let it show through instead of tinting twice. */
+  .mantine-Paper-root .mantine-Table-table {
+    background: transparent;
+  }
+
   /* A card's open button is tiny; when it takes keyboard focus the whole card shows it. */
   .card-elevated:has([data-grid-item]:focus-visible) {
     outline: 2px solid var(--mantine-primary-color-filled);
