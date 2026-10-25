@@ -119,6 +119,38 @@ export function ParamField({
       </ControlRow>
     )
   }
+  if (spec.default == null) {
+    // Like an optional choice: a number with no declared default can be left unset, which means "use the
+    // backend's own" (a random seed, say). A switch sets it; what is sent is the number, or null when unset.
+    const isSet = typeof value === 'number'
+    return (
+      <ControlRow id={controlId} spec={spec} size={size}>
+        <Switch
+          id={controlId}
+          size={size}
+          aria-label={`${spec.label}: set a value, or use the default`}
+          disabled={disabled}
+          checked={isSet}
+          onChange={(e) => onChange(e.currentTarget.checked ? (spec.min ?? 0) : null)}
+        />
+        <NumberInput
+          size={size}
+          style={{ flex: 1, minWidth: 0 }}
+          aria-label={spec.label}
+          value={isSet ? value : ''}
+          placeholder="Default"
+          disabled={!isSet || disabled}
+          min={spec.min ?? undefined}
+          max={spec.max ?? undefined}
+          step={spec.step ?? undefined}
+          allowDecimal={spec.type === 'float'}
+          decimalScale={spec.type === 'float' ? 6 : 0}
+          clampBehavior="strict"
+          onChange={(v) => typeof v === 'number' && onChange(v)}
+        />
+      </ControlRow>
+    )
+  }
   return (
     <NumberInput
       size={size}
