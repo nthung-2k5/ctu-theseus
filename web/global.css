@@ -141,6 +141,33 @@ body {
     background-color: color-mix(in srgb, var(--mantine-color-primary-5) 28%, var(--mantine-color-dark-7));
   }
 
+  /* A list item that opens something as a whole: its name is the link, stretched over the item, so the item is one
+     big click target while a button inside it (given a z-index) can still be pressed on its own. */
+  .project-item {
+    position: relative;
+    transition: border-color 120ms ease;
+  }
+
+  .project-item:hover {
+    border-color: var(--mantine-color-primary-filled);
+  }
+
+  .stretched-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+
+  .stretched-link:focus-visible {
+    outline: none;
+  }
+
+  .stretched-link:focus-visible::after {
+    outline: 2px solid var(--mantine-primary-color-filled);
+    outline-offset: 2px;
+  }
+
   .spin {
     animation: spin 1s linear infinite;
   }

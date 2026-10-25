@@ -18,6 +18,20 @@ export function formatDate(dateInput: string | Date | undefined | null): string 
 }
 
 /** A short date and time, for timestamps where the hour matters (run start/finish). */
+/** How long ago, in the unit that reads best ("just now", "5m ago", "3h ago", "2d ago"); a plain date after a month. */
+export function formatRelative(dateInput: string | Date | undefined | null, now: number = Date.now()): string {
+  if (!dateInput) return '—'
+  const then = new Date(dateInput).getTime()
+  if (Number.isNaN(then)) return '—'
+  const minutes = Math.floor((now - then) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return days < 30 ? `${days}d ago` : formatDate(dateInput)
+}
+
 export function formatDateTime(dateInput: string | Date | undefined | null): string {
   if (!dateInput) return '—'
   const date = new Date(dateInput)
