@@ -96,16 +96,6 @@ export function RunOverviewPanel({
                 'Base model',
                 isLoading ? <Skeleton key="m" height={16} width={140} /> : <Badge key="model">{modelLabel}</Badge>,
               ],
-              [
-                'Trained on',
-                isLoading ? (
-                  <Skeleton key="w" height={16} width={140} />
-                ) : (
-                  <Text key="worker" size="sm">
-                    {data?.run.workerName ? `Remote worker “${data.run.workerName}”` : 'This server'}
-                  </Text>
-                ),
-              ],
             ]}
           />
         </Stack>
