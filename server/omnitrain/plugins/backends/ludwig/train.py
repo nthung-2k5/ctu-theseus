@@ -92,7 +92,11 @@ class TrainingProgressCallback(Callback):
 
 
 def train(run: TrainContext) -> LudwigLoadedModel:
-    model = LudwigModel(config=run.config, logging_level=logging.INFO, callbacks=[TrainingProgressCallback(run)])
+    # `random_seed` is ours, not a Ludwig config key (Ludwig takes it as an argument to `train`), and its schema would
+    # warn about and drop it. Absent when the user left the seed unset, which keeps Ludwig's own default.
+    config = dict(run.config)
+    seed = {"random_seed": config.pop("random_seed")} if "random_seed" in config else {}
+    model = LudwigModel(config=config, logging_level=logging.INFO, callbacks=[TrainingProgressCallback(run)])
     with tracer.start_as_current_span("ludwig.train"):
-        model.train(dataset=run.dataset_uri, output_directory=run.output_uri, experiment_name="results")
+        model.train(dataset=run.dataset_uri, output_directory=run.output_uri, experiment_name="results", **seed)
     return LudwigLoadedModel(model)

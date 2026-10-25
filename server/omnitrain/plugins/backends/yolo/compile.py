@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
-from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase
+from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase, seed_spec
 from omnitrain.plugins.backends.yolo.tasks import IMAGE_SIZES, OPTIMIZERS, YOLO_TASKS, YoloTaskSpec
 from omnitrain.schemas.common import ParamSpec
 
@@ -41,7 +41,6 @@ class YoloHyperparameters(HyperparamsBase):
     pretrained: bool | None = None
     # Number of leading layers kept frozen, which makes fine-tuning faster and needs fewer examples.
     freeze_layers: int | None = Field(default=None, ge=0, le=100)
-    seed: int | None = Field(default=None, ge=0)
 
 
 def _spec_for(task: TaskDescriptor) -> YoloTaskSpec:
@@ -151,6 +150,7 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             description="How big a step the model takes each time it learns from some examples. Too high and it "
             "overshoots; too low and training is slow. SGD usually wants a larger value (around 0.01) than AdamW.",
         ),
+        seed_spec(_TRAINING),
         ParamSpec(
             name="optimizer", label="Optimizer", type="choice", group=_TRAINING,
             default=DEFAULT_OPTIMIZER, choices=list(OPTIMIZERS),

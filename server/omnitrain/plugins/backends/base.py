@@ -50,6 +50,20 @@ class ConfigError(ValueError):
     """A user-correctable problem with the requested training configuration."""
 
 
+MAX_SEED = 2**31 - 1
+
+
+def seed_spec(group: str) -> ParamSpec:
+    """The form field for `HyperparamsBase.seed`, so every backend offers it the same way. No default: unset
+    means the backend's own."""
+    return ParamSpec(
+        name="seed", label="Random seed", type="int", group=group, default=None, min=0, max=MAX_SEED, step=1,
+        description="Fixes the random choices training makes (starting weights, the order examples are shown in, "
+        "random augmentation), so two runs with the same seed and settings are meant to give the same result. "
+        "Leave it unset to use the trainer's own default.",
+    )  # fmt: skip
+
+
 class HyperparamsBase(BaseModel):
     """camelCase on the wire, unknown keys rejected. Every backend's `Hyperparameters` subclasses
     this, adding whatever extra knobs its own models support."""
@@ -62,6 +76,8 @@ class HyperparamsBase(BaseModel):
     batch_size: int | Literal["auto"] | None = None
     learning_rate: float | None = Field(default=None, gt=0, le=1)
     early_stop_patience: int | None = Field(default=None, ge=-1)
+    # Seeds the framework's random number generators (see each `compile`). None leaves the framework's own default.
+    seed: int | None = Field(default=None, ge=0, le=MAX_SEED)
 
 
 class ModelChoice(BaseModel):
@@ -333,6 +349,8 @@ class TrainerBackend(ABC):
 
 __all__ = [
     "ARTIFACT_FILENAMES",
+    "MAX_SEED",
+    "seed_spec",
     "Artifact",
     "ConfigError",
     "CustomModelKind",

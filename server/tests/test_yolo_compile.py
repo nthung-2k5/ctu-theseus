@@ -55,6 +55,10 @@ class TestCompile:
             "seed": 7,
         }
 
+    def test_seed_is_left_to_ultralytics_unless_given(self):
+        assert "seed" not in compile_()["train"]
+        assert {s.name: s for s in hyperparameter_specs(TASK)}["seed"].default is None
+
     def test_auto_batch_size_is_ultralytics_autobatch(self):
         assert compile_(batch_size="auto")["train"]["batch"] == -1
 

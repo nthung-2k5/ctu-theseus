@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnitrain.core import constants as C
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
-from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase
+from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase, seed_spec
 from omnitrain.plugins.backends.ludwig.tasks import (
     HF_CAUSAL_LM,
     HF_TRANSFORMER,
@@ -128,6 +128,9 @@ class LudwigConfig(BaseModel):
     # The LLM base model. Declared so `model_dump` keeps it: unknown keys are dropped, and a missing
     # base_model makes Ludwig reject an llm config.
     base_model: str | None = None
+    # Not a Ludwig config key: `train.py` takes it out and passes it to `LudwigModel.train(random_seed=...)`,
+    # which seeds numpy, random and torch.
+    random_seed: int | None = None
     input_features: list[_InputFeature] = Field(min_length=1)
     output_features: list[_OutputFeature] = Field(min_length=1)
     combiner: _Combiner | None = None
@@ -204,6 +207,7 @@ def compile_ludwig_config(
 
     config = {
         "model_type": spec.model_type,
+        **({"random_seed": sel.seed} if sel.seed is not None else {}),
         # An LLM task fine-tunes its base model directly: it has no encoder to swap, so the custom
         # model is the base_model. (An LLM task offers no built-in models, so without one it stays unset.)
         **({"base_model": custom.local_path} if custom is not None and custom.kind == HF_CAUSAL_LM else {}),
@@ -384,6 +388,7 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             description="The method the model uses to improve itself after each step. Leave it on Default unless "
             "you know you want a specific one; the default (Adam) is a safe general choice.",
         ),
+        seed_spec(_TRAINING),
     ]  # fmt: skip
 
     training = [

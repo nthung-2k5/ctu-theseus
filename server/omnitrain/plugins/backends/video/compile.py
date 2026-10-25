@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
-from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase
+from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase, seed_spec
 from omnitrain.plugins.backends.video import tasks
 from omnitrain.plugins.backends.video.custom import HF_VIDEO
 from omnitrain.schemas.common import ParamSpec
@@ -39,7 +39,6 @@ class VideoHyperparameters(HyperparamsBase):
     # Train only the new classification head, keeping the pretrained backbone fixed.
     freeze_backbone: bool | None = None
     horizontal_flip: bool | None = None
-    seed: int | None = Field(default=None, ge=0)
 
 
 def compile_video_config(
@@ -145,6 +144,7 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             description="How big a step the model takes each time it learns from some clips. Too high and it "
             "overshoots; too low and training is slow.",
         ),
+        seed_spec(_TRAINING),
         ParamSpec(
             name="optimizer", label="Optimizer", type="choice", group=_TRAINING,
             default="AdamW", choices=list(tasks.OPTIMIZERS),

@@ -223,8 +223,9 @@ class TestBackboneAndHead:
         ]
         for task, ctx, sel in cases:
             config = compile_(task, ctx, **sel)
-            # ludwig_version is metadata for us, and the split column is added by the data layer.
-            config = {k: v for k, v in config.items() if k not in ("ludwig_version", "preprocessing")}
+            # ludwig_version and random_seed are ours (train.py hands the seed to Ludwig separately), and the split
+            # column is added by the data layer.
+            config = {k: v for k, v in config.items() if k not in ("ludwig_version", "random_seed", "preprocessing")}
             ModelConfig.from_dict(config)  # raises on any option Ludwig does not know
 
 
@@ -251,8 +252,16 @@ class TestHyperparameterSpecs:
         assert names == {
             "epochs", "batchSize", "learningRate", "earlyStopPatience", "optimizer",
             "validationMetric", "imageSize", "useClassWeights",
-            "freezeBackbone", "headLayers", "headWidth", "headDropout",
+            "freezeBackbone", "headLayers", "headWidth", "headDropout", "seed",
         }  # fmt: skip
+
+    def test_seed_is_unset_by_default_and_reaches_ludwig_as_random_seed_when_given(self):
+        from omnitrain.plugins.backends.ludwig.compile import hyperparameter_specs
+
+        specs = {p.name: p for p in hyperparameter_specs(get_task_descriptor("image_classification"))}
+        assert specs["seed"].default is None
+        assert "random_seed" not in compile_("image_classification", VISION)
+        assert compile_("image_classification", VISION, seed=7)["random_seed"] == 7
 
     def test_early_stopping_declares_its_off_value_and_no_other_knob_does(self):
         from omnitrain.plugins.backends.ludwig.compile import hyperparameter_specs
@@ -298,7 +307,7 @@ class TestHyperparameterSpecs:
         by_section: dict[str, list[str]] = {}
         for p in specs:
             by_section.setdefault(p.group or "", []).append(p.name)
-        assert by_section["Training"] == ["epochs", "batchSize", "learningRate", "optimizer"]
+        assert by_section["Training"] == ["epochs", "batchSize", "learningRate", "optimizer", "seed"]
         assert by_section["Stopping"] == ["earlyStopPatience", "validationMetric"]
         assert by_section["Model details"][0] == "freezeBackbone"
 

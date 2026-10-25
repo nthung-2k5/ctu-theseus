@@ -73,6 +73,10 @@ class TestCompile:
         swin = compile_(model_id="swin3d_t")["clip"]
         assert swin["numFrames"] == 32 and swin["mean"][0] == pytest.approx(0.485)
 
+    def test_seed_is_unset_unless_given(self):
+        assert compile_()["train"]["seed"] is None
+        assert {s.name: s for s in hyperparameter_specs(TASK)}["seed"].default is None
+
     def test_explicit_selections_override_defaults(self):
         c = compile_(num_frames=8, frame_size=64, epochs=3, batch_size=2, optimizer="SGD", pretrained=False, seed=7)
         assert (c["clip"]["numFrames"], c["clip"]["frameSize"]) == (8, 64)
