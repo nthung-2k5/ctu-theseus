@@ -4606,6 +4606,38 @@
   },
   "components": {
     "schemas": {
+      "ActiveRunBrief": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "canceled"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status"
+        ],
+        "title": "ActiveRunBrief",
+        "description": "A run that is queued or running right now."
+      },
       "AdminExportListResponse": {
         "properties": {
           "exports": {
@@ -9298,6 +9330,11 @@
             "title": "Itemcount",
             "default": 0
           },
+          "snapshotCount": {
+            "type": "integer",
+            "title": "Snapshotcount",
+            "default": 0
+          },
           "runCount": {
             "type": "integer",
             "title": "Runcount",
@@ -9320,6 +9357,26 @@
               }
             ],
             "title": "Lastrunstatus"
+          },
+          "activeRun": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveRunBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bestScore": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationScore"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "lastActivityAt": {
             "anyOf": [

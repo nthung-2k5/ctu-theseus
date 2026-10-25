@@ -13,6 +13,7 @@ from omnitrain.db.enums import DatasetModality, DatasetVersionStatus, SplitType,
 from omnitrain.plugins.augmentation.config import AugmentationConfig
 from omnitrain.plugins.preprocessing.config import PreprocessingConfig
 from omnitrain.schemas.common import ApiModel
+from omnitrain.schemas.training import EvaluationScore
 
 HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
 
@@ -75,6 +76,14 @@ class DraftDatasetOut(ApiModel):
     modality: DatasetModality
 
 
+class ActiveRunBrief(ApiModel):
+    """A run that is queued or running right now."""
+
+    id: uuid.UUID
+    name: str
+    status: TrainingStatus
+
+
 class ProjectSummary(ApiModel):
     id: uuid.UUID
     name: str
@@ -82,10 +91,16 @@ class ProjectSummary(ApiModel):
     task: str
     created_at: datetime
     draft_dataset: DraftDatasetOut | None = None
-    # What a project card shows without opening the project: how much data, how much training, and how it last went.
+    # What the projects list shows without opening a project: how much data, how far along it is, and how it went.
     item_count: int = 0
+    # Snapshots that finished building (the draft is not one): what a run trains on.
+    snapshot_count: int = 0
     run_count: int = 0
     last_run_status: TrainingStatus | None = None
+    # The project's newest queued or running run, if any.
+    active_run: ActiveRunBrief | None = None
+    # The best headline score among its runs (see services/evaluation_score.best_score).
+    best_score: EvaluationScore | None = None
     # The newest of the project's creation and its latest run.
     last_activity_at: datetime | None = None
 

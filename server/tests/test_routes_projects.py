@@ -8,7 +8,7 @@ import uuid
 import pytest
 import sqlalchemy as sa
 
-from omnitrain.db.models import ApiKey, DatasetVersion, Project, TrainingRun
+from omnitrain.db.models import ApiKey, DatasetVersion, Project, RunEvaluation, TrainingRun
 from omnitrain.services import storage
 
 
@@ -88,20 +88,36 @@ async def test_list_summarises_data_and_training_for_each_project(client, new_us
             )
         ).scalar_one()
         for status in ("succeeded", "running"):
-            s.add(
-                TrainingRun(
-                    project_id=uuid.UUID(busy["id"]),
-                    dataset_version_id=draft_id,
-                    name=status,
-                    status=status,
-                    hyperparameters={},
-                )
+            run = TrainingRun(
+                project_id=uuid.UUID(busy["id"]),
+                dataset_version_id=draft_id,
+                name=status,
+                status=status,
+                hyperparameters={},
             )
+            s.add(run)
+            if status == "succeeded":
+                await s.flush()
+                s.add(
+                    RunEvaluation(run_id=run.id, status="success", accuracy=0.8, report={"overall": {"accuracy": 0.8}})
+                )
+        s.add(DatasetVersion(dataset_id=uuid.UUID(busy["id"]), version_tag="v1", status="ready"))
+        s.add(DatasetVersion(dataset_id=uuid.UUID(busy["id"]), version_tag="v2", status="building"))
         await s.commit()
 
     by_id = {p["id"]: p for p in (await c.get("/api/projects")).json()["projects"]}
     assert (by_id[quiet["id"]]["itemCount"], by_id[quiet["id"]]["runCount"]) == (0, 0)
     assert by_id[quiet["id"]]["lastRunStatus"] is None
+    assert (by_id[quiet["id"]]["snapshotCount"], by_id[quiet["id"]]["activeRun"], by_id[quiet["id"]]["bestScore"]) == (
+        0,
+        None,
+        None,
+    )
+    # Only a finished snapshot counts, the running run is the active one, and the best score is the succeeded run's.
+    assert by_id[busy["id"]]["snapshotCount"] == 1
+    assert by_id[busy["id"]]["activeRun"]["name"] == "running"
+    best = by_id[busy["id"]]["bestScore"]
+    assert best["metric"] == "accuracy" and best["value"] == pytest.approx(0.8)  # the column is single precision
     assert by_id[busy["id"]]["runCount"] == 2
     assert by_id[busy["id"]]["lastRunStatus"] in ("running", "succeeded")
     assert by_id[busy["id"]]["lastActivityAt"] >= by_id[busy["id"]]["createdAt"]

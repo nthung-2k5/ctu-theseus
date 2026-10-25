@@ -1,15 +1,26 @@
 """/api/projects: CRUD. Creating a project also creates its 1:1 dataset and mutable draft version."""
 
+import uuid
+
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException
 
 from omnitrain.api.deps import ProjectDep, SessionDep, UserId
-from omnitrain.db.models import Dataset, DatasetVersion, DatasetVersionItem, LabelClass, Project, TrainingRun
+from omnitrain.db.models import (
+    Dataset,
+    DatasetVersion,
+    DatasetVersionItem,
+    LabelClass,
+    Project,
+    RunEvaluation,
+    TrainingRun,
+)
 from omnitrain.domain.task_registry import find_task_descriptor, task_to_modality
 from omnitrain.events import get_event_writer
 from omnitrain.jobs import abort
 from omnitrain.plugins.backends.registry import trainable_backends
 from omnitrain.schemas.projects import (
+    ActiveRunBrief,
     CreateProjectBody,
     DatasetOut,
     DraftDatasetOut,
@@ -22,9 +33,11 @@ from omnitrain.schemas.projects import (
     ProjectSummary,
     UpdateProjectBody,
 )
+from omnitrain.schemas.training import EvaluationScore
 from omnitrain.services import plugin_settings
 from omnitrain.services.cleanup import cleanup_project_storage
 from omnitrain.services.dataset_views import split_counts_for_dataset, version_with_counts
+from omnitrain.services.evaluation_score import best_score, score_from_overall
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -71,6 +84,47 @@ async def list_projects(user_id: UserId, session: SessionDep) -> ProjectListResp
             )
         ).all()
     }
+    snapshot_counts = dict(
+        (
+            await session.execute(
+                sa.select(DatasetVersion.dataset_id, sa.func.count())
+                .where(
+                    DatasetVersion.dataset_id.in_(ids),
+                    DatasetVersion.version_tag.is_not(None),
+                    DatasetVersion.status == "ready",
+                )
+                .group_by(DatasetVersion.dataset_id)
+            )
+        ).all()
+    )
+    active_runs = {
+        project_id: ActiveRunBrief(id=run_id, name=name, status=status)
+        for project_id, run_id, name, status in (
+            await session.execute(
+                sa.select(TrainingRun.project_id, TrainingRun.id, TrainingRun.name, TrainingRun.status)
+                .distinct(TrainingRun.project_id)
+                .where(TrainingRun.project_id.in_(ids), TrainingRun.status.in_(("queued", "running")))
+                .order_by(TrainingRun.project_id, TrainingRun.created_at.desc())
+            )
+        ).all()
+    }
+    # Only each succeeded run's `overall` block is read, not the whole report (per-class tables, error rows).
+    scores_by_project: dict[uuid.UUID, list[EvaluationScore]] = {}
+    for project_id, accuracy, overall in (
+        await session.execute(
+            sa.select(TrainingRun.project_id, RunEvaluation.accuracy, RunEvaluation.report["overall"])
+            .join(RunEvaluation, RunEvaluation.run_id == TrainingRun.id)
+            .where(
+                TrainingRun.project_id.in_(ids),
+                TrainingRun.status == "succeeded",
+                RunEvaluation.status == "success",
+            )
+            .order_by(TrainingRun.created_at.desc())
+        )
+    ).all():
+        score = score_from_overall(overall, accuracy)
+        if score is not None:
+            scores_by_project.setdefault(project_id, []).append(score)
     return ProjectListResponse(
         projects=[
             ProjectSummary(
@@ -81,7 +135,10 @@ async def list_projects(user_id: UserId, session: SessionDep) -> ProjectListResp
                 created_at=p.created_at,
                 draft_dataset=DraftDatasetOut(modality=modality) if modality else None,
                 item_count=item_counts.get(p.id, 0),
+                snapshot_count=snapshot_counts.get(p.id, 0),
                 run_count=run_counts.get(p.id, 0),
+                active_run=active_runs.get(p.id),
+                best_score=best_score(scores_by_project.get(p.id, [])),
                 last_run_status=latest_runs[p.id][0] if p.id in latest_runs else None,
                 last_activity_at=max(p.created_at, latest_runs[p.id][1]) if p.id in latest_runs else p.created_at,
             )

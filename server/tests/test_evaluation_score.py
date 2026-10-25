@@ -5,7 +5,8 @@ import uuid
 import pytest
 
 from omnitrain.db.models import RunEvaluation
-from omnitrain.services.evaluation_score import evaluation_brief, primary_score
+from omnitrain.schemas.training import EvaluationScore
+from omnitrain.services.evaluation_score import best_score, evaluation_brief, primary_score
 
 
 def _evaluation(status="success", accuracy=None, report=None) -> RunEvaluation:
@@ -41,6 +42,28 @@ def test_a_failed_evaluation_carries_no_score():
     brief = evaluation_brief(_evaluation(status="failed", accuracy=0.9, report={"overall": {"accuracy": 0.9}}))
     assert brief is not None and brief.score is None
     assert evaluation_brief(None) is None
+
+
+def _score(metric="accuracy", value=0.5, higher=True) -> EvaluationScore:
+    return EvaluationScore(metric=metric, label=metric, value=value, higher_is_better=higher)
+
+
+class TestBestScore:
+    def test_the_best_of_a_projects_runs_wins(self):
+        best = best_score([_score(value=0.7), _score(value=0.9), _score(value=0.8)])
+        assert best is not None and best.value == 0.9
+
+    def test_for_an_error_metric_lower_is_better(self):
+        best = best_score([_score("rmse", 3.0, False), _score("rmse", 1.5, False), _score("rmse", 2.0, False)])
+        assert best is not None and best.value == 1.5
+
+    def test_runs_judged_by_another_metric_than_the_newest_are_not_compared_with_it(self):
+        # Newest first: a detector's mAP50, then two older classifier runs whose accuracy is higher.
+        best = best_score([_score("map50", 0.4), _score("accuracy", 0.99), _score("accuracy", 0.95)])
+        assert best is not None and (best.metric, best.value) == ("map50", 0.4)
+
+    def test_no_scored_run_means_no_best(self):
+        assert best_score([]) is None
 
 
 class TestScorePlugins:
