@@ -43,7 +43,10 @@ import { useMemo, useState } from 'react'
 
 const routeApi = getRouteApi('/_app/project/$projectId/training/')
 
-const STATUSES = ['queued', 'running', 'succeeded', 'failed', 'canceled']
+const STATUSES = ['queued', 'running', 'succeeded', 'failed', 'canceled'].map((value) => ({
+  value,
+  label: value.charAt(0).toUpperCase() + value.slice(1),
+}))
 
 const SWEEP_STATUS_COLORS: Record<string, string> = { running: 'cyan', completed: 'teal', canceled: 'gray' }
 
@@ -341,6 +344,7 @@ export function TrainingPage() {
       <Group gap="xs" wrap="wrap">
         {sweeps.length > 0 && (
           <SegmentedControl
+            size="md"
             value={show}
             onChange={(v) => setFilter({ show: v as 'runs' | 'sweeps' })}
             data={[
@@ -352,15 +356,15 @@ export function TrainingPage() {
         {show === 'runs' && runs.length > 0 && (
           <>
             <TextInput
-              size="xs"
+              size="sm"
               placeholder="Search runs…"
-              leftSection={<MagnifyingGlassIcon size={14} />}
+              leftSection={<MagnifyingGlassIcon size={16} />}
               value={q}
               onChange={(e) => setFilter({ q: e.currentTarget.value })}
               style={{ flexGrow: 1, minWidth: 200, maxWidth: 320 }}
             />
             <MultiSelect
-              size="xs"
+              size="sm"
               placeholder={statuses.length === 0 ? 'All statuses' : undefined}
               data={STATUSES}
               value={statuses}
@@ -369,6 +373,7 @@ export function TrainingPage() {
               w={220}
             />
             <SegmentedControl
+              size="md"
               ml="auto"
               value={sort}
               onChange={(v) => setFilter({ sort: v as 'newest' | 'best' })}
