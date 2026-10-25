@@ -181,7 +181,7 @@ export function LiveCard() {
     <div className="ot-card ot-live" role="img" aria-label="Animated preview of a live training run">
       <div className="ot-live-head">
         <span className="ot-live-dot" /> <b>LIVE</b>
-        <span className="ot-muted">Ludwig · image classifier</span>
+        <span className="ot-muted">Image classifier</span>
         <span className="ot-chip">20 Hz</span>
       </div>
       <div className="ot-kpis">

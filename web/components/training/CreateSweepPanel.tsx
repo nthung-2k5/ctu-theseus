@@ -11,7 +11,7 @@
 
 import { Checkbox, Group, MultiSelect, NumberInput, Paper, Select, SimpleGrid, Text, TextInput } from '@mantine/core'
 import { FlaskIcon } from '@phosphor-icons/react'
-import { groupParams, LabelWithTip, SectionLabel } from '@public/components/ui'
+import { groupParams, InfoTip, LabelWithTip, SectionLabel } from '@public/components/ui'
 import type { ParamSpec } from '@public/lib/api/generated/models'
 import { useListSweepStrategies } from '@public/lib/api/generated/sweeps/sweeps'
 import { useListProjectTrainingBackends } from '@public/lib/api/generated/training/training'
@@ -19,6 +19,7 @@ import { isClassificationTask } from '@public/lib/tasks'
 import type { ProjectDetail, SweepSearchSpace, SweepStrategyValue } from '@public/store/types'
 import { useEffect, useMemo, useState } from 'react'
 import { ConfigHeader, LaunchBar } from './ConfigHeader'
+import { allModels, MODEL_HELP, ModelPicker, type ModelSelection } from './ModelPicker'
 
 export interface SweepStartConfig {
   name: string
@@ -100,11 +101,14 @@ export function CreateSweepPanel({
   const chosenStrategy = strategies.find((s) => s.id === strategy)
   const [maxTrials, setMaxTrials] = useState<number | string>(6)
 
-  const [backendId, setBackendId] = useState<string | null>(null)
+  // The chosen model decides the trainer, and so which settings can be searched.
+  const [selection, setSelection] = useState<ModelSelection | null>(null)
   useEffect(() => {
-    if (!backendId && backends.length > 0) setBackendId(backends[0].id)
-  }, [backendId, backends])
-  const backend = backends.find((b) => b.id === backendId)
+    if (selection || backends.length === 0) return
+    const first = allModels(backends).find((e) => (e.model.source ?? 'builtin') === 'builtin')
+    if (first) setSelection({ backendId: first.backend.id, modelId: first.model.id })
+  }, [selection, backends])
+  const backend = backends.find((b) => b.id === selection?.backendId)
   const sweepableKnobs = (backend?.params ?? []).filter((p) => p.type !== 'bool')
 
   const [included, setIncluded] = useState<Record<string, boolean>>({})
@@ -137,12 +141,13 @@ export function CreateSweepPanel({
   else if (!versionId) problems.push('Select a snapshot.')
   if (!name.trim()) problems.push('Give the sweep a name.')
   if (isClassificationTask(project.task) && classCount < 2) problems.push('Define at least 2 classes.')
-  if (!backend) problems.push('No trainer backend is available.')
+  if (!backend) problems.push('No model is available to train this task.')
   if (includedCount === 0) problems.push('Check at least one hyperparameter to search over.')
 
   const launch = () => {
     if (!backend || !versionId) return
-    const searchSpace: SweepSearchSpace = {}
+    // The chosen model is a search-space key like any other, with one candidate, so every trial uses it.
+    const searchSpace: SweepSearchSpace = selection?.modelId ? { [backend.modelParamName]: [selection.modelId] } : {}
     for (const spec of sweepableKnobs) {
       if (!included[spec.name]) continue
       const raw = candidates[spec.name]
@@ -173,9 +178,6 @@ export function CreateSweepPanel({
         onNameChange={setName}
         versionId={versionId}
         onVersionChange={setVersionId}
-        backends={backends}
-        backendId={backendId}
-        onBackendChange={setBackendId}
         extras={
           <>
             <Select
@@ -210,6 +212,14 @@ export function CreateSweepPanel({
           </>
         }
       />
+
+      <Paper p="sm">
+        <Group gap={4} mb="xs">
+          <SectionLabel>Base model</SectionLabel>
+          <InfoTip text={MODEL_HELP} />
+        </Group>
+        <ModelPicker backends={backends} selection={selection} onChange={setSelection} builtInOnly />
+      </Paper>
 
       <Paper p="sm">
         <SectionLabel mb={4}>Search space</SectionLabel>

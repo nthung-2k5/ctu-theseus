@@ -32,6 +32,7 @@ export function NewTrainingPage() {
     return {
       name: run.name,
       datasetVersionId: run.datasetVersion.id,
+      backend: run.backend,
       hyperparameters: (run.hyperparameters ?? {}) as Record<string, unknown>,
     }
   }, [source])

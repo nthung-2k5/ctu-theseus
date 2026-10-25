@@ -6,13 +6,11 @@ import type { ProjectDetail } from '@public/store/types'
 import { Link } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
-export interface BackendOption {
-  id: string
-  label: string
-}
+export const RUN_NAME_HELP =
+  'A name so you can recognise this later in your list of training runs. It does not affect how the model trains.'
 
 /**
- * The strip at the top of "new run" and "new sweep": name, the snapshot to train on, the trainer backend, and the class count when the task uses classes.
+ * The strip at the top of "new sweep": name, the snapshot to train on, and the class count when the task uses classes.
  * `extras` adds mode-specific fields after them; `right` sits at the far end.
  */
 export function ConfigHeader({
@@ -23,9 +21,6 @@ export function ConfigHeader({
   onNameChange,
   versionId,
   onVersionChange,
-  backends,
-  backendId,
-  onBackendChange,
   hideSnapshot,
   hideClassCount,
   extras,
@@ -38,9 +33,6 @@ export function ConfigHeader({
   onNameChange: (name: string) => void
   versionId: string | null
   onVersionChange: (id: string | null) => void
-  backends: BackendOption[]
-  backendId: string | null
-  onBackendChange: (id: string | null) => void
   /** The snapshot is chosen elsewhere on the page (a list), so leave out its dropdown and summary line. */
   hideSnapshot?: boolean
   /** Leave out the class-count badge (the launch checks still require at least 2 classes). */
@@ -57,12 +49,7 @@ export function ConfigHeader({
       <Group align="flex-end" gap="md">
         <TextInput
           size="xs"
-          label={
-            <LabelWithTip
-              label={nameLabel}
-              tip="A name so you can recognise this later in your list of training runs. It does not affect how the model trains."
-            />
-          }
+          label={<LabelWithTip label={nameLabel} tip={RUN_NAME_HELP} />}
           placeholder={namePlaceholder}
           w={hideSnapshot ? undefined : 240}
           style={hideSnapshot ? { flex: 1 } : undefined}
@@ -90,22 +77,6 @@ export function ConfigHeader({
             }))}
             value={versionId}
             onChange={onVersionChange}
-          />
-        )}
-        {backends.length > 1 && (
-          <Select
-            size="xs"
-            label={
-              <LabelWithTip
-                label="Trainer backend"
-                tip="The software that does the training. Different ones can offer different models and settings."
-              />
-            }
-            w={170}
-            allowDeselect={false}
-            data={backends.map((b) => ({ value: b.id, label: b.label }))}
-            value={backendId}
-            onChange={onBackendChange}
           />
         )}
         {extras}
