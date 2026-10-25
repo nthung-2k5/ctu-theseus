@@ -14,7 +14,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from omnitrain.core import constants as C
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
-from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase, seed_spec
+from omnitrain.plugins.backends.base import (
+    ConfigError,
+    CustomModelRef,
+    HyperparamsBase,
+    grad_clip_spec,
+    lr_schedule_spec,
+    mixed_precision_spec,
+    seed_spec,
+    warmup_spec,
+    weight_decay_spec,
+)
 from omnitrain.plugins.backends.ludwig.tasks import (
     HF_CAUSAL_LM,
     HF_TRANSFORMER,
@@ -112,6 +122,9 @@ class _Trainer(BaseModel):
     # Declared explicitly so a strict model never silently strips them.
     validation_metric: str | None = None
     optimizer: _Typed | None = None
+    gradient_clipping: dict[str, Any] | None = None
+    learning_rate_scheduler: dict[str, Any] | None = None
+    use_mixed_precision: bool | None = None
 
 
 class _FixedSplit(BaseModel):
@@ -202,8 +215,20 @@ def compile_ludwig_config(
     }
     if sel.validation_metric:
         trainer["validation_metric"] = sel.validation_metric
-    if sel.optimizer:
-        trainer["optimizer"] = _with_optimizer(sel.optimizer, task.id)
+    if sel.optimizer or sel.weight_decay is not None:
+        # Weight decay lives on the optimizer block. With no optimizer chosen it must name one: AdamW, because it
+        # applies the decay properly (Ludwig's own default, Adam, would turn it into an L2 penalty on the gradient).
+        trainer["optimizer"] = {
+            **_with_optimizer(sel.optimizer or "adamw", task.id),
+            **({"weight_decay": sel.weight_decay} if sel.weight_decay is not None else {}),
+        }
+    scheduler = _lr_scheduler(sel, trainer["epochs"])
+    if scheduler:
+        trainer["learning_rate_scheduler"] = scheduler
+    if sel.grad_clip_norm is not None:
+        trainer["gradient_clipping"] = {"clipglobalnorm": sel.grad_clip_norm}
+    if sel.mixed_precision is not None:
+        trainer["use_mixed_precision"] = sel.mixed_precision
 
     config = {
         "model_type": spec.model_type,
@@ -337,6 +362,23 @@ def _with_optimizer(optimizer: str, task_id: str) -> dict[str, str]:
     return {"type": optimizer}
 
 
+def _lr_scheduler(sel: LudwigHyperparameters, epochs: int) -> dict[str, Any]:
+    """Ludwig's `learning_rate_scheduler` block for the requested schedule and warmup, empty when neither was asked for.
+
+    Ludwig's own "cosine" is a warm-restart schedule whose period defaults to one evaluation, not one cosine over the
+    whole run, and the run's step count is not known until the data is loaded, so it is not offered.
+    """
+    if sel.lr_schedule == "cosine":
+        raise ConfigError("The Ludwig backend offers a constant or linear learning rate schedule, not cosine")
+    block: dict[str, Any] = {}
+    if sel.lr_schedule == "linear":
+        block["decay"] = "linear"
+    if sel.warmup_epochs:
+        # Ludwig counts warmup as a share of all training steps, so an epoch count becomes a fraction of the run.
+        block["warmup_fraction"] = min(sel.warmup_epochs / epochs, 1.0)
+    return block
+
+
 def _apply_class_weights(
     output_features: list[dict[str, Any]], class_counts: dict[str, int] | None, task_id: str
 ) -> list[dict[str, Any]]:
@@ -389,6 +431,11 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             "you know you want a specific one; the default (Adam) is a safe general choice.",
         ),
         seed_spec(_TRAINING),
+        weight_decay_spec(_TRAINING),
+        lr_schedule_spec(_TRAINING, ("constant", "linear")),
+        warmup_spec(_TRAINING),
+        grad_clip_spec(_TRAINING),
+        mixed_precision_spec(_TRAINING),
     ]  # fmt: skip
 
     training = [

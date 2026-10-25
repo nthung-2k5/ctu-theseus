@@ -10,7 +10,17 @@ from typing import Any, Literal
 from pydantic import Field
 
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
-from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase, seed_spec
+from omnitrain.plugins.backends.base import (
+    ConfigError,
+    CustomModelRef,
+    HyperparamsBase,
+    lr_schedule_spec,
+    mixed_precision_spec,
+    refuse_unsupported,
+    seed_spec,
+    warmup_spec,
+    weight_decay_spec,
+)
 from omnitrain.plugins.backends.yolo.tasks import IMAGE_SIZES, OPTIMIZERS, YOLO_TASKS, YoloTaskSpec
 from omnitrain.schemas.common import ParamSpec
 
@@ -97,6 +107,19 @@ def compile_yolo_config(
         train["freeze"] = hp.freeze_layers
     if hp.seed is not None:
         train["seed"] = hp.seed
+    # Ultralytics clips gradients at a fixed 10.0 and offers no argument to change it.
+    refuse_unsupported(hp, "YOLO", "grad_clip_norm")
+    if hp.weight_decay is not None:
+        train["weight_decay"] = hp.weight_decay
+    if hp.warmup_epochs is not None:
+        train["warmup_epochs"] = hp.warmup_epochs
+    if hp.mixed_precision is not None:
+        train["amp"] = hp.mixed_precision
+    if hp.lr_schedule == "cosine":
+        train["cos_lr"] = True
+    elif hp.lr_schedule == "constant":
+        # `lrf` is the final learning rate as a fraction of the first; 1.0 keeps it flat.
+        train["lrf"] = 1.0
 
     return {
         "backend": "yolo",
@@ -151,6 +174,10 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             "overshoots; too low and training is slow. SGD usually wants a larger value (around 0.01) than AdamW.",
         ),
         seed_spec(_TRAINING),
+        weight_decay_spec(_TRAINING),
+        lr_schedule_spec(_TRAINING),
+        warmup_spec(_TRAINING),
+        mixed_precision_spec(_TRAINING, default=True),
         ParamSpec(
             name="optimizer", label="Optimizer", type="choice", group=_TRAINING,
             default=DEFAULT_OPTIMIZER, choices=list(OPTIMIZERS),

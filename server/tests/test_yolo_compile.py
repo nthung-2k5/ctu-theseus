@@ -139,3 +139,34 @@ class TestBackend:
             "YoloBackend.available(); assert 'ultralytics' not in sys.modules, 'imported ultralytics'"
         )
         subprocess.run([sys.executable, "-c", code], check=True)
+
+
+class TestOptimisation:
+    def test_nothing_is_added_unless_asked_for(self):
+        train = compile_()["train"]
+        assert not {"weight_decay", "warmup_epochs", "amp", "cos_lr", "lrf"} & set(train)
+
+    def test_shared_knobs_map_to_ultralytics_arguments(self):
+        train = compile_(weight_decay=0.01, warmup_epochs=1.5, mixed_precision=False, lr_schedule="cosine")["train"]
+        assert (train["weight_decay"], train["warmup_epochs"], train["amp"], train["cos_lr"]) == (
+            0.01,
+            1.5,
+            False,
+            True,
+        )
+
+    def test_a_constant_schedule_keeps_the_final_rate_equal_to_the_first(self):
+        train = compile_(lr_schedule="constant")["train"]
+        assert train["lrf"] == 1.0 and "cos_lr" not in train
+
+    def test_gradient_clipping_is_refused_not_ignored(self):
+        with pytest.raises(ConfigError, match="gradClipNorm"):
+            compile_(grad_clip_norm=1.0)
+
+    def test_the_form_offers_what_compile_accepts(self):
+        names = {s.name for s in hyperparameter_specs(TASK)}
+        assert {"weightDecay", "lrSchedule", "warmupEpochs", "mixedPrecision"} <= names
+        assert "gradClipNorm" not in names
+
+    def test_the_mixed_precision_switch_shows_ultralytics_own_default(self):
+        assert {s.name: s for s in hyperparameter_specs(TASK)}["mixedPrecision"].default is True

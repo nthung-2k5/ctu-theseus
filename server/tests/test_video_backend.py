@@ -13,6 +13,7 @@ from omnitrain.plugins.backends.registry import get_backend, trainable_backends
 from omnitrain.plugins.backends.video import VideoBackend, frames
 from omnitrain.plugins.backends.video.compile import VideoHyperparameters, compile_video_config, hyperparameter_specs
 from omnitrain.plugins.backends.video.manifest import build_preprocessing_manifest
+from omnitrain.plugins.backends.video.schedule import lr_factor
 from omnitrain.plugins.export.formats._kits import supports_generated_clients
 from omnitrain.plugins.export.registry import list_export_formats
 
@@ -115,6 +116,90 @@ class TestCompile:
 
 
 SPEC = frames.ClipSpec(num_frames=4, stride=2, size=16, mean=(0.0, 0.0, 0.0), std=(1.0, 1.0, 1.0))
+
+
+class TestOptimisation:
+    def test_defaults_keep_what_each_optimizer_already_did(self):
+        train = compile_()["train"]
+        assert train["weightDecay"] is None and train["gradClipNorm"] is None
+        assert (train["lrSchedule"], train["warmupEpochs"], train["mixedPrecision"]) == ("constant", 0, False)
+
+    def test_selections_reach_the_config(self):
+        train = compile_(
+            weight_decay=0.05, lr_schedule="cosine", warmup_epochs=1.5, grad_clip_norm=1.0, mixed_precision=True
+        )["train"]
+        assert (train["weightDecay"], train["lrSchedule"], train["warmupEpochs"]) == (0.05, "cosine", 1.5)
+        assert (train["gradClipNorm"], train["mixedPrecision"]) == (1.0, True)
+
+    def test_the_form_offers_every_shape(self):
+        specs = {p.name: p for p in hyperparameter_specs(TASK)}
+        assert specs["lrSchedule"].choices == ["constant", "linear", "cosine"]
+        assert {"weightDecay", "warmupEpochs", "gradClipNorm", "mixedPrecision"} <= set(specs)
+
+
+class TestLearningRateCurve:
+    def test_constant_is_flat(self):
+        assert [lr_factor(i, 10, 0, "constant") for i in range(10)] == [1.0] * 10
+
+    def test_linear_starts_at_one_and_ends_at_zero(self):
+        curve = [lr_factor(i, 11, 0, "linear") for i in range(11)]
+        assert curve[0] == 1.0 and curve[-1] == 0.0
+        assert curve == sorted(curve, reverse=True)
+
+    def test_cosine_is_half_way_down_in_the_middle(self):
+        assert lr_factor(5, 11, 0, "cosine") == pytest.approx(0.5)
+        assert lr_factor(10, 11, 0, "cosine") == pytest.approx(0.0, abs=1e-9)
+
+    def test_warmup_rises_to_the_full_rate_then_the_schedule_takes_over(self):
+        curve = [lr_factor(i, 20, 4, "linear") for i in range(20)]
+        assert curve[:4] == sorted(curve[:4]) and curve[0] < 0.25
+        assert curve[4] == 1.0 and curve[-1] == 0.0
+
+    def test_a_step_past_the_end_stays_at_the_floor(self):
+        assert lr_factor(99, 10, 0, "linear") == 0.0
+
+    def test_an_unknown_schedule_raises(self):
+        with pytest.raises(ValueError):
+            lr_factor(0, 10, 0, "zigzag")
+
+
+class TestStepper:
+    """The optimizer step with its schedule, clipping and (CUDA-only) mixed precision, on a toy network on the CPU."""
+
+    @staticmethod
+    def _stepper(**hp):
+        import torch
+
+        from omnitrain.plugins.backends.video.train import _Stepper
+
+        net = torch.nn.Linear(4, 2)
+        params = list(net.parameters())
+        optimizer = torch.optim.SGD(params, lr=1.0)
+        base = {"epochs": 2, "lrSchedule": "linear", "warmupEpochs": 0, "gradClipNorm": None, "mixedPrecision": True}
+        return net, optimizer, _Stepper(optimizer, params, "cpu", {**base, **hp}, steps_per_epoch=5)
+
+    def test_mixed_precision_is_off_without_cuda(self):
+        _, _, stepper = self._stepper()
+        assert stepper.amp is False
+
+    def test_the_learning_rate_follows_the_curve_per_step(self):
+        import torch
+
+        net, optimizer, stepper = self._stepper()
+        rates = []
+        for _ in range(10):
+            rates.append(optimizer.param_groups[0]["lr"])
+            stepper.step(net(torch.ones(1, 4)).sum())
+        assert rates[0] == 1.0 and rates == sorted(rates, reverse=True)
+
+    def test_clipping_caps_the_update(self):
+        import torch
+
+        net, _, stepper = self._stepper(gradClipNorm=0.1, lrSchedule="constant")
+        before = [p.detach().clone() for p in net.parameters()]
+        stepper.step(net(torch.ones(1, 4) * 100).sum() * 100)
+        moved = torch.sqrt(sum(((p - b) ** 2).sum() for p, b in zip(net.parameters(), before, strict=True)))
+        assert float(moved.detach()) <= 0.1 + 1e-5
 
 
 class TestClipSampling:

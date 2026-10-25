@@ -72,7 +72,10 @@ def test_a_backend_that_only_implements_the_required_methods_still_works():
         # modelId is always excluded (models() covers it); batchSize mixes int and "auto" and has
         # no generic representation, so the lenient default skips it rather than raising.
         names = {p.name for p in _MinimalBackend.hyperparameter_specs(task)}
-        assert names == {"epochs", "learningRate", "earlyStopPatience", "seed"}
+        assert names == {
+            "epochs", "learningRate", "earlyStopPatience", "seed",
+            "weightDecay", "lrSchedule", "warmupEpochs", "gradClipNorm", "mixedPrecision",
+        }  # fmt: skip
 
         assert _MinimalBackend.evaluate(None, None, "split", "id") is None  # no evaluation support by default
 

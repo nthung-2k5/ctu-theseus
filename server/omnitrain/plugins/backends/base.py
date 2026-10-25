@@ -64,6 +64,70 @@ def seed_spec(group: str) -> ParamSpec:
     )  # fmt: skip
 
 
+LR_SCHEDULES = ("constant", "linear", "cosine")
+
+
+def weight_decay_spec(group: str) -> ParamSpec:
+    """The form field for `HyperparamsBase.weight_decay`. No default: unset means the trainer's own."""
+    return ParamSpec(
+        name="weightDecay", label="Weight decay", type="float", group=group, default=None, min=0, max=1, step=0.0001,
+        description="Gently pulls every weight toward zero at each step, which keeps the model from leaning too "
+        "hard on any one detail of the training examples. Small values (0.0001 to 0.05) are typical. Leave it "
+        "unset to use the trainer's own default.",
+    )  # fmt: skip
+
+
+def lr_schedule_spec(group: str, choices: tuple[str, ...] = LR_SCHEDULES) -> ParamSpec:
+    """The form field for `HyperparamsBase.lr_schedule`: how the learning rate changes over the run. A backend
+    offers only the shapes it can really produce."""
+    return ParamSpec(
+        name="lrSchedule", label="Learning rate schedule", type="choice", group=group, default=None,
+        choices=list(choices),
+        description="How the learning rate changes while training. Constant keeps it fixed; linear lowers it "
+        "steadily to zero by the last epoch; cosine lowers it slowly at first, then faster, then slowly again. "
+        "Lowering it toward the end usually gives a slightly better and steadier result. Leave it unset to use "
+        "the trainer's own default.",
+    )  # fmt: skip
+
+
+def warmup_spec(group: str) -> ParamSpec:
+    """The form field for `HyperparamsBase.warmup_epochs`."""
+    return ParamSpec(
+        name="warmupEpochs", label="Warmup epochs", type="float", group=group, default=None, min=0, max=20, step=0.5,
+        description="Starts with a tiny learning rate and raises it to the full value over this many epochs. "
+        "Helps when training is unstable at the start, especially with a high learning rate or a large batch. "
+        "0 means no warmup.",
+    )  # fmt: skip
+
+
+def grad_clip_spec(group: str) -> ParamSpec:
+    """The form field for `HyperparamsBase.grad_clip_norm`."""
+    return ParamSpec(
+        name="gradClipNorm", label="Gradient clipping", type="float", group=group, default=None, min=0.01, max=100,
+        step=0.1,
+        description="Caps how large a single update can be, so one unusual batch cannot throw the model off. "
+        "Smaller values are stricter; 1.0 is a common choice. Leave it unset for none (or the trainer's own).",
+    )  # fmt: skip
+
+
+def mixed_precision_spec(group: str, default: bool = False) -> ParamSpec:
+    """The form field for `HyperparamsBase.mixed_precision`. A switch cannot show "unset", so `default` must be what
+    the backend does when it is not asked (on for Ultralytics, off for the rest)."""
+    return ParamSpec(
+        name="mixedPrecision", label="Mixed precision", type="bool", group=group, default=default,
+        description="Does most of the arithmetic in half precision on a GPU: faster and uses less memory, with "
+        "almost no loss in quality. It has no effect without a GPU.",
+    )  # fmt: skip
+
+
+def refuse_unsupported(hp: "HyperparamsBase", backend: str, *names: str) -> None:
+    """Raise `ConfigError` if any of the shared optimisation fields `names` is set. A backend whose framework cannot
+    do one of them must say so rather than silently train without it (a sweep over it would measure nothing)."""
+    for name in names:
+        if getattr(hp, name) is not None:
+            raise ConfigError(f"The {backend} backend does not support {to_camel(name)}")
+
+
 class HyperparamsBase(BaseModel):
     """camelCase on the wire, unknown keys rejected. Every backend's `Hyperparameters` subclasses
     this, adding whatever extra knobs its own models support."""
@@ -78,6 +142,16 @@ class HyperparamsBase(BaseModel):
     early_stop_patience: int | None = Field(default=None, ge=-1)
     # Seeds the framework's random number generators (see each `compile`). None leaves the framework's own default.
     seed: int | None = Field(default=None, ge=0, le=MAX_SEED)
+    # The optimisation knobs shared by every backend. None leaves the framework's own default, so a stored run
+    # that predates them compiles exactly as before. A backend that cannot honour one refuses it in `compile`
+    # (never ignores it) and does not put it in its form.
+    weight_decay: float | None = Field(default=None, ge=0, le=1)
+    lr_schedule: Literal["constant", "linear", "cosine"] | None = None
+    # Linear warmup from zero to the learning rate, in epochs (may be fractional).
+    warmup_epochs: float | None = Field(default=None, ge=0, le=20)
+    # Global gradient-norm ceiling.
+    grad_clip_norm: float | None = Field(default=None, gt=0, le=100)
+    mixed_precision: bool | None = None
 
 
 class ModelChoice(BaseModel):
@@ -350,7 +424,14 @@ class TrainerBackend(ABC):
 __all__ = [
     "ARTIFACT_FILENAMES",
     "MAX_SEED",
+    "LR_SCHEDULES",
+    "grad_clip_spec",
+    "lr_schedule_spec",
+    "mixed_precision_spec",
+    "refuse_unsupported",
     "seed_spec",
+    "warmup_spec",
+    "weight_decay_spec",
     "Artifact",
     "ConfigError",
     "CustomModelKind",

@@ -14,7 +14,9 @@ from omnitrain.schemas.common import ApiModel
 # models the server cannot serve.
 #   1  claim / events / complete
 #   2  the run spec can carry a bring-your-own model for the worker to fetch (`WorkerCustomModel`)
-PROTOCOL_VERSION = 2
+#   3  a run's config can carry weight decay, a learning-rate schedule, warmup, gradient clipping and mixed precision
+#      (a worker on 2 would train without them and not say so)
+PROTOCOL_VERSION = 3
 
 
 class WorkerClaimBody(ApiModel):

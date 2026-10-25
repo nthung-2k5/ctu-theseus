@@ -8,6 +8,7 @@ Progress, heartbeats and the abort check run in the training loop itself, so `Tr
 `run.check_abort()` stops training the same way it does for the other backends.
 """
 
+import contextlib
 import json
 import logging
 import shutil
@@ -26,6 +27,7 @@ from omnitrain.plugins.backends.base import TrainContext
 from omnitrain.plugins.backends.video import custom, data, frames, hf, network, runtime
 from omnitrain.plugins.backends.video.model import VideoLoadedModel, clip_spec_from_meta
 from omnitrain.plugins.backends.video.model import load as load_model
+from omnitrain.plugins.backends.video.schedule import lr_factor
 from omnitrain.services import storage
 
 tracer = trace.get_tracer("omnitrain")
@@ -78,16 +80,56 @@ class ClipDataset(Dataset):
         return frames.to_tensor(clip, self._spec), sample.class_index
 
 
+class _Stepper:
+    """Everything one optimizer step needs beyond the optimizer: the learning-rate curve, gradient clipping and mixed
+    precision (a loss scaler and `autocast`, both only on a CUDA device, where half precision is worth it)."""
+
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        parameters: list[torch.nn.Parameter],
+        device: str,
+        hp: dict[str, Any],
+        steps_per_epoch: int,
+    ) -> None:
+        self.optimizer = optimizer
+        self._parameters = parameters
+        self._clip = hp.get("gradClipNorm")
+        self.amp = bool(hp.get("mixedPrecision")) and device.startswith("cuda")
+        self._device_type = "cuda" if device.startswith("cuda") else "cpu"
+        self._scaler = torch.amp.GradScaler("cuda", enabled=self.amp)
+        total = hp["epochs"] * steps_per_epoch
+        warmup = round(float(hp.get("warmupEpochs") or 0) * steps_per_epoch)
+        schedule = hp.get("lrSchedule") or "constant"
+        self._scheduler = torch.optim.lr_scheduler.LambdaLR(
+            optimizer, lambda step: lr_factor(step, total, warmup, schedule)
+        )
+
+    def autocast(self) -> Any:
+        return torch.autocast(self._device_type, dtype=torch.float16, enabled=self.amp)
+
+    def step(self, loss: torch.Tensor) -> None:
+        self.optimizer.zero_grad(set_to_none=True)
+        self._scaler.scale(loss).backward()
+        if self._clip is not None:
+            # Gradients are still multiplied by the loss scale; undo that first so the norm is the real one.
+            self._scaler.unscale_(self.optimizer)
+            torch.nn.utils.clip_grad_norm_(self._parameters, self._clip)
+        self._scaler.step(self.optimizer)
+        self._scaler.update()
+        self._scheduler.step()
+
+
 def _run_epoch(
     net: torch.nn.Module,
     loader: DataLoader,
     device: str,
     run: TrainContext,
     beat: _Beat,
-    optimizer: torch.optim.Optimizer | None,
+    stepper: _Stepper | None,
 ) -> tuple[float, float]:
-    """One pass over `loader`: trains when an optimizer is given, otherwise only scores. Returns (loss, accuracy)."""
-    training = optimizer is not None
+    """One pass over `loader`: trains when a stepper is given, otherwise only scores. Returns (loss, accuracy)."""
+    training = stepper is not None
     net.train(training)
     total_loss, correct, seen = 0.0, 0, 0
     for clips, labels in loader:
@@ -95,12 +137,11 @@ def _run_epoch(
         beat()
         clips, labels = clips.to(device), labels.to(device)
         with torch.set_grad_enabled(training):
-            logits = net(clips)
-            loss = torch.nn.functional.cross_entropy(logits, labels)
-        if optimizer is not None:
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            with stepper.autocast() if stepper is not None else contextlib.nullcontext():
+                logits = net(clips)
+                loss = torch.nn.functional.cross_entropy(logits.float(), labels)
+        if stepper is not None:
+            stepper.step(loss)
         total_loss += float(loss.item()) * len(labels)
         correct += int((logits.argmax(dim=1) == labels).sum().item())
         seen += len(labels)
@@ -187,19 +228,24 @@ def train(run: TrainContext) -> VideoLoadedModel:
             )
         net = net.to(device)
         trainable = [p for p in net.parameters() if p.requires_grad]
+        # Each optimizer keeps its own weight decay unless one was asked for: SGD 1e-4, and AdamW torch's 0.01.
+        decay = hp.get("weightDecay")
         if hp["optimizer"] == "SGD":
             optimizer: torch.optim.Optimizer = torch.optim.SGD(
-                trainable, lr=hp["learningRate"], momentum=0.9, weight_decay=1e-4
+                trainable, lr=hp["learningRate"], momentum=0.9, weight_decay=1e-4 if decay is None else decay
             )
         else:
-            optimizer = torch.optim.AdamW(trainable, lr=hp["learningRate"])
+            optimizer = torch.optim.AdamW(
+                trainable, lr=hp["learningRate"], **({} if decay is None else {"weight_decay": decay})
+            )
+        stepper = _Stepper(optimizer, trainable, device, hp, len(train_loader))
 
         best_loss, best_state, stale = float("inf"), None, 0
         with tracer.start_as_current_span("video.train"):
             for epoch in range(1, hp["epochs"] + 1):
                 run.check_abort()
                 run.heartbeat()
-                loss, accuracy = _run_epoch(net, train_loader, device, run, beat, optimizer)
+                loss, accuracy = _run_epoch(net, train_loader, device, run, beat, stepper)
                 run.report(epoch, "train", {"loss": loss, "accuracy": accuracy})
                 val_loss, val_accuracy = _run_epoch(net, val_loader, device, run, beat, None)
                 run.report(epoch, "validation", {"loss": val_loss, "accuracy": val_accuracy})

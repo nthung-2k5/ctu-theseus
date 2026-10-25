@@ -253,6 +253,7 @@ class TestHyperparameterSpecs:
             "epochs", "batchSize", "learningRate", "earlyStopPatience", "optimizer",
             "validationMetric", "imageSize", "useClassWeights",
             "freezeBackbone", "headLayers", "headWidth", "headDropout", "seed",
+            "weightDecay", "lrSchedule", "warmupEpochs", "gradClipNorm", "mixedPrecision",
         }  # fmt: skip
 
     def test_seed_is_unset_by_default_and_reaches_ludwig_as_random_seed_when_given(self):
@@ -307,7 +308,10 @@ class TestHyperparameterSpecs:
         by_section: dict[str, list[str]] = {}
         for p in specs:
             by_section.setdefault(p.group or "", []).append(p.name)
-        assert by_section["Training"] == ["epochs", "batchSize", "learningRate", "optimizer", "seed"]
+        assert by_section["Training"] == [
+            "epochs", "batchSize", "learningRate", "optimizer", "seed",
+            "weightDecay", "lrSchedule", "warmupEpochs", "gradClipNorm", "mixedPrecision",
+        ]  # fmt: skip
         assert by_section["Stopping"] == ["earlyStopPatience", "validationMetric"]
         assert by_section["Model details"][0] == "freezeBackbone"
 
@@ -361,3 +365,65 @@ class TestSerialize:
         assert text.index("model_type") < text.index("input_features") < text.index("trainer")
         # Ludwig reads this with a YAML 1.1 loader, so small floats must stay floats, not strings.
         assert isinstance(yaml.safe_load(text)["trainer"]["learning_rate"], float)
+
+
+class TestOptimisation:
+    def test_nothing_is_added_unless_asked_for(self):
+        t = compile_("image_classification", VISION)["trainer"]
+        assert not {"optimizer", "learning_rate_scheduler", "gradient_clipping", "use_mixed_precision"} & set(t)
+
+    def test_weight_decay_goes_on_the_optimizer_and_defaults_it_to_adamw(self):
+        assert compile_("image_classification", VISION, weight_decay=0.01)["trainer"]["optimizer"] == {
+            "type": "adamw",
+            "weight_decay": 0.01,
+        }
+        t = compile_("image_classification", VISION, weight_decay=0.01, optimizer="sgd")["trainer"]
+        assert t["optimizer"] == {"type": "sgd", "weight_decay": 0.01}
+
+    def test_warmup_is_a_fraction_of_the_whole_run(self):
+        t = compile_("image_classification", VISION, epochs=20, warmup_epochs=2, lr_schedule="linear")["trainer"]
+        assert t["learning_rate_scheduler"] == {"decay": "linear", "warmup_fraction": 0.1}
+
+    def test_warmup_can_not_exceed_the_run(self):
+        t = compile_("image_classification", VISION, epochs=2, warmup_epochs=9)["trainer"]
+        assert t["learning_rate_scheduler"] == {"warmup_fraction": 1.0}
+
+    def test_a_constant_schedule_adds_no_decay(self):
+        t = compile_("image_classification", VISION, lr_schedule="constant")["trainer"]
+        assert "learning_rate_scheduler" not in t
+
+    def test_cosine_is_refused_because_ludwigs_is_a_restart_schedule(self):
+        with pytest.raises(ConfigError, match="cosine"):
+            compile_("image_classification", VISION, lr_schedule="cosine")
+
+    def test_clipping_and_mixed_precision(self):
+        t = compile_("image_classification", VISION, grad_clip_norm=1.0, mixed_precision=True)["trainer"]
+        assert t["gradient_clipping"] == {"clipglobalnorm": 1.0}
+        assert t["use_mixed_precision"] is True
+
+    def test_ludwig_accepts_the_compiled_trainer(self):
+        from ludwig.schema.model_types.base import ModelConfig
+
+        config = compile_(
+            "image_classification",
+            VISION,
+            weight_decay=0.01,
+            lr_schedule="linear",
+            warmup_epochs=1,
+            grad_clip_norm=1.0,
+            mixed_precision=True,
+        )
+        config.pop("ludwig_version")
+        config.pop("random_seed", None)
+        trainer = ModelConfig.from_dict(config).trainer
+        assert trainer.optimizer.weight_decay == 0.01
+        assert trainer.learning_rate_scheduler.decay == "linear"
+        assert trainer.gradient_clipping.clipglobalnorm == 1.0
+        assert trainer.use_mixed_precision is True
+
+    def test_the_form_offers_what_compile_accepts(self):
+        from omnitrain.plugins.backends.ludwig.compile import hyperparameter_specs
+
+        specs = {s.name: s for s in hyperparameter_specs(get_task_descriptor("image_classification"))}
+        assert {"weightDecay", "warmupEpochs", "gradClipNorm", "mixedPrecision"} <= set(specs)
+        assert specs["lrSchedule"].choices == ["constant", "linear"]

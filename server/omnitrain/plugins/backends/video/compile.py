@@ -10,7 +10,17 @@ from typing import Any, Literal
 from pydantic import Field
 
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
-from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, HyperparamsBase, seed_spec
+from omnitrain.plugins.backends.base import (
+    ConfigError,
+    CustomModelRef,
+    HyperparamsBase,
+    grad_clip_spec,
+    lr_schedule_spec,
+    mixed_precision_spec,
+    seed_spec,
+    warmup_spec,
+    weight_decay_spec,
+)
 from omnitrain.plugins.backends.video import tasks
 from omnitrain.plugins.backends.video.custom import HF_VIDEO
 from omnitrain.schemas.common import ParamSpec
@@ -101,6 +111,12 @@ def compile_video_config(
             "freezeBackbone": bool(hp.freeze_backbone),
             "horizontalFlip": True if hp.horizontal_flip is None else hp.horizontal_flip,
             "seed": hp.seed,
+            # Unset keeps what each optimizer already did (see train.py); the rest are off by default.
+            "weightDecay": hp.weight_decay,
+            "lrSchedule": hp.lr_schedule or "constant",
+            "warmupEpochs": hp.warmup_epochs or 0,
+            "gradClipNorm": hp.grad_clip_norm,
+            "mixedPrecision": bool(hp.mixed_precision),
         },
     }
 
@@ -145,6 +161,11 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
             "overshoots; too low and training is slow.",
         ),
         seed_spec(_TRAINING),
+        weight_decay_spec(_TRAINING),
+        lr_schedule_spec(_TRAINING),
+        warmup_spec(_TRAINING),
+        grad_clip_spec(_TRAINING),
+        mixed_precision_spec(_TRAINING),
         ParamSpec(
             name="optimizer", label="Optimizer", type="choice", group=_TRAINING,
             default="AdamW", choices=list(tasks.OPTIMIZERS),
