@@ -5,7 +5,7 @@ Ultralytics and the video backend report no per-class statistics through their o
 from the model's predictions on the evaluation split. Every label is a class NAME taken from the model's own
 `OutputSpec.labels`, never an index and never from the `label_classes` table (see domain/evaluate.py).
 
-`model` is any `LoadedModel` whose single input column holds what `predict` reads and whose prediction frame follows
+`model` is any `LoadedModel` whose input columns hold what `predict` reads and whose prediction frame follows
 the `{feature}_predictions` / `{feature}_probability` convention.
 """
 
@@ -31,19 +31,25 @@ def evaluate_classification(
     label_column: str,
     batch_size: int,
     max_classes_for_matrix: int,
+    allow_missing_inputs: bool = False,
 ) -> EvalResult | None:
+    """`allow_missing_inputs`: score a row even when some input cell is empty, for a model (tabular) that has its own
+    way of coping with a missing value. Otherwise such a row has nothing to be predicted from and is left out."""
     labels = list(model.output.labels or [])
-    input_column = model.input_columns[0]
+    inputs = list(model.input_columns)
     name = model.output.name
 
     eval_rows, split_used = pick_eval_split(df, split_column)
     # A row with no input, or a class this model has never heard of, has nothing to be scored against.
-    eval_rows = eval_rows[eval_rows[input_column].notna() & eval_rows[label_column].isin(labels)].reset_index(drop=True)
+    keep = eval_rows[label_column].isin(labels)
+    if not allow_missing_inputs:
+        keep &= eval_rows[inputs].notna().all(axis=1)
+    eval_rows = eval_rows[keep].reset_index(drop=True)
     if len(eval_rows) == 0:
         return None
 
     batches = [
-        model.predict(eval_rows.iloc[start : start + batch_size][[input_column]])
+        model.predict(eval_rows.iloc[start : start + batch_size][inputs])
         for start in range(0, len(eval_rows), batch_size)
     ]
     predictions = pd.concat(batches, ignore_index=True)
