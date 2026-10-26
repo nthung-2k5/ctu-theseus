@@ -32,6 +32,8 @@ Implements preprocessing for:
   - a `text` input with an `hfTokenizer` recipe (a fine-tuned Hugging Face transformer) — pass the
     text itself. It is tokenized by the model's own tokenizer, which ships in the bundle as
     `tokenizer.json` (or inside preprocessing.json) and is run by the `tokenizers` package.
+  - a `text` input with a `tagWords` recipe and a `tags` output (token classification) — pass the
+    text itself; `predict()` returns one `{token, tag, confidence}` per whitespace-separated word.
 
 Every other input type (Ludwig's text and audio, a scikit-learn text model) raises
 NotImplementedError with a pointer to preprocessing.json so you can adapt preprocessing yourself —
@@ -256,6 +258,18 @@ class OmniTrainClient:
                     f"Unknown audio recipe {self._audio_recipe.get('recipe')!r}. "
                     "See preprocessing.json's `inputs[0].audioSpectrogram` and adapt this client."
                 )
+        elif self.output_spec["type"] == "tags" and "tagWords" in self.input_spec:
+            self._kind = "tags"
+            self._tag_recipe = self.input_spec["tagWords"]
+            if self._tag_recipe.get("recipe") != "tag_word_ids_v1":
+                raise NotImplementedError(
+                    f"Unknown tagging recipe {self._tag_recipe.get('recipe')!r}. "
+                    "See preprocessing.json's `inputs[0].tagWords` and adapt this client."
+                )
+            lower = self._tag_recipe["lowercase"]
+            self._tag_lower = {code: code + lower["add"] for code in range(lower["from"], lower["to"] + 1)}
+            first = self._tag_recipe["firstWordId"]
+            self._tag_ids = {word: first + i for i, word in enumerate(self._tag_recipe["vocabulary"])}
         elif self.input_spec["type"] == "text" and "textTokens" in self.input_spec:
             self._kind = "text"
             self._text_recipe = self.input_spec["textTokens"]
@@ -370,7 +384,8 @@ class OmniTrainClient:
     def predict(self, value: str | Path | dict[str, float], top_k: int = 5) -> dict[str, float] | list[dict]:
         """Run inference and return `{class_name: probability}` sorted
         descending (classification), or `{"value": float}` (regression), or,
-        for a detector, the list `detect()` returns.
+        for a detector, the list `detect()` returns, or, for a tagger, one
+        `{token, tag, confidence}` per word of the text.
 
         `value` is a file path for a single `image`, `video` or `audio` input, the text
         itself (a `str`) for a `text` input, or a `{column: value}` dict — one entry per
@@ -382,6 +397,8 @@ class OmniTrainClient:
             return self._classify_video(value, top_k)
         if self._kind == "audio":
             return self._classify_audio(value, top_k)
+        if self._kind == "tags":
+            return self._tag_words(str(value))
         if self._kind == "text":
             return self._classify_text(str(value), top_k)
         if self._is_tabular:
@@ -612,6 +629,38 @@ class OmniTrainClient:
         classes = self.output_spec["classes"]
         ranked = sorted(zip(classes, probs), key=lambda p: p[1], reverse=True)
         return {name: round(float(p), 4) for name, p in ranked[:top_k]}
+
+    # -- Tags ------------------------------------------------------------------------------------------------------
+
+    def _word_ids(self, words: list[str]) -> np.ndarray:
+        """`[1, maxTokens]` int64 ids by `tagWords`: each of the first maxTokens words, ASCII capitals lower-cased,
+        looked up exactly in the vocabulary; the end is padded."""
+        recipe = self._tag_recipe
+        ids = [self._tag_ids.get(w.translate(self._tag_lower), recipe["unknownId"]) for w in words[: recipe["maxTokens"]]]
+        ids += [recipe["padId"]] * (recipe["maxTokens"] - len(ids))
+        return np.array([ids], dtype=np.int64)
+
+    def _tag_words(self, text: str) -> list[dict]:
+        """One `{token, tag, confidence}` per word of `text` (`str.split()`): the highest-scoring tag of the word's
+        row of logits and its softmax probability. A word past `maxTokens` was not read and gets the recipe's
+        `fallbackTag` with confidence 0."""
+        recipe = self._tag_recipe
+        words = text.split()
+        if not words:
+            return []
+        feed = {self._onnx_input_names[self.input_spec["name"]]: self._word_ids(words)}
+        raw = np.asarray(self.session.run([self._onnx_output_name], feed)[0])
+        rows = raw.reshape(raw.shape[-2], raw.shape[-1])
+        classes = self.output_spec["classes"]
+        out = []
+        for i, word in enumerate(words):
+            if i < min(len(words), recipe["maxTokens"]):
+                probs = _softmax(rows[i])
+                best = int(np.argmax(probs))
+                out.append({"token": word, "tag": classes[best], "confidence": round(float(probs[best]), 4)})
+            else:
+                out.append({"token": word, "tag": recipe["fallbackTag"], "confidence": 0.0})
+        return out
 
     # -- Text ------------------------------------------------------------------------------------------------------
 

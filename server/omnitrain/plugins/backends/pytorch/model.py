@@ -7,7 +7,8 @@ the export golden sample work on it unchanged.
 
 What differs between the kinds of model is only how a frame becomes network output (`outputs`), which reads the
 spec stored in `names.json`; the rest is shared. Images go through `images.preprocess`, a sound through `audio`, a text
-through `text.encode`: the same steps an export client applies.
+through `text.encode` (or, for a tagger, `tagging.encode`): the same steps an export client applies. A tagger's
+frame is the one exception to the shape above: one tag per word, see `TaggerModel`.
 """
 
 import json
@@ -23,10 +24,11 @@ import pandas as pd
 import torch
 
 from omnitrain.domain.predict import ClassificationClass, InferenceOutput
+from omnitrain.domain.token_tags import OUTSIDE, cell_tags, words
 from omnitrain.plugins.backends.base import LoadedModel, OutputSpec
-from omnitrain.plugins.backends.pytorch import audio, images, network, runtime, tabular, text
+from omnitrain.plugins.backends.pytorch import audio, images, network, runtime, tabular, tagging, text
 from omnitrain.plugins.backends.pytorch.data import split_s3_uri
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TabularSpec, TextSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TabularSpec, TextSpec, WordsSpec
 from omnitrain.services import storage
 
 # Rows scored per forward pass, which bounds memory however many rows a frame has.
@@ -50,8 +52,8 @@ class PytorchLoadedModel(LoadedModel):
         self._lock = threading.Lock()
         self.output = OutputSpec(
             name=self._name,
-            kind="classification" if self._kind == "classify" else "regression",
-            labels=list(meta["names"]) if self._kind == "classify" else None,
+            kind={"classify": "classification", "tag": "tokens"}.get(self._kind, "regression"),  # type: ignore[arg-type]
+            labels=list(meta["names"]) if self._kind in ("classify", "tag") else None,
         )
 
     @property
@@ -224,6 +226,73 @@ class TextModel(PytorchLoadedModel):
         return np.concatenate(out) if out else np.zeros((0, len(self.output.labels or [])), dtype=np.float32)
 
 
+class TaggerModel(PytorchLoadedModel):
+    """One tag per word of a text. The prediction frame's `{feature}_predictions` is the tags joined by single spaces
+    (the same shape as the snapshot's tags cell, so a row is "right" when the strings are equal), `_words` the words
+    they belong to, `_word_probabilities` each tag's probability, and `_probability` the weakest of those (a sentence is
+    only as certain as its least certain word). A word past `maxTokens` was never read: it gets `O` when the tag set
+    has it, otherwise the first tag, with probability 0, so every text has exactly one tag per word."""
+
+    def __init__(self, net: torch.nn.Module, meta: dict[str, Any]) -> None:
+        super().__init__(net, meta)
+        self._spec = WordsSpec.from_meta(meta)
+        self.input_columns = [meta["textColumn"]]
+
+    @property
+    def spec(self) -> WordsSpec:
+        return self._spec
+
+    @property
+    def predict_batch(self) -> int:
+        return TEXT_PREDICT_BATCH
+
+    def outputs(self, frame: pd.DataFrame) -> np.ndarray:
+        ids = tagging.encode(tagging.clean(frame[self.input_columns[0]]), self._spec)
+        out = [
+            self._forward(torch.from_numpy(ids[start : start + TEXT_PREDICT_BATCH]))
+            for start in range(0, len(ids), TEXT_PREDICT_BATCH)
+        ]
+        shape = (0, self._spec.max_tokens, len(self.output.labels or []))
+        return np.concatenate(out) if out else np.zeros(shape, dtype=np.float32)
+
+    def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
+        labels = self.output.labels or []
+        fallback = labels.index(OUTSIDE) if OUTSIDE in labels else 0
+        texts = tagging.clean(frame[self.input_columns[0]])
+        logits = torch.from_numpy(self.outputs(frame))
+        probabilities = torch.softmax(logits, dim=-1)
+        top_probability, top = probabilities.max(dim=-1)
+        rows: dict[str, list[Any]] = {"predictions": [], "words": [], "word_probabilities": [], "probability": []}
+        for i, value in enumerate(texts):
+            found = words(value)
+            read = min(len(found), self._spec.max_tokens)
+            tags = [labels[j] for j in top[i, :read].tolist()] + [labels[fallback]] * (len(found) - read)
+            confidences = [float(p) for p in top_probability[i, :read].tolist()] + [0.0] * (len(found) - read)
+            rows["predictions"].append(" ".join(tags))
+            rows["words"].append(found)
+            rows["word_probabilities"].append(confidences)
+            rows["probability"].append(min(confidences) if confidences else 1.0)
+        return pd.DataFrame({f"{self._name}_{key}": value for key, value in rows.items()})
+
+    def to_output(
+        self, predictions: pd.DataFrame, *, top_k: int = 100, input_tokens: list[str] | None = None
+    ) -> InferenceOutput:
+        tags = cell_tags(predictions[f"{self._name}_predictions"].iloc[0])
+        found = input_tokens if input_tokens is not None else list(predictions[f"{self._name}_words"].iloc[0])
+        return {
+            "kind": "tokens",
+            "feature": self._name,
+            "tokens": [{"token": word, "tag": tag} for word, tag in zip(found, tags, strict=False)],
+        }
+
+    def golden_prediction(self, predictions: pd.DataFrame, threshold: float = 0.0) -> dict[str, float]:
+        # A tagging has no per-class distribution; the verify script compares the tags themselves (`expected["tags"]`).
+        return {}
+
+    def tags(self, predictions: pd.DataFrame) -> list[str]:
+        return cell_tags(predictions[f"{self._name}_predictions"].iloc[0])
+
+
 class HFTextModel(PytorchLoadedModel):
     """A bring-your-own transformer: the texts go through its own tokenizer, cut and padded to `maxTokens`."""
 
@@ -278,6 +347,11 @@ def build_network(meta: dict[str, Any]) -> torch.nn.Module:
         )
     if meta["inputKind"] == "audio":
         return network.build_audio(meta["model"], len(meta["names"]), pretrained=False)
+    if meta["inputKind"] == "words":
+        words_spec = WordsSpec.from_meta(meta)
+        return network.build_tagger(
+            meta["model"], words_spec.size, len(meta["names"]), float(meta["network"]["dropout"])
+        )
     if meta["inputKind"] == "text":
         spec = TextSpec.from_meta(meta)
         return network.build_text(meta["model"], spec.size, len(meta["names"]), float(meta["network"]["dropout"]))
@@ -288,7 +362,9 @@ def wrap(net: torch.nn.Module, meta: dict[str, Any]) -> PytorchLoadedModel:
     """`net` as the loaded model its `names.json` calls for."""
     if "hfTokenizer" in meta:
         return HFTextModel(net, meta)
-    kinds = {"tabular": TabularModel, "audio": AudioModel, "image": ImageModel, "text": TextModel}
+    kinds = {
+        "tabular": TabularModel, "audio": AudioModel, "image": ImageModel, "text": TextModel, "words": TaggerModel,
+    }  # fmt: skip
     return kinds[meta["inputKind"]](net, meta)
 
 

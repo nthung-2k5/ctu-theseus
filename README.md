@@ -386,6 +386,12 @@ XLM-RoBERTa, ALBERT or ELECTRA encoder, fast tokenizer required), fine-tuned wit
 Python devkit runs that tokenizer (`pip install tokenizers`) and the other five generated clients ship the bare model
 plus `tokenizer.json` and a README that says they do not tokenize. `video` offers `hf_video` the same way.
 
+`token_classification` (one tag per whitespace-separated word, `token_tags` annotations in the API only: there is no web
+tag editor yet) trains on the `pytorch` backend's `tagger_cnn`, from scratch. Its report counts words and, when the tags
+are BIO (`B-PER`, `I-PER`, `O`), whole entities: **Entity F1** is then the run's headline score. The Python devkit tags
+text (`predict` returns `[{token, tag, confidence}]`); the other five generated clients ship the bare model and a README
+that says they do not implement it.
+
 ## Local development
 
 Requires [Bun](https://bun.sh), [uv](https://docs.astral.sh/uv/), Docker, and the

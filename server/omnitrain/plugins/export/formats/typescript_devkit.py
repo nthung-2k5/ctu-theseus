@@ -4,6 +4,7 @@ from omnitrain.plugins.export.readme import (
     DETECTION_LIMITATION,
     HF_TEXT_OTHER_LIMITATION,
     LIMITATION_FULL,
+    TAGS_OTHER_LIMITATION,
     TEXT_LIMITATION,
 )
 
@@ -24,6 +25,7 @@ class TypeScriptDevkit(DevkitFormat):
         "kinds": {
             "audio": {"run_cmd": "bun example.ts <path-to-wav-file>", "limitation": AUDIO_LIMITATION},
             "hf_text": {"limitation": HF_TEXT_OTHER_LIMITATION},
+            "tags": {"limitation": TAGS_OTHER_LIMITATION},
             "text": {"run_cmd": 'bun example.ts "<the text to classify>"', "limitation": TEXT_LIMITATION},
             "detection": {
                 "run_cmd": "bun example.ts <path-to-image>   # one line per box: label, confidence, x y w h",

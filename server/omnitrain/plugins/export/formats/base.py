@@ -51,9 +51,11 @@ class BundleContext:
 
     @property
     def kind(self) -> str:
-        """Which client kind the manifest describes: detection, video, audio, text, hf_text or standard."""
+        """Which client kind the manifest describes: detection, video, audio, text, hf_text, tags or standard."""
         if any(o.get("type") == "detections" for o in self.preprocessing.get("outputs", [])):
             return "detection"
+        if any(o.get("type") == "tags" for o in self.preprocessing.get("outputs", [])):
+            return "tags"
         if any(i.get("type") == "video" for i in self.preprocessing.get("inputs", [])):
             return "video"
         if any(i.get("type") == "audio" and "audioSpectrogram" in i for i in self.preprocessing.get("inputs", [])):

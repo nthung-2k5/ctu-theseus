@@ -101,12 +101,16 @@ def _refuse(hp: PytorchHyperparameters, task: TaskDescriptor, *names: str) -> No
 def compile_pytorch_config(
     task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef | None = None
 ) -> dict[str, Any]:
-    if task.id not in tasks.IMAGE_TASKS | tasks.AUDIO_TASKS | tasks.TEXT_TASKS and task.id not in tasks.TABULAR_TASKS:
+    supported = tasks.IMAGE_TASKS | tasks.AUDIO_TASKS | tasks.TEXT_TASKS | tasks.TOKEN_TASKS
+    if task.id not in supported and task.id not in tasks.TABULAR_TASKS:
         raise ConfigError(f'The PyTorch backend does not support the task "{task.id}"')
     if custom is None and hp.model_id and hp.model_id.startswith("custom:"):
         raise ConfigError(f'Custom model "{hp.model_id}" was not resolved (it may have been removed or disabled)')
     if custom is not None and custom.kind != _CUSTOM_KIND.get(_input_kind(task)):
         raise ConfigError(f'A "{custom.kind}" custom model cannot be used for task "{task.id}"')
+    if task.id in tasks.TOKEN_TASKS:
+        _refuse(hp, task, *_IMAGE_ONLY, *_AUDIO_ONLY)
+        return _compile_tagger(task, ctx, hp)
     if task.id in tasks.IMAGE_TASKS:
         _refuse(hp, task, *_TABULAR_ONLY, *_AUDIO_ONLY, *_TEXT_ONLY)
         return _compile_image(task, ctx, hp, custom)
@@ -277,6 +281,37 @@ def _compile_text(
     }
 
 
+def _compile_tagger(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters) -> dict[str, Any]:
+    """Token classification with the built-in tagger. The tag set is not known here (a snapshot of tags has no class
+    list): `train.py` reads it off the usable rows and writes it, in the model's own order, to names.json."""
+    model_id = hp.model_id or tasks.TAGGER_MODELS[0].id
+    if model_id not in tasks.TAGGER_MODELS_BY_ID:
+        raise ConfigError(f'"{model_id}" is not a token classification model for the task "{task.id}"')
+    if hp.freeze_backbone or hp.pretrained:
+        raise ConfigError("The built-in tagger is trained from scratch, so there is nothing pretrained to freeze")
+
+    d = tasks.TEXT_DEFAULTS
+    return {
+        "backend": "pytorch",
+        "inputKind": "words",
+        "task": "tag",
+        "model": model_id,
+        "textColumn": _column(ctx, "inline_text"),
+        "labelColumn": _column(ctx, "label"),
+        "classNames": [],
+        "text": {
+            "maxTokens": hp.max_tokens or d["max_tokens"],
+            "vocabSize": hp.vocab_size or d["vocab_size"],
+            "minWordCount": hp.min_word_count or d["min_word_count"],
+        },
+        "network": {"dropout": d["dropout"] if hp.dropout is None else hp.dropout},
+        "train": {
+            **_train_block(hp, d, epochs=hp.epochs or d["epochs"]),
+            "useClassWeights": bool(hp.use_class_weights),
+        },
+    }
+
+
 def _compile_hf_text(ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef) -> dict[str, Any]:
     """A bring-your-own transformer. It brings its own tokenizer and vocabulary, so those settings (and the dropout the
     built-in models have) are ignored (the form always sends them), and it is fine-tuned, so the learning rate defaults
@@ -358,7 +393,7 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
         return _tabular_specs(tasks.TABULAR_TASKS[task.id])
     if task.id in tasks.AUDIO_TASKS:
         return _audio_specs()
-    if task.id in tasks.TEXT_TASKS:
+    if task.id in tasks.TEXT_TASKS or task.id in tasks.TOKEN_TASKS:
         return _text_specs()
     return []
 

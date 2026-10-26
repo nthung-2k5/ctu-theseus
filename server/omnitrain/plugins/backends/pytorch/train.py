@@ -34,10 +34,22 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from omnitrain.core import constants as C
 from omnitrain.plugins.backends.base import ConfigError, TrainContext
-from omnitrain.plugins.backends.pytorch import audio, custom, data, hf, images, loop, network, runtime, tabular, text
+from omnitrain.plugins.backends.pytorch import (
+    audio,
+    custom,
+    data,
+    hf,
+    images,
+    loop,
+    network,
+    runtime,
+    tabular,
+    tagging,
+    text,
+)
 from omnitrain.plugins.backends.pytorch.model import PytorchLoadedModel
 from omnitrain.plugins.backends.pytorch.model import load as load_model
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TextSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TextSpec, WordsSpec
 from omnitrain.services import storage
 
 logger = logging.getLogger(__name__)
@@ -442,6 +454,60 @@ def _text_setup(run: TrainContext, df: pd.DataFrame, class_names: list[str]) -> 
     )
 
 
+def _tagger_setup(run: TrainContext, df: pd.DataFrame) -> Setup:
+    """Token classification: each text becomes one id per word, each word has one tag, and the loss is over words."""
+    cfg = run.config
+    hp: dict[str, Any] = cfg["train"]
+    settings: dict[str, Any] = cfg["text"]
+    splits, tag_names = tagging.prepare(
+        df, text_column=cfg["textColumn"], tags_column=cfg["labelColumn"], split_column=C.SPLIT_COLUMN_NAME
+    )
+    for name in ("train", "validation"):
+        if len(splits[name]) == 0:
+            raise ConfigError(
+                f"The {name} split has no usable texts, which training needs. Check the snapshot's split settings "
+                "and that its items are tagged, with one tag per word."
+            )
+    if len(tag_names) < 2:
+        raise ConfigError("The snapshot uses only one tag, so there is nothing to tell apart")
+
+    # Built from the train texts alone, so nothing about validation or test leaks into what the model knows.
+    vocabulary = tagging.fit_vocabulary(
+        splits["train"].texts, max_words=int(settings["vocabSize"]), min_count=int(settings["minWordCount"])
+    )
+    spec = WordsSpec(max_tokens=int(settings["maxTokens"])).with_vocabulary(vocabulary)
+    dropout = float(cfg["network"]["dropout"])
+    meta = {
+        "schemaVersion": 1,
+        "task": cfg["task"],
+        "model": cfg["model"],
+        **spec.to_meta(),
+        "textColumn": cfg["textColumn"],
+        "network": {"dropout": dropout},
+        "outputName": cfg["labelColumn"],
+        # The model's tag order: index i is tag_names[i], because that is how the labels were encoded below.
+        "names": tag_names,
+    }
+    net = network.build_tagger(cfg["model"], spec.size, len(tag_names), dropout)
+
+    index = {tag: i for i, tag in enumerate(tag_names)}
+    labels = {name: tagging.label_ids(part.tags, index, spec.max_tokens) for name, part in splits.items()}
+    weights = None
+    if hp.get("useClassWeights"):
+        seen = labels["train"][labels["train"] >= 0]
+        weights = torch.from_numpy(tabular.balanced_class_weights(seen, len(tag_names)))
+    batch_size = int(hp["batchSize"])
+
+    def loader(split: str, *, shuffle: bool) -> DataLoader:
+        return DataLoader(
+            TensorDataset(torch.from_numpy(tagging.encode(splits[split].texts, spec)), torch.from_numpy(labels[split])),
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+
+    return Setup(net, loader("train", shuffle=True), loader("validation", shuffle=False), loop.Tagging(weights), meta)
+
+
 def train(run: TrainContext) -> PytorchLoadedModel:
     cfg = run.config
     hp: dict[str, Any] = cfg["train"]
@@ -458,6 +524,8 @@ def train(run: TrainContext) -> PytorchLoadedModel:
 
         if cfg["inputKind"] == "tabular":
             setup = _tabular_setup(run, df, class_names)
+        elif cfg["inputKind"] == "words":
+            setup = _tagger_setup(run, df)
         elif cfg["inputKind"] == "text":
             setup = (_hf_text_setup if cfg.get("custom") else _text_setup)(run, df, class_names)
         elif cfg["inputKind"] == "audio":

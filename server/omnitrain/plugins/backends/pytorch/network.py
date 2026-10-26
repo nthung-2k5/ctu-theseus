@@ -191,6 +191,41 @@ class TextCnn(nn.Module):
         return self.fc(self.dropout(torch.cat(pooled, dim=1)))
 
 
+class TaggerCnn(nn.Module):
+    """One tag per word: each word's learned vector is read together with its neighbours by stacked convolutions that
+    keep the length (`TAGGER_KERNEL` wide, padded to match), each with a residual connection so a word's own identity
+    survives the mixing, and a linear layer turns every position into tag logits `[batch, tokens, tags]`. A position
+    beyond the text is padding: its output means nothing and the loss ignores it, and it is zeroed after every layer, so
+    a word's logits do not depend on how far the text was padded."""
+
+    def __init__(self, vocab_size: int, num_tags: int, dropout: float) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, tasks.TEXT_EMBEDDING, padding_idx=0)
+        self.convs = nn.ModuleList(
+            nn.Conv1d(
+                tasks.TEXT_EMBEDDING, tasks.TEXT_EMBEDDING, kernel_size=tasks.TAGGER_KERNEL,
+                padding=tasks.TAGGER_KERNEL // 2,
+            )
+            for _ in range(tasks.TAGGER_LAYERS)
+        )  # fmt: skip
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(tasks.TEXT_EMBEDDING, num_tags)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        present = (tokens != 0).unsqueeze(1)  # [batch, 1, tokens]
+        x = self.dropout(self.embedding(tokens)).transpose(1, 2)  # [batch, embedding, tokens]
+        for conv in self.convs:
+            x = torch.where(present, x + torch.relu(conv(x)), torch.zeros_like(x))
+        return self.fc(self.dropout(x.transpose(1, 2)))
+
+
+def build_tagger(model_id: str, vocab_size: int, num_tags: int, dropout: float) -> nn.Module:
+    """A word tagger over `[batch, max_tokens]` int64 ids with `vocab_size` embedding rows. Trained from scratch."""
+    if model_id not in tasks.TAGGER_MODELS_BY_ID:
+        raise ValueError(f'"{model_id}" is not a token classification model')
+    return TaggerCnn(vocab_size, num_tags, dropout)
+
+
 def build_text(model_id: str, vocab_size: int, num_classes: int, dropout: float) -> nn.Module:
     """A text classifier over `[batch, max_tokens]` int64 ids with `vocab_size` embedding rows (padding and unknown
     included). Every text model is trained from scratch."""

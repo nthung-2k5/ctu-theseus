@@ -14,9 +14,10 @@ assigned each class, so guessing wrong silently mislabels every prediction a gen
 
 from typing import Any
 
+from omnitrain.domain.token_tags import OUTSIDE
 from omnitrain.plugins.backends.pytorch import audio, text
 from omnitrain.plugins.backends.pytorch.runtime import METADATA_FILENAME
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TextSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TextSpec, WordsSpec
 
 
 def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict[str, Any] | None) -> dict[str, Any]:
@@ -28,6 +29,14 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
         output: dict[str, Any] = {
             "name": meta["outputName"],
             "type": "category",
+            "column": meta["outputName"],
+            "classes": list(meta["names"]),
+        }
+    elif meta["task"] == "tag":
+        # One row of logits per word position, `[batch, maxTokens, len(classes)]`; `classes` is the tag order.
+        output = {
+            "name": meta["outputName"],
+            "type": "tags",
             "column": meta["outputName"],
             "classes": list(meta["names"]),
         }
@@ -49,6 +58,9 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
             "inputs": [_audio_input(meta)],
             "outputs": [output],
         }
+
+    if meta["inputKind"] == "words":
+        return {"schemaVersion": 1, "runId": run_id, "inputs": [_words_input(meta)], "outputs": [output]}
 
     if meta["inputKind"] == "text":
         return {"schemaVersion": 1, "runId": run_id, "inputs": [_text_input(meta)], "outputs": [output]}
@@ -105,6 +117,44 @@ def _text_input(meta: dict[str, Any]) -> dict[str, Any]:
             "padId": text.PAD,
             "unknownId": text.UNKNOWN,
             "firstWordId": text.FIRST_WORD,
+            "vocabulary": list(spec.vocab),
+        },
+    }
+
+
+TAG_WORDS_SPLIT = (
+    "A word is a maximal run of characters that are not whitespace, whitespace being what Python's str.split() "
+    "separates on (str.isspace()), so punctuation stays attached to its word. Lower-case the ASCII letters A-Z only "
+    "(add 32 to a code unit between 65 and 90) and change nothing else."
+)
+TAG_WORDS_IDS = (
+    "Take the first maxTokens words. Each becomes its position in vocabulary plus firstWordId, or unknownId when it is "
+    "not in vocabulary (an exact match on the lower-cased word). Pad the end with padId up to maxTokens. The model "
+    "returns one row of tag logits per position: the tag of word i is the highest of row i, for i below the number of "
+    "words read. A word past maxTokens was not read and gets fallbackTag."
+)
+
+
+def _words_input(meta: dict[str, Any]) -> dict[str, Any]:
+    """What turns a text into a tagger's input: a word per id (`tagging.py` is the reference implementation). Every
+    generated client that follows it refuses a `recipe` it does not know."""
+    spec = WordsSpec.from_meta(meta)
+    names = list(meta["names"])
+    return {
+        "name": "tokens",
+        "type": "text",
+        "column": meta["textColumn"],
+        "layout": "[batch, maxTokens] int64",
+        "tagWords": {
+            "recipe": "tag_word_ids_v1",
+            "split": TAG_WORDS_SPLIT,
+            "lowercase": {"from": ord("A"), "to": ord("Z"), "add": 32},
+            "ids": TAG_WORDS_IDS,
+            "maxTokens": spec.max_tokens,
+            "padId": text.PAD,
+            "unknownId": text.UNKNOWN,
+            "firstWordId": text.FIRST_WORD,
+            "fallbackTag": OUTSIDE if OUTSIDE in names else names[0],
             "vocabulary": list(spec.vocab),
         },
     }

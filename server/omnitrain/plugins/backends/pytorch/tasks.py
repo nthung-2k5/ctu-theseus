@@ -188,6 +188,23 @@ TEXT_DEFAULTS = {
 # initialised model would wreck its weights, so it has its own (used when the form leaves the rate unset). The other
 # defaults, including the epoch limit, work for both, because early stopping ends a fine-tune after a few epochs.
 HF_TEXT_LEARNING_RATE = 0.00002
+
+# Token classification: one tag per whitespace-separated word (`domain/token_tags.py`). The built-in tagger is trained
+# from scratch on the same word-id idea as the text classifiers, so it shares their defaults; a bring-your-own
+# transformer is the pretrained option.
+TOKEN_TASKS: frozenset[str] = frozenset({"token_classification"})
+TAGGER_MODELS: tuple[TextModel, ...] = (
+    TextModel(
+        "tagger_cnn", "Word CNN tagger", "Looks up each word's learned vector and reads it together with the four "
+        "words on either side of it, through two convolution layers, to tag it. Trained from scratch and quick: a "
+        "good baseline for a tag set whose words give it away, such as names after \"Mr.\"; a pretrained "
+        "transformer (add one on the Models page) does better with little data.",
+    ),
+)  # fmt: skip
+TAGGER_MODELS_BY_ID: dict[str, TextModel] = {m.id: m for m in TAGGER_MODELS}
+# The convolutions' kernel width (an odd number, so a word sits in the middle of its window) and how many there are.
+TAGGER_KERNEL = 5
+TAGGER_LAYERS = 2
 # The embedding width of each text model: the size of a word's learned vector.
 TEXT_EMBEDDING = 128
 # A convolution filter spans this many words, and there are this many of each size.

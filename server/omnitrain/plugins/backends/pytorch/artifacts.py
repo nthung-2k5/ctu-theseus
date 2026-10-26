@@ -12,6 +12,8 @@ Only ONNX is offered, and it is exported straight from the trained `nn.Module`:
     split and looked up in the vocabulary, see text.py and manifest.py) and returns raw class logits.
     A bring-your-own transformer takes the same kind of tensor named `input_ids`, made by its own tokenizer; its
     attention mask is derived from the padding id inside the graph, so there is still one input.
+  * A tagger takes the same `tokens` tensor (one id per whitespace-separated word, see tagging.py) and returns logits
+    `[batch, max_tokens, tags]`, one row per word position, named `logits`.
   * A table model takes one float tensor `[batch]` per column, named by the column, as RAW values: filling a missing
     value and standardising are inside the graph (so the manifest carries no `numberNormalization`). It returns logits
     for a classifier, or the number in the target's own units for a regressor, in one tensor named by the label column.
@@ -68,7 +70,8 @@ def convert(model: Any, artifact_id: str, workdir: str) -> str:
             "input_names": [AUDIO_INPUT_NAME],
             "dynamic_shapes": ({0: batch},),
         }
-    elif model.meta["inputKind"] == "text":
+    elif model.meta["inputKind"] in ("text", "words"):
+        # A tagger takes the same kind of tensor; it returns `[batch, max_tokens, tags]` logits, not `[batch, classes]`.
         output_name = IMAGE_OUTPUT_NAME
         wrapped = net
         export_args = {

@@ -5,6 +5,7 @@ from omnitrain.plugins.export.readme import (
     AUDIO_APP_LIMITATION,
     DETECTION_LIMITATION,
     HF_TEXT_OTHER_LIMITATION,
+    TAGS_OTHER_LIMITATION,
     TEXT_APP_LIMITATION,
 )
 
@@ -24,6 +25,7 @@ class FlutterApp(AppFormat):
             "detection": {"limitation": DETECTION_LIMITATION},
             "audio": {"limitation": AUDIO_APP_LIMITATION},
             "hf_text": {"limitation": HF_TEXT_OTHER_LIMITATION},
+            "tags": {"limitation": TAGS_OTHER_LIMITATION},
             "text": {"limitation": TEXT_APP_LIMITATION},
         },
     }

@@ -73,6 +73,23 @@ HF_TEXT_OTHER_LIMITATION = (
     "with any Hugging Face `tokenizers` binding, truncating and padding as `hfTokenizer.run` says, and feed the ids to "
     "the model. The client raises a clear error rather than guessing."
 )
+# For a client that implements token classification (a tag for every word).
+TAGS_LIMITATION = (
+    "Token classification: the model gives one tag per word. `predict` is given the text itself (a string, not a "
+    "file), splits it into words at whitespace, looks each of the first `inputs[0].tagWords.maxTokens` words up in "
+    "`tagWords.vocabulary` (ASCII capitals lower-cased, an unknown word is `unknownId`), pads the rest and returns "
+    "`[{token, tag, confidence}]`, one per word. A word past `maxTokens` was not read and gets `tagWords.fallbackTag`. "
+    "The vocabulary was built from the training texts only. Only a model trained by the PyTorch backend carries that "
+    "recipe."
+)
+TAGS_OTHER_LIMITATION = (
+    "This model tags every word of a text, which this client does not implement. `preprocessing.json` has the whole "
+    "recipe (`inputs[0].tagWords`: split at whitespace, look each word up, pad to `maxTokens`; the graph returns "
+    "`[batch, maxTokens, tags]` logits and the tag of word i is the highest of row i, the tags being "
+    "`outputs[0].classes`). The client raises a clear error rather than guessing."
+)
+
+
 APP_LIMITATION = (
     "Only implements preprocessing for **image classification** inputs today. `preprocessing.json` still has the "
     "exact parameters Ludwig used (`inputs[0].ludwigPreprocessing`) for other input types; adapt the client code for "

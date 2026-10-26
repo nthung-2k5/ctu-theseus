@@ -182,6 +182,28 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `text` in `ReadmeVars` only when the manifest carries `textTokens`, so a scikit-learn or Ludwig text model keeps its
   old README and `NotImplementedError`. Change the recipe in `text.py` and you must change all six clients.
   The shared number report lives in `domain/regression_report.py`, beside the classification one.
+  **Token classification is one more input kind, `words` (`tagging.py`, `WordsSpec`, `TaggerModel`)**, and `task: "tag"` in
+  `names.json`. The data side is `domain/token_tags.py`: a text's words are `str.split()` (the same definition the
+  inference route uses), an item's `token_tags` annotation is one tag per word (validated against the text on
+  create and PATCH, `label_structured` a list of strings with no whitespace), and the snapshot's tags cell is those tags
+  joined by single spaces, left empty when they do not fit. The tag set is read off the usable rows of every split (`O`
+  first, then alphabetical) and stored in `names.json`, never taken from `label_classes` (a tags snapshot has no class
+  list, so `compile` writes `classNames: []`). `tagger_cnn` reads one id per word (vocabulary fitted on TRAIN only, ASCII
+  capitals lower-cased, a word never split further, so "Hue," is its own word) through two width-5 convolutions with
+  residual connections, zeroing padded positions so logits do not depend on how far a text was padded; the loss
+  (`loop.Tagging`) is per word and ignores `-100`. A word past `maxTokens` was never read: it gets `O` (else the first tag)
+  with probability 0, so every text has one tag per word. The prediction frame is not the classification one:
+  `{feature}_predictions` is the tags joined by spaces (the cell's shape, so a row is right when strings are equal),
+  with `_words`, `_word_probabilities` and `_probability` (the weakest word), and `golden_prediction` is `{}`. The report
+  (`domain/token_report.py`) counts words in `confusionMatrix`/`perClass` and, only when some tag is `B-x`/`I-x`, adds
+  `entityPrecision/Recall/F1` (exact span and type, `conlleval`) under `overall`; `EntityF1` (`scoring/metrics.py`, order 5)
+  is then the headline, ahead of accuracy, which `O` inflates. ONNX is `tokens` int64 `[batch, maxTokens]` to `logits`
+  `[batch, maxTokens, tags]`; the manifest's output is type `tags` and its input carries `tagWords` (recipe
+  `tag_word_ids_v1`, which a client refuses if it does not know). Only the Python devkit implements it (`predict` returns
+  `[{token, tag, confidence}]`, verified against `expected.json`'s `tags`); the other five clients ship the bare model and
+  a README that says so (`TAGS_OTHER_LIMITATION`). Change `tagging.py` and its recipe and the Python client must change
+  with it, and a client in another language needs a table for `str.split()`'s whitespace first. There is no bring-your-own
+  token classifier yet (`_CUSTOM_KIND` has no entry for it), and the web has no tag editor: tags are written through the API.
 - **A torch ONNX export must be a single file: pass `external_data=False`.** `torch.onnx.export(dynamo=True)` writes the
   weights to a `model.onnx.data` sidecar by default, always, even for a tiny model, and a bundle (and the S3 copy in
   `jobs/export.py`) carries only `model.onnx`, so the shipped graph cannot load. Every backend that calls it sets

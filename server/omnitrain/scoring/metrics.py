@@ -3,6 +3,14 @@
 from omnitrain.scoring.base import HeadlineScore
 
 
+class EntityF1(HeadlineScore):
+    """Tagging with BIO tags: whole entities exactly right. Before accuracy, which `O` words inflate."""
+
+    id = "entityF1"
+    label = "Entity F1"
+    order = 5
+
+
 class Accuracy(HeadlineScore):
     id = "accuracy"
     label = "Accuracy"

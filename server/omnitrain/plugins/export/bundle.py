@@ -80,6 +80,9 @@ def to_bundle_local(expected: dict[str, Any], sample_filename: str) -> bytes:
     if expected.get("detections") is not None:
         # A detector's boxes, besides `predictions` (its best confidence per class): what its verify script compares.
         local["detections"] = expected["detections"]
+    if expected.get("tags") is not None:
+        # A tagger's tag for each word of the sample, besides an empty `predictions`: what its verify script compares.
+        local["tags"] = expected["tags"]
     return dumps(local).encode()
 
 

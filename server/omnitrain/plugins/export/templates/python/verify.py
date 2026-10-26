@@ -7,7 +7,7 @@ Exits non-zero (and prints a diff) if the top-1 class or any shared
 probability disagrees by more than TOLERANCE.
 
 For an object detector the comparison is of boxes, not probabilities: see
-`verify_detections`.
+`verify_detections`. For a tagger it is of the tags, word by word.
 """
 
 from __future__ import annotations
@@ -93,6 +93,20 @@ def main() -> int:
             print("expected.json has no detections to compare against.")
             return 0
         return 0 if verify_detections(expected["detections"], client.detect(sample_path)) else 1
+    if client._kind == "tags":  # noqa: SLF001 — a tagger is given the text and returns one tag per word
+        if expected.get("tags") is None:
+            print("expected.json has no tags to compare against.")
+            return 0
+        found = [w["tag"] for w in client.predict(sample_path.read_text(encoding="utf-8"))]
+        if found != expected["tags"]:
+            for i, (want, got) in enumerate(zip(expected["tags"], found)):
+                if want != got:
+                    print(f"MISMATCH word {i}: expected '{want}', got '{got}'")
+            if len(found) != len(expected["tags"]):
+                print(f"MISMATCH expected {len(expected['tags'])} tags, got {len(found)}")
+            return 1
+        print(f"OK — all {len(found)} tags match the platform's output.")
+        return 0
     if client._is_tabular:  # noqa: SLF001 — verify script, not a library boundary
         with open(sample_path, encoding="utf-8") as f:
             sample_input = json.load(f)

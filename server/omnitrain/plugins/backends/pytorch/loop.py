@@ -124,6 +124,46 @@ class Classification(Objective):
         return {"loss": totals["loss"] / max(seen, 1), "accuracy": totals["correct"] / max(seen, 1)}
 
 
+class Tagging(Objective):
+    """Cross entropy over the tag logits of every word `[batch, tokens, tags]`; a position labelled `IGNORE` (padding,
+    or a word the model does not read) counts for nothing. A pass counts words, not rows, so the epoch's metrics are per
+    word (`run_epoch` only counts rows: `summarise` divides by its own count). Optional per-tag weights steer the
+    optimisation only, as in `Classification`, since `O` outnumbers every other tag."""
+
+    IGNORE = -100
+
+    def __init__(self, tag_weights: torch.Tensor | None = None) -> None:
+        self._weights = tag_weights
+
+    def _flat(self, outputs: torch.Tensor, targets: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return outputs.float().reshape(-1, outputs.shape[-1]), targets.reshape(-1)
+
+    def loss(self, outputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        logits, flat = self._flat(outputs, targets)
+        weights = None if self._weights is None else self._weights.to(outputs.device)
+        # `sum` over `max(words, 1)`, not torch's mean: a batch whose words are all ignored would be 0 / 0.
+        total = torch.nn.functional.cross_entropy(
+            logits, flat, weight=weights, ignore_index=self.IGNORE, reduction="sum"
+        )
+        counted = flat != self.IGNORE
+        scale = weights[flat[counted]].sum() if weights is not None else counted.sum()
+        return total / scale.clamp(min=1)
+
+    def sums(self, outputs: torch.Tensor, targets: torch.Tensor) -> dict[str, float]:
+        logits, flat = self._flat(outputs, targets)
+        counted = flat != self.IGNORE
+        loss = torch.nn.functional.cross_entropy(logits, flat, ignore_index=self.IGNORE, reduction="sum")
+        return {
+            "loss": float(loss.item()),
+            "correct": float(((logits.argmax(dim=1) == flat) & counted).sum().item()),
+            "count": float(counted.sum().item()),
+        }
+
+    def summarise(self, totals: dict[str, float], seen: int) -> dict[str, float]:
+        count = max(totals.get("count", 0.0), 1.0)
+        return {"loss": totals["loss"] / count, "accuracy": totals["correct"] / count}
+
+
 class Regression(Objective):
     """Mean squared error of a number. The network outputs the target in its own units; the error is scaled by the
     target's spread so a column measured in millions trains as well as one measured in fractions. The reported loss

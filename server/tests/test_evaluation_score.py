@@ -80,7 +80,7 @@ class TestScorePlugins:
     def test_the_builtin_scores_are_tried_most_telling_first(self):
         from omnitrain.scoring import list_scores
 
-        assert [s.id for s in list_scores()] == ["accuracy", "map50", "r2", "rmse", "mae"]
+        assert [s.id for s in list_scores()] == ["entityF1", "accuracy", "map50", "r2", "rmse", "mae"]
 
     def test_a_new_class_becomes_a_headline_with_no_other_edit(self, scores):
         from omnitrain.scoring import HeadlineScore

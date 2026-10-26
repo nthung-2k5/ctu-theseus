@@ -4,6 +4,7 @@ from omnitrain.plugins.export.readme import (
     DETECTION_LIMITATION,
     HF_TEXT_LIMITATION,
     LIMITATION_FULL,
+    TAGS_LIMITATION,
     TEXT_LIMITATION,
 )
 
@@ -46,6 +47,11 @@ class PythonDevkit(DevkitFormat):
                 "run_cmd": 'python example.py "<the text to classify>"',
                 "files": "`omnitrain_client.py`, `example.py`, `tokenizer.json`",
                 "limitation": HF_TEXT_LIMITATION,
+            },
+            "tags": {
+                "dependencies": "pip install onnxruntime numpy",
+                "run_cmd": 'python example.py "<the text to tag>"   # one line per word: word, tag, confidence',
+                "limitation": TAGS_LIMITATION,
             },
             "video": {
                 "dependencies": "pip install onnxruntime numpy pillow opencv-python-headless",

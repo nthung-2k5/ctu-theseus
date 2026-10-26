@@ -41,7 +41,7 @@ def compile_(ctx: SnapshotContext = SNAPSHOT, **selection):
 
 
 class TestRegistration:
-    def test_the_backend_trains_images_tables_sounds_and_texts_only(self):
+    def test_the_backend_trains_images_tables_sounds_texts_and_tags_only(self):
         assert get_backend("pytorch") is PytorchBackend
         supported_tasks = (
             "image_classification",
@@ -49,12 +49,12 @@ class TestRegistration:
             "tabular_regression",
             "audio_classification",
             "text_classification",
+            "token_classification",
         )
         for supported in supported_tasks:
             assert PytorchBackend.supports(get_task_descriptor(supported))
         assert not PytorchBackend.supports(get_task_descriptor("video_classification"))
         assert not PytorchBackend.supports(get_task_descriptor("object_detection"))
-        assert not PytorchBackend.supports(get_task_descriptor("token_classification"))
         assert not PytorchBackend.supports(get_task_descriptor("text_generation"))
         assert PytorchBackend in trainable_backends(TASK)
 

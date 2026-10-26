@@ -8,7 +8,7 @@ there: it never consults the compiled config. Pure data (no torch, no PIL).
 
 import math
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Self
 
 
 @dataclass(frozen=True)
@@ -162,15 +162,25 @@ class TextSpec:
         """Rows of the embedding table: the padding and unknown ids plus the vocabulary."""
         return len(self.vocab) + 2
 
-    def with_vocabulary(self, vocab: list[str]) -> "TextSpec":
+    def with_vocabulary(self, vocab: list[str]) -> Self:
         return replace(self, vocab=tuple(vocab))
 
     def to_meta(self) -> dict[str, Any]:
         return {"inputKind": "text", "maxTokens": self.max_tokens, "vocabulary": list(self.vocab)}
 
     @classmethod
-    def from_meta(cls, meta: dict[str, Any]) -> "TextSpec":
+    def from_meta(cls, meta: dict[str, Any]) -> Self:
         return cls(max_tokens=int(meta["maxTokens"]), vocab=tuple(str(w) for w in meta.get("vocabulary", ())))
+
+
+@dataclass(frozen=True)
+class WordsSpec(TextSpec):
+    """A text as the tagger sees it: one id per whitespace-separated word (`tagging.py`), in the same vocabulary layout
+    as a `TextSpec` (0 padding, 1 unknown, vocabulary position plus two) but a different recipe, so another
+    `inputKind`: a word is never split further, and the model gives one tag per word."""
+
+    def to_meta(self) -> dict[str, Any]:
+        return {**super().to_meta(), "inputKind": "words"}
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,8 @@ value per input column) for a tabular model — e.g.:
 
 An object detector prints one line per box; a video model takes a video file path and an audio
 model an audio file path (a WAV file; other formats need `pip install soundfile`). A text model takes
-the text itself: `python example.py "what a great film"`.
+the text itself: `python example.py "what a great film"`. A tagger takes the text too and prints one line per
+word: the word, its tag and the model's confidence.
 """
 
 import json
@@ -33,7 +34,10 @@ if __name__ == "__main__":
     else:
         predictions = client.predict(sys.argv[1])
 
-    if isinstance(predictions, list):  # an object detector: `[{label, confidence, box}]`
+    if isinstance(predictions, list) and client._kind == "tags":  # noqa: SLF001 — `[{token, tag, confidence}]`
+        for word in predictions:
+            print(f"{word['token']}\t{word['tag']}\t{word['confidence']:.4f}")
+    elif isinstance(predictions, list):  # an object detector: `[{label, confidence, box}]`
         for detection in predictions:
             box = detection["box"]
             print(

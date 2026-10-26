@@ -17,6 +17,7 @@ Submodules:
   data.py       snapshot parquet -> local image files and labelled samples per split (pandas, PIL)
   audio.py      audio file -> log-mel spectrogram, the one recipe (numpy, scipy)
   text.py       text -> word ids, the one recipe: tokenizer, train-only vocabulary, padding (numpy, pandas)
+  tagging.py    token classification's data: a text's whitespace words -> ids, one tag per word (numpy, pandas)
   tabular.py    snapshot parquet -> feature matrix and targets, train-only statistics (numpy, pandas)
   network.py    builds a torchvision model with a fresh head, the table perceptron, or a text model
   loop.py       heartbeats, the optimizer step (schedule, clipping, mixed precision), the objective and `fit`
@@ -35,7 +36,7 @@ here, and none of them imports torch at module level, so listing this backend ne
 import torch, so they are imported lazily, inside the classmethods that need them.
 
 Licence: torchvision and its pretrained ImageNet weights are BSD-3-Clause. Not offered yet: built-in pretrained text
-models (a Hugging Face encoder is brought, not bundled), token classification, bring-your-own models other than
+models (a Hugging Face encoder is brought, not bundled), a bring-your-own token classifier, bring-your-own models other than
 Hugging Face image and text classifiers, categorical table columns.
 """
 
@@ -66,8 +67,10 @@ from omnitrain.plugins.backends.pytorch.tasks import (
     IMAGE_TASKS,
     TABULAR_MODELS,
     TABULAR_TASKS,
+    TAGGER_MODELS,
     TEXT_MODELS,
     TEXT_TASKS,
+    TOKEN_TASKS,
 )
 from omnitrain.schemas.common import ParamSpec
 
@@ -97,7 +100,13 @@ class PytorchBackend(TrainerBackend):
 
     @classmethod
     def supports(cls, task: TaskDescriptor) -> bool:
-        return task.id in IMAGE_TASKS or task.id in TABULAR_TASKS or task.id in AUDIO_TASKS or task.id in TEXT_TASKS
+        return (
+            task.id in IMAGE_TASKS
+            or task.id in TABULAR_TASKS
+            or task.id in AUDIO_TASKS
+            or task.id in TEXT_TASKS
+            or task.id in TOKEN_TASKS
+        )
 
     @classmethod
     def models(cls, task: TaskDescriptor) -> list[ModelChoice]:
@@ -114,6 +123,8 @@ class PytorchBackend(TrainerBackend):
             ]
         if task.id in TEXT_TASKS:
             return [ModelChoice(id=m.id, label=m.label, description=m.description) for m in TEXT_MODELS]
+        if task.id in TOKEN_TASKS:
+            return [ModelChoice(id=m.id, label=m.label, description=m.description) for m in TAGGER_MODELS]
         return []
 
     @classmethod

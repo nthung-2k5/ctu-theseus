@@ -94,6 +94,10 @@ def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_
             # `predictions` stays the flat `{label: value}` dict every client parses (here the best confidence per
             # class); the boxes themselves ride along for the devkits that can check them.
             golden["detections"] = model.to_output(predictions)["detections"]
+        output = model.to_output(predictions)
+        if output["kind"] == "tokens":
+            # `predictions` is empty (no distribution over classes); the tag of each word is what a client must match.
+            golden["tags"] = [t["tag"] for t in output["tokens"]]
         return golden
     except (AttributeError, TypeError, KeyError, IndexError, NameError):
         # A bug in this function, not a data problem: surface it. These are exactly the failures
