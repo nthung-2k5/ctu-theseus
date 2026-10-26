@@ -90,9 +90,11 @@ The `ruby/` templates go under `templates/ruby/`.
 
 - **Class order comes from the trained model**, carried in `ctx.preprocessing` and `ctx.labels`, never from the
   `label_classes` table. Never re-derive it in a format.
-- **Generated clients only implement classification and regression.** `supports_generated_clients(task)` in
-  `_kits.py` refuses detectors (they need NMS and an undone letterbox) and video. Keep that check unless your
-  client really implements the missing steps.
+- **A client only runs the kinds it implements.** `client_kind(task)` in `_kits.py` says whether a task is
+  `standard` (classification, regression), `detection` (NMS and an undone letterbox) or `video` (decode, sample
+  clips); `DevkitFormat.handles` lists the kinds a devkit's client really implements, and `supports` offers it for
+  those only. Today every devkit and app handles `standard` and `detection`; only the Python devkit also handles `video`. Add a kind
+  to `handles` only together with the client code, its `kinds` README text and a verify branch.
 - **Looking a format up by id is not filtered.** `find_export_format` and `get_export_format` must keep working
   after an admin switches a format off, so an export that was already queued can finish. Admin switches apply
   only to `list_export_formats` and to validating new work.

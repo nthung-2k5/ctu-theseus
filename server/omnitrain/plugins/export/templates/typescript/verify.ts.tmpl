@@ -7,10 +7,59 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { OmniTrainClient } from './client'
+import { type Detection, OmniTrainClient } from './client'
 
 const TOLERANCE = 1e-3
 const expectedPath = join(import.meta.dirname, 'expected.json')
+
+// Object detection. The platform's prediction comes from the original weights through Ultralytics, which pads an
+// image only up to a multiple of 32 before the network; this client pads to the full square the exported graph was
+// built for. The same box therefore comes out a little different, and a borderline one may appear in only one list.
+// So only confident boxes are held to account, and by overlap and a loose confidence margin, not exact numbers.
+const CONFIDENT = 0.35 // a box at least this confident on either side must have a partner on the other
+const MIN_IOU = 0.7
+const CONFIDENCE_MARGIN = 0.1
+
+function iou(a: Detection['box'], b: Detection['box']): number {
+  const width = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)
+  const height = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y)
+  const intersection = Math.max(width, 0) * Math.max(height, 0)
+  const union = a.w * a.h + b.w * b.h - intersection
+  return union > 0 ? intersection / union : 0
+}
+
+/** Whether `others` has a box of the same class that overlaps enough and is about as confident. */
+function hasPartner(box: Detection, others: Detection[]): boolean {
+  const same = others.filter((o) => o.label === box.label)
+  if (same.length === 0) return false
+  const best = same.reduce((a, b) => (iou(box.box, b.box) > iou(box.box, a.box) ? b : a))
+  return iou(box.box, best.box) >= MIN_IOU && Math.abs(best.confidence - box.confidence) <= CONFIDENCE_MARGIN
+}
+
+function verifyDetections(expected: Detection[], actual: Detection[]): boolean {
+  let ok = true
+  const sides: [Detection[], string, Detection[], string][] = [
+    [expected, 'platform', actual, 'this client'],
+    [actual, 'this client', expected, 'the platform'],
+  ]
+  for (const [source, side, other, otherName] of sides) {
+    for (const box of source) {
+      if (box.confidence >= CONFIDENT && !hasPartner(box, other)) {
+        ok = false
+        const b = box.box
+        console.log(
+          `MISMATCH ${side} found '${box.label}' (${box.confidence.toFixed(2)}) at x=${b.x.toFixed(3)} y=${b.y.toFixed(3)} ` +
+            `w=${b.w.toFixed(3)} h=${b.h.toFixed(3)}; ${otherName} has no matching box`,
+        )
+      }
+    }
+  }
+  if (ok) {
+    const confident = expected.filter((box) => box.confidence >= CONFIDENT).length
+    console.log(`OK — ${confident} confident box(es) match the platform's output (IoU >= ${MIN_IOU}).`)
+  }
+  return ok
+}
 
 if (!existsSync(expectedPath)) {
   console.log('No expected.json in this bundle — nothing to verify against.')
@@ -20,14 +69,22 @@ if (!existsSync(expectedPath)) {
 const expected = JSON.parse(readFileSync(expectedPath, 'utf-8')) as {
   sampleFile: string
   predictions: Record<string, number>
+  detections?: Detection[]
 }
 const samplePath = join(import.meta.dirname, expected.sampleFile)
 
 const client = new OmniTrainClient()
+if (client.isDetector) {
+  if (!expected.detections) {
+    console.log('expected.json has no detections to compare against.')
+    process.exit(0)
+  }
+  process.exit(verifyDetections(expected.detections, await client.detect(samplePath)) ? 0 : 1)
+}
 const sampleInput: string | Record<string, number> = client.isTabular
   ? JSON.parse(readFileSync(samplePath, 'utf-8'))
   : samplePath
-const actual = await client.predict(sampleInput, Object.keys(expected.predictions).length || 5)
+const actual = (await client.predict(sampleInput, Object.keys(expected.predictions).length || 5)) as Record<string, number>
 
 const entries = Object.entries(expected.predictions)
 if (entries.length === 0) {

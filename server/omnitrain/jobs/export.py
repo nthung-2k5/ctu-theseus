@@ -75,10 +75,6 @@ def _build_golden_sample(
     """
     try:
         model = backend.load(model_dir)
-        if model.output.kind == "detections":
-            # `expected.json` embeds a flat `{label: value}` dict that every devkit parses; a list of boxes does
-            # not fit it, and no devkit or app supports detection, so there is nothing to verify a client against.
-            return None
         df = pd.read_parquet(storage.s3fs_path(C.BUCKET_DATASETS, dataset_key))
         rows = (
             df[df[C.SPLIT_COLUMN_NAME] == "test"]
@@ -96,7 +92,7 @@ def _build_golden_sample(
         input_column, input_value = _shape_input_value(
             model.input_columns, sample.iloc[0]
         )
-        return {
+        golden: dict[str, Any] = {
             "schemaVersion": 1,
             "inputColumn": input_column,
             "inputValue": input_value,
@@ -104,6 +100,11 @@ def _build_golden_sample(
             "outputType": model.output.kind,
             "predictions": predicted,
         }
+        if model.output.kind == "detections":
+            # `predictions` stays the flat `{label: value}` dict every client parses (here the best confidence per
+            # class); the boxes themselves ride along for the devkits that can check them.
+            golden["detections"] = model.to_output(predictions)["detections"]
+        return golden
     except (AttributeError, TypeError, KeyError, IndexError, NameError):
         # A bug in this function, not a data problem: surface it. These are exactly the failures
         # that used to vanish into `return None`, silently disabling every bundle verify script.

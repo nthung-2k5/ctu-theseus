@@ -21,7 +21,10 @@
       <span id="dropzone-label">Choose an image, or drag one here</span>
       <input id="file-input" type="file" accept="image/*" hidden />
     </label>
-    <img id="preview" hidden alt="preview" />
+    <div class="frame">
+      <img id="preview" hidden alt="preview" />
+      <canvas id="overlay" hidden></canvas>
+    </div>
 
     <section id="results" hidden>
       <h2>Predictions</h2>

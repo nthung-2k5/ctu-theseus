@@ -9,7 +9,9 @@
 // training time — see README.md.
 
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -52,6 +54,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   Uint8List? _previewBytes;
   Map<String, double>? _predictions;
+  // An object detector's result: the boxes, and the picture's size to lay them over it.
+  List<Detection>? _detections;
+  double? _imageAspect;
   bool _predicting = false;
 
   @override
@@ -81,16 +86,31 @@ class _HomeScreenState extends State<HomeScreen> {
       _previewBytes = bytes;
       _predicting = true;
       _predictions = null;
+      _detections = null;
     });
 
     try {
-      final predictions = await _client.predict(bytes);
-      setState(() => _predictions = predictions);
+      if (_client.isDetector) {
+        final detections = await _client.detect(bytes);
+        final image = await decodeImageFromBytes(bytes);
+        setState(() {
+          _detections = detections;
+          _imageAspect = image.width / image.height;
+        });
+      } else {
+        final predictions = await _client.predict(bytes);
+        setState(() => _predictions = predictions);
+      }
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
       setState(() => _predicting = false);
     }
+  }
+
+  Future<ui.Image> decodeImageFromBytes(Uint8List bytes) async {
+    final codec = await ui.instantiateImageCodec(bytes);
+    return (await codec.getNextFrame()).image;
   }
 
   @override
@@ -119,7 +139,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 4),
                         const Text('Runs fully on-device — nothing is uploaded.', style: TextStyle(fontSize: 12, color: Colors.grey)),
                         const SizedBox(height: 16),
-                        if (_previewBytes != null)
+                        if (_previewBytes != null && _detections != null && _imageAspect != null)
+                          // The boxes are fractions of the picture, so the picture is shown whole, at its own aspect.
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: AspectRatio(
+                              aspectRatio: _imageAspect!,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.memory(_previewBytes!, fit: BoxFit.fill),
+                                  CustomPaint(painter: _BoxPainter(_detections!)),
+                                ],
+                              ),
+                            ),
+                          )
+                        else if (_previewBytes != null)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(12),
                             child: Image.memory(_previewBytes!, height: 220, fit: BoxFit.cover),
@@ -143,6 +178,29 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 24),
                         if (_predicting) const CircularProgressIndicator(),
+                        if (_detections != null)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('Detections', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  const SizedBox(height: 8),
+                                  if (_detections!.isEmpty) const Text('No objects found.'),
+                                  for (final d in _detections!)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 2),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [Text(d.label), Text(d.confidence.toStringAsFixed(4))],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
                         if (_predictions != null)
                           Card(
                             child: Padding(
@@ -173,6 +231,35 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// Draws a detector's boxes, given as fractions of the picture, over the picture.
+class _BoxPainter extends CustomPainter {
+  _BoxPainter(this.detections);
+
+  final List<Detection> detections;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..color = const Color(0xFF1864AB);
+    final fill = Paint()..color = const Color(0xFF1864AB);
+    for (final d in detections) {
+      final rect = Rect.fromLTWH(d.box.x * size.width, d.box.y * size.height, d.box.w * size.width, d.box.h * size.height);
+      canvas.drawRect(rect, stroke);
+      final text = TextPainter(
+        text: TextSpan(text: '${d.label} ${d.confidence.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      canvas.drawRect(Rect.fromLTWH(rect.left, rect.top, text.width + 8, text.height + 4), fill);
+      text.paint(canvas, Offset(rect.left + 4, rect.top + 2));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BoxPainter oldDelegate) => oldDelegate.detections != detections;
+}
+
 /// Self-check screen: runs the bundle's golden sample through this app's
 /// own [OmniTrainClient] and diffs the result against expected.json, the
 /// platform's own prediction for that sample.
@@ -187,6 +274,50 @@ class VerifyScreen extends StatefulWidget {
 
 class _VerifyScreenState extends State<VerifyScreen> {
   static const _tolerance = 1e-3;
+
+  // Object detection. The platform's prediction comes from the original weights through Ultralytics, which pads an
+  // image only up to a multiple of 32 before the network; this client pads to the full square the exported graph was
+  // built for. The same box therefore comes out a little different, and a borderline one may appear in only one list.
+  // So only confident boxes are held to account, and by overlap and a loose confidence margin, not exact numbers.
+  static const _confident = 0.35; // a box at least this confident on either side must have a partner on the other
+  static const _minIou = 0.7;
+  static const _confidenceMargin = 0.1;
+
+  static double _iou(Box a, Box b) {
+    final width = math.min(a.x + a.w, b.x + b.w) - math.max(a.x, b.x);
+    final height = math.min(a.y + a.h, b.y + b.h) - math.max(a.y, b.y);
+    final intersection = math.max(width, 0) * math.max(height, 0);
+    final union = a.w * a.h + b.w * b.h - intersection;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  /// Whether [others] has a box of the same class that overlaps enough and is about as confident.
+  static bool _hasPartner(Detection box, List<Detection> others) {
+    final same = others.where((o) => o.label == box.label).toList();
+    if (same.isEmpty) return false;
+    final best = same.reduce((a, b) => _iou(box.box, b.box) > _iou(box.box, a.box) ? b : a);
+    return _iou(box.box, best.box) >= _minIou && (best.confidence - box.confidence).abs() <= _confidenceMargin;
+  }
+
+  /// Verification lines for a detector, and whether it passed.
+  static (List<String>, bool) verifyDetections(List<Detection> expected, List<Detection> actual) {
+    final lines = <String>[];
+    for (final (source, side, other, otherName) in [
+      (expected, 'platform', actual, 'this app'),
+      (actual, 'this app', expected, 'the platform'),
+    ]) {
+      for (final box in source) {
+        if (box.confidence >= _confident && !_hasPartner(box, other)) {
+          lines.add("MISMATCH $side found '${box.label}' (${box.confidence.toStringAsFixed(2)}); $otherName has no matching box");
+        }
+      }
+    }
+    if (lines.isEmpty) {
+      final confident = expected.where((b) => b.confidence >= _confident).length;
+      lines.add("OK — $confident confident box(es) match the platform's output (IoU >= $_minIou).");
+    }
+    return (lines, lines.length == 1 && lines.first.startsWith('OK'));
+  }
 
   bool _running = true;
   List<String> _lines = [];
@@ -204,6 +335,36 @@ class _VerifyScreenState extends State<VerifyScreen> {
     try {
       final expectedJson = await rootBundle.loadString('assets/expected.json');
       final expected = jsonDecode(expectedJson) as Map<String, dynamic>;
+      if (widget.client.isDetector) {
+        final detections = expected['detections'] as List?;
+        if (detections == null) {
+          lines.add('expected.json has no detections to compare against.');
+        } else {
+          final platform = [
+            for (final d in detections.cast<Map<String, dynamic>>())
+              Detection(
+                d['label'] as String,
+                (d['confidence'] as num).toDouble(),
+                Box(
+                  ((d['box'] as Map)['x'] as num).toDouble(),
+                  ((d['box'] as Map)['y'] as num).toDouble(),
+                  ((d['box'] as Map)['w'] as num).toDouble(),
+                  ((d['box'] as Map)['h'] as num).toDouble(),
+                ),
+              ),
+          ];
+          final sampleBytes = (await rootBundle.load('assets/${expected['sampleFile'] as String}')).buffer.asUint8List();
+          final (found, passed) = verifyDetections(platform, await widget.client.detect(sampleBytes));
+          lines.addAll(found);
+          ok = passed;
+        }
+        setState(() {
+          _lines = lines;
+          _ok = ok;
+          _running = false;
+        });
+        return;
+      }
       final expectedPredictions = (expected['predictions'] as Map<String, dynamic>).map(
         (k, v) => MapEntry(k, (v as num).toDouble()),
       );

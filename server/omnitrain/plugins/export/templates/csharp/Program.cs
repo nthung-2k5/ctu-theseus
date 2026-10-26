@@ -18,6 +18,17 @@ if (args[0] == "verify")
     return Verify(client);
 }
 
+if (client.IsDetector)
+{
+    var found = client.Detect(args[0]);
+    foreach (var d in found)
+    {
+        Console.WriteLine($"{d.Label}: {d.Confidence:F4}  x={d.Box.X:F3} y={d.Box.Y:F3} w={d.Box.W:F3} h={d.Box.H:F3}");
+    }
+    if (found.Count == 0) Console.WriteLine("No objects found.");
+    return 0;
+}
+
 var predictions = client.Predict(args[0]);
 foreach (var (className, probability) in predictions)
 {
@@ -40,6 +51,16 @@ static int Verify(OmniTrainClient client)
     var expected = JsonSerializer.Deserialize<ExpectedJson>(File.ReadAllText(expectedPath), opts)
         ?? throw new InvalidDataException("expected.json is empty or invalid");
     var samplePath = Path.Combine(here, expected.SampleFile);
+
+    if (client.IsDetector)
+    {
+        if (expected.Detections is null)
+        {
+            Console.WriteLine("expected.json has no detections to compare against.");
+            return 0;
+        }
+        return VerifyDetections(expected.Detections, client.Detect(samplePath)) ? 0 : 1;
+    }
 
     if (expected.Predictions.Count == 0)
     {
@@ -83,8 +104,58 @@ static int Verify(OmniTrainClient client)
     return 1;
 }
 
+// Object detection. The platform's prediction comes from the original weights through Ultralytics, which pads an
+// image only up to a multiple of 32 before the network; this client pads to the full square the exported graph was
+// built for. The same box therefore comes out a little different, and a borderline one may appear in only one list.
+// So only confident boxes are held to account, and by overlap and a loose confidence margin, not exact numbers.
+static bool VerifyDetections(List<Detection> expected, List<Detection> actual)
+{
+    const double confident = 0.35; // a box at least this confident on either side must have a partner on the other
+    const double minIou = 0.7;
+    const double confidenceMargin = 0.1;
+
+    static double Iou(Box a, Box b)
+    {
+        var width = Math.Min(a.X + a.W, b.X + b.W) - Math.Max(a.X, b.X);
+        var height = Math.Min(a.Y + a.H, b.Y + b.H) - Math.Max(a.Y, b.Y);
+        var intersection = Math.Max(width, 0) * Math.Max(height, 0);
+        var union = (a.W * a.H) + (b.W * b.H) - intersection;
+        return union > 0 ? intersection / union : 0;
+    }
+
+    bool HasPartner(Detection box, List<Detection> others)
+    {
+        var same = others.Where(o => o.Label == box.Label).ToList();
+        if (same.Count == 0) return false;
+        var best = same.OrderByDescending(o => Iou(box.Box, o.Box)).First();
+        return Iou(box.Box, best.Box) >= minIou && Math.Abs(best.Confidence - box.Confidence) <= confidenceMargin;
+    }
+
+    var ok = true;
+    foreach (var (source, side, other, otherName) in new[]
+    {
+        (expected, "platform", actual, "this client"),
+        (actual, "this client", expected, "the platform"),
+    })
+    {
+        foreach (var box in source.Where(b => b.Confidence >= confident && !HasPartner(b, other)))
+        {
+            ok = false;
+            Console.WriteLine(
+                $"MISMATCH {side} found '{box.Label}' ({box.Confidence:F2}) at x={box.Box.X:F3} y={box.Box.Y:F3} " +
+                $"w={box.Box.W:F3} h={box.Box.H:F3}; {otherName} has no matching box");
+        }
+    }
+    if (ok)
+    {
+        Console.WriteLine($"OK — {expected.Count(b => b.Confidence >= confident)} confident box(es) match the platform's output (IoU >= {minIou}).");
+    }
+    return ok;
+}
+
 file sealed class ExpectedJson
 {
     public string SampleFile { get; init; } = "";
     public Dictionary<string, double> Predictions { get; init; } = [];
+    public List<Detection>? Detections { get; init; }
 }

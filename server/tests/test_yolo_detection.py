@@ -613,20 +613,47 @@ class TestManifestAndExport:
         assert output["classes"] == CLASSES
         assert output["yoloOutput"]["nonMaxSuppression"] == "required"
 
-    def test_only_the_plain_onnx_format_is_offered_for_detection(self):
+    def test_the_plain_onnx_format_and_every_client_are_offered_for_detection(self):
         ids = [f.id for f in list_export_formats(TASK, YoloBackend)]
-        assert ids == ["onnx"]  # no devkit or app can run a detector, and torch_export is not a YOLO artifact
+        # Every generated client decodes a detector's output; torch_export is not a YOLO artifact.
+        assert ids == [
+            "onnx",
+            "python_devkit",
+            "typescript_devkit",
+            "csharp_devkit",
+            "java_devkit",
+            "pwa_app",
+            "flutter_app",
+        ]
 
     def test_classification_still_offers_the_devkits_and_apps(self):
         ids = [f.id for f in list_export_formats(get_task_descriptor("image_classification"), YoloBackend)]
         assert {"onnx", "python_devkit", "typescript_devkit", "csharp_devkit", "java_devkit"} <= set(ids)
         assert {"pwa_app", "flutter_app"} <= set(ids)
 
-    def test_the_golden_sample_is_skipped_for_a_detector(self, monkeypatch):
+    def test_the_golden_sample_of_a_detector_carries_its_boxes(self, monkeypatch):
+        from omnitrain.core import constants as C
         from omnitrain.jobs import export as export_job
 
-        class Detector:
-            output = SimpleNamespace(kind="detections")
+        boxes = [{"label": "cat", "confidence": 0.8, "box": {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4}}]
 
+        class Detector:
+            output = SimpleNamespace(kind="detections", name="boxes")
+            input_columns = ["image"]
+
+            def predict(self, frame):
+                return frame
+
+            def golden_prediction(self, predictions, threshold=0.0):
+                return {"cat": 0.8}
+
+            def to_output(self, predictions):
+                return {"kind": "detections", "detections": boxes}
+
+        frame = pd.DataFrame({"image": ["s3://theseus-datasets/p/a.jpg"], C.SPLIT_COLUMN_NAME: ["test"]})
         monkeypatch.setattr(YoloBackend, "load", classmethod(lambda cls, model_dir: Detector()))
-        assert export_job._build_golden_sample(YoloBackend, "dir", "key") is None  # type: ignore[arg-type]
+        monkeypatch.setattr(export_job.pd, "read_parquet", lambda path: frame)
+        monkeypatch.setattr(export_job.storage, "s3fs_path", lambda bucket, key: "unused")
+        golden = export_job._build_golden_sample(YoloBackend, "dir", "key")  # type: ignore[arg-type]
+        assert golden["detections"] == boxes and golden["predictions"] == {"cat": 0.8}
+        assert golden["outputType"] == "detections" and golden["inputValue"] == "s3://theseus-datasets/p/a.jpg"

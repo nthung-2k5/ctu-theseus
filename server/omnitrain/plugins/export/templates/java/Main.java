@@ -6,12 +6,24 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 public final class Main {
     private static final double TOLERANCE = 1e-3;
+
+    // Object detection. The platform's prediction comes from the original weights through Ultralytics, which pads an
+    // image only up to a multiple of 32 before the network; this client pads to the full square the exported graph
+    // was built for. The same box therefore comes out a little different, and a borderline one may appear in only one
+    // list. So only confident boxes are held to account, and by overlap and a loose confidence margin, not exact
+    // numbers.
+    private static final double CONFIDENT = 0.35; // a box at least this confident on either side must have a partner on the other
+    private static final double MIN_IOU = 0.7;
+    private static final double CONFIDENCE_MARGIN = 0.1;
 
     private Main() {}
 
@@ -26,9 +38,57 @@ public final class Main {
             if ("verify".equals(args[0])) {
                 System.exit(verify(client));
             }
+            if (client.isDetector()) {
+                List<OmniTrainClient.Detection> found = client.detect(Path.of(args[0]));
+                for (OmniTrainClient.Detection d : found) {
+                    OmniTrainClient.Box b = d.box();
+                    System.out.printf("%s: %.4f  x=%.3f y=%.3f w=%.3f h=%.3f%n", d.label(), d.confidence(), b.x(), b.y(), b.w(), b.h());
+                }
+                if (found.isEmpty()) System.out.println("No objects found.");
+                return;
+            }
             Map<String, Double> predictions = client.predict(Path.of(args[0]), 5);
             predictions.forEach((className, probability) -> System.out.printf("%s: %.4f%n", className, probability));
         }
+    }
+
+    private static double iou(OmniTrainClient.Box a, OmniTrainClient.Box b) {
+        double width = Math.min(a.x() + a.w(), b.x() + b.w()) - Math.max(a.x(), b.x());
+        double height = Math.min(a.y() + a.h(), b.y() + b.h()) - Math.max(a.y(), b.y());
+        double intersection = Math.max(width, 0) * Math.max(height, 0);
+        double union = a.w() * a.h() + b.w() * b.h() - intersection;
+        return union > 0 ? intersection / union : 0;
+    }
+
+    /** Whether {@code others} has a box of the same class that overlaps enough and is about as confident. */
+    private static boolean hasPartner(OmniTrainClient.Detection box, List<OmniTrainClient.Detection> others) {
+        return others.stream()
+            .filter(o -> o.label().equals(box.label()))
+            .max(Comparator.comparingDouble(o -> iou(box.box(), o.box())))
+            .map(best -> iou(box.box(), best.box()) >= MIN_IOU && Math.abs(best.confidence() - box.confidence()) <= CONFIDENCE_MARGIN)
+            .orElse(false);
+    }
+
+    private static boolean verifyDetections(List<OmniTrainClient.Detection> expected, List<OmniTrainClient.Detection> actual) {
+        boolean ok = true;
+        for (int side = 0; side < 2; side++) {
+            List<OmniTrainClient.Detection> source = side == 0 ? expected : actual;
+            List<OmniTrainClient.Detection> other = side == 0 ? actual : expected;
+            for (OmniTrainClient.Detection box : source) {
+                if (box.confidence() >= CONFIDENT && !hasPartner(box, other)) {
+                    ok = false;
+                    OmniTrainClient.Box b = box.box();
+                    System.out.printf("MISMATCH %s found '%s' (%.2f) at x=%.3f y=%.3f w=%.3f h=%.3f; %s has no matching box%n",
+                        side == 0 ? "platform" : "this client", box.label(), box.confidence(), b.x(), b.y(), b.w(), b.h(),
+                        side == 0 ? "this client" : "the platform");
+                }
+            }
+        }
+        if (ok) {
+            long confident = expected.stream().filter(d -> d.confidence() >= CONFIDENT).count();
+            System.out.printf("OK — %d confident box(es) match the platform's output (IoU >= %s).%n", confident, MIN_IOU);
+        }
+        return ok;
     }
 
     private static int verify(OmniTrainClient client) throws Exception {
@@ -42,6 +102,22 @@ public final class Main {
         JsonNode expected = mapper.readTree(expectedPath.toFile());
         JsonNode expectedPredictions = expected.get("predictions");
         Path samplePath = Path.of(expected.get("sampleFile").asText());
+
+        if (client.isDetector()) {
+            JsonNode detections = expected.get("detections");
+            if (detections == null || detections.isNull()) {
+                System.out.println("expected.json has no detections to compare against.");
+                return 0;
+            }
+            List<OmniTrainClient.Detection> platform = new ArrayList<>();
+            for (JsonNode d : detections) {
+                JsonNode b = d.get("box");
+                platform.add(new OmniTrainClient.Detection(
+                    d.get("label").asText(), d.get("confidence").asDouble(),
+                    new OmniTrainClient.Box(b.get("x").asDouble(), b.get("y").asDouble(), b.get("w").asDouble(), b.get("h").asDouble())));
+            }
+            return verifyDetections(platform, client.detect(samplePath)) ? 0 : 1;
+        }
 
         if (expectedPredictions.size() == 0) {
             System.out.println("expected.json has no predictions to compare against.");

@@ -39,8 +39,22 @@ class BundleContext:
     @property
     def readme_vars(self) -> ReadmeVars:
         return ReadmeVars(
-            self.run_name, self.task_label, self.format_label, self.artifact_filename, self.golden is not None
+            self.run_name,
+            self.task_label,
+            self.format_label,
+            self.artifact_filename,
+            self.golden is not None,
+            self.kind,
         )
+
+    @property
+    def kind(self) -> str:
+        """Which client kind the manifest describes: detection, video or standard."""
+        if any(o.get("type") == "detections" for o in self.preprocessing.get("outputs", [])):
+            return "detection"
+        if any(i.get("type") == "video" for i in self.preprocessing.get("inputs", [])):
+            return "video"
+        return "standard"
 
     def add(self, path: str, data: str | bytes, compress: bool = True) -> None:
         self.files.append(BundleFile(path, data.encode() if isinstance(data, str) else data, compress))

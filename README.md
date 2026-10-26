@@ -278,7 +278,11 @@ that file (Ludwig's `idx2str`, YOLO's `names`), **never** from the `label_classe
 Postgres has no knowledge of the index order a run assigned. How an image is resized is part of the same
 contract: without an `imageResize` the clients squash it to a square (what Ludwig does), and YOLO
 classification asks for `shorter_edge_center_crop`, as Ultralytics does; a client refuses a mode it does not
-know rather than guess. Every generated bundle ships a
+know rather than guess. A detector's graph returns every candidate box, and a video model's takes sampled clips: every generated client
+implements the detector's side (confidence filter, non-maximum suppression, an undone letterbox) and only the Python
+devkit implements video (frame sampling), as `client_kind(task)` and the formats' `handles` in `formats/_kits.py` say.
+A detector's `expected.json` carries the platform's boxes (`detections`) for the verify scripts to match by overlap; a
+format that lacks a kind is offered for that task as the bare model. Every generated bundle ships a
 golden sample (`expected.json`) plus a verify path (a script for devkit langs, a built-in
 self-check screen/button for the PWA/Flutter apps) so a consumer can confirm the reimplementation
 actually matches the platform's own inference output before trusting it.

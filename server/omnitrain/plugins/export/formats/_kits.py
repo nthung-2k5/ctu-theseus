@@ -7,13 +7,24 @@ from omnitrain.plugins.export.common import template
 from omnitrain.plugins.export.formats.base import BundleContext, ExportFormat
 from omnitrain.plugins.export.readme import app_readme, devkit_readme
 
+STANDARD, DETECTION, VIDEO = "standard", "detection", "video"
+
+
+def client_kind(task: TaskDescriptor) -> str:
+    """What a generated client has to do for this task: `standard` (classification and regression: one preprocessed
+    input, a flat `{label: value}` result), `detection` (the graph returns every candidate box, so the client runs
+    the confidence filter, non-maximum suppression and undoes the letterbox) or `video` (decode a file, sample clips,
+    average the clips' probabilities)."""
+    if task.output is not None and task.output.kind == "detections":
+        return DETECTION
+    if task.modality == "video":
+        return VIDEO
+    return STANDARD
+
 
 def supports_generated_clients(task: TaskDescriptor) -> bool:
-    """The generated clients implement preprocessing and postprocessing for classification and regression. A
-    detector's output is a pile of candidate boxes that needs non-maximum suppression and an undone letterbox, which
-    none of them do, so offering a devkit or app for it would hand over a client that cannot run the model. Nor do
-    they decode a video or sample frames from it, so a video model is exported as the bare ONNX model only."""
-    return task.modality != "video" and (task.output is None or task.output.kind != "detections")
+    """Whether every generated client (not only the ones that learned a kind) can run the task's model."""
+    return client_kind(task) == STANDARD
 
 
 class DevkitFormat(ExportFormat):
@@ -26,8 +37,8 @@ class DevkitFormat(ExportFormat):
     group = "Devkit"
     notice = (
         "Devkit bundles ship source only (no project or build files; dependencies are documented in the README). "
-        "Preprocessing is currently implemented for image classification only. See the bundle's README for other "
-        "modalities."
+        "Preprocessing is implemented for image and tabular inputs, and object detection; video is offered by the "
+        "Python devkit only. See the bundle's README for other modalities."
     )
     artifact = "onnx"
     needs_golden = True
@@ -35,10 +46,12 @@ class DevkitFormat(ExportFormat):
     readme_info: ClassVar[dict[str, Any]]
     client_files: ClassVar[tuple[tuple[str, str], ...]]
     verify_files: ClassVar[tuple[tuple[str, str], ...]] = ()
+    # The `client_kind`s this client implements; a kind it lacks is exported as the bare model only.
+    handles: ClassVar[frozenset[str]] = frozenset({STANDARD})
 
     @classmethod
     def supports(cls, task: TaskDescriptor) -> bool:
-        return supports_generated_clients(task)
+        return client_kind(task) in cls.handles
 
     @classmethod
     def assemble(cls, ctx: BundleContext) -> None:
@@ -61,17 +74,19 @@ class AppFormat(ExportFormat):
 
     group = "App"
     notice = (
-        "App bundles run inference on-device, never on a server. Preprocessing is currently implemented for image "
-        "classification only. See the bundle's README for other modalities."
+        "App bundles run inference on-device, never on a server. Preprocessing is implemented for image "
+        "classification and object detection. See the bundle's README for other modalities."
     )
     artifact = "onnx"
     needs_golden = True
 
     readme_info: ClassVar[dict[str, Any]]
+    # The `client_kind`s this app implements; a kind it lacks is exported as the bare model only.
+    handles: ClassVar[frozenset[str]] = frozenset({STANDARD})
 
     @classmethod
     def supports(cls, task: TaskDescriptor) -> bool:
-        return supports_generated_clients(task)
+        return client_kind(task) in cls.handles
 
     @classmethod
     def readme(cls, ctx: BundleContext) -> str:

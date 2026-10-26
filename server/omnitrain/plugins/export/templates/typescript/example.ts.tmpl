@@ -31,6 +31,16 @@ if (client.isTabular) {
 }
 
 const predictions = await client.predict(input)
-for (const [className, probability] of Object.entries(predictions)) {
-  console.log(`${className}: ${probability.toFixed(4)}`)
+if (Array.isArray(predictions)) {
+  // An object detector: one line per box.
+  for (const { label, confidence, box } of predictions) {
+    console.log(
+      `${label}: ${confidence.toFixed(4)}  x=${box.x.toFixed(3)} y=${box.y.toFixed(3)} w=${box.w.toFixed(3)} h=${box.h.toFixed(3)}`,
+    )
+  }
+  if (predictions.length === 0) console.log('No objects found.')
+} else {
+  for (const [className, probability] of Object.entries(predictions)) {
+    console.log(`${className}: ${probability.toFixed(4)}`)
+  }
 }

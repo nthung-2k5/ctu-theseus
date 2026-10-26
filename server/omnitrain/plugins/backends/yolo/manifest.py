@@ -53,9 +53,9 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
 
 def _detection_manifest(run_id: str, meta: dict[str, Any], size: int) -> dict[str, Any]:
     """The exported detector takes a letterboxed image and returns every candidate box: turning those into
-    detections (confidence filter, non-maximum suppression, undoing the letterbox) is the client's job. No generated
-    devkit or app implements that yet, so detection bundles are model-only (see export/formats/_kits.py); this
-    manifest is the contract a hand-written client follows, and `labels.txt` comes from `classes` as usual."""
+    detections (confidence filter, non-maximum suppression, undoing the letterbox) is the client's job. Only the
+    Python devkit implements that (see export/formats/_kits.py), so other formats ship the bare model; this manifest
+    is the contract a hand-written client follows, and `labels.txt` comes from `classes` as usual."""
     return {
         "schemaVersion": 1,
         "runId": run_id,

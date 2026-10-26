@@ -5,6 +5,8 @@ value per input column) for a tabular model — e.g.:
 
     python example.py cat.jpg
     python example.py '{"age": 34, "income": 52000}'
+
+An object detector prints one line per box; a video model takes a video file path.
 """
 
 import json
@@ -29,5 +31,15 @@ if __name__ == "__main__":
     else:
         predictions = client.predict(sys.argv[1])
 
-    for class_name, probability in predictions.items():
-        print(f"{class_name}: {probability:.4f}")
+    if isinstance(predictions, list):  # an object detector: `[{label, confidence, box}]`
+        for detection in predictions:
+            box = detection["box"]
+            print(
+                f"{detection['label']}: {detection['confidence']:.4f}  "
+                f"x={box['x']:.3f} y={box['y']:.3f} w={box['w']:.3f} h={box['h']:.3f}"
+            )
+        if not predictions:
+            print("No objects found.")
+    else:
+        for class_name, probability in predictions.items():
+            print(f"{class_name}: {probability:.4f}")

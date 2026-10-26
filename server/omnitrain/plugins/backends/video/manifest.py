@@ -7,8 +7,9 @@ a video first and the class list in the model's own index order.
 The class list MUST come from `names.json`, NEVER from the label_classes table: Postgres has no idea which index a
 run assigned each class, so guessing wrong silently mislabels every prediction.
 
-No generated devkit or app implements video yet (see export/formats/_kits.py), so a video bundle is the bare model
-and this manifest is the contract a hand-written client follows.
+Only the Python devkit implements video (see export/formats/_kits.py), so other formats ship the bare model and
+this manifest is the contract a hand-written client follows. Frames are decoded and resized with OpenCV, and
+"resize the shorter edge" means `round(edge * size / shorter)` with a floor of `size`, exactly as the platform did.
 """
 
 from typing import Any

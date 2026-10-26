@@ -306,7 +306,7 @@ class TestManifestAndExport:
         with pytest.raises(ValueError, match="names.json"):
             build_preprocessing_manifest("r1", {}, None)
 
-    def test_only_the_bare_onnx_model_is_offered(self):
+    def test_the_bare_model_and_the_python_devkit_are_offered(self):
         assert not supports_generated_clients(TASK)
         ids = [f.id for f in list_export_formats(TASK, VideoBackend)]
-        assert ids == ["onnx"]
+        assert ids == ["onnx", "python_devkit"]

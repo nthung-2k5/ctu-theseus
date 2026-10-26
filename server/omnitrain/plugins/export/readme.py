@@ -20,6 +20,22 @@ LIMITATION_IMAGE_ONLY = (
     "client raises a clear error rather than silently producing wrong predictions. Adapt the client's "
     "preprocessing method for your input type."
 )
+# For a devkit whose client implements object detection (see `formats/_kits.client_kind`).
+DETECTION_LIMITATION = (
+    "Object detection: the client returns the boxes found as `{label, confidence, box: {x, y, w, h}}`, most "
+    "confident first; `box` is the top-left corner and size as fractions (0..1) of the image. The model returns every "
+    "candidate box, so the client applies the confidence filter, per-class non-maximum suppression and undoes the "
+    "letterbox (`outputs[0].yoloOutput`, `inputs[0].imageResize` in `preprocessing.json`). The platform's own "
+    "prediction runs Ultralytics on the original weights, which letterboxes a little differently, so the verify "
+    "script compares confident boxes by overlap rather than for equal numbers."
+)
+
+
+APP_LIMITATION = (
+    "Only implements preprocessing for **image classification** inputs today. `preprocessing.json` still has the "
+    "exact parameters Ludwig used (`inputs[0].ludwigPreprocessing`) for other input types; adapt the client code for "
+    "your input type."
+)
 
 
 @dataclass
@@ -29,6 +45,8 @@ class ReadmeVars:
     format: str  # the export format's display label
     artifact: str  # model file name inside the bundle, e.g. model.onnx
     has_verify: bool
+    # What the client does: "standard", "detection" or "video" (see formats/_kits.client_kind).
+    kind: str = "standard"
 
 
 def _header(v: ReadmeVars) -> str:
@@ -48,6 +66,7 @@ This is the bare artifact only, with no client code. `preprocessing.json` has ev
 
 
 def app_readme(v: ReadmeVars, info: dict[str, Any]) -> str:
+    info = {**info, **info.get("kinds", {}).get(v.kind, {})}
     verify = ""
     if v.has_verify:
         verify = (
@@ -61,7 +80,7 @@ A {info["label"]}: runs fully on-device (or in-browser), no server involved.
 
 ## Limitation
 
-Only implements preprocessing for **image classification** inputs today. `preprocessing.json` still has the exact parameters Ludwig used (`inputs[0].ludwigPreprocessing`) for other input types; adapt the client code for your input type.
+{info.get("limitation", APP_LIMITATION)}
 
 ## Quick start
 
@@ -74,6 +93,8 @@ Only implements preprocessing for **image classification** inputs today. `prepro
 
 
 def devkit_readme(v: ReadmeVars, info: dict[str, Any]) -> str:
+    # A format that implements a kind beyond classification/regression says what differs for it under `kinds`.
+    info = {**info, **info.get("kinds", {}).get(v.kind, {})}
     contents_extra = ", `expected.json`, `sample/`" if v.has_verify else ""
     note = f"\n{info['note']}\n" if info.get("note") else ""
     verify = ""

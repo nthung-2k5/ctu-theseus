@@ -60,6 +60,22 @@ h1 {
   border-radius: 8px;
   margin-bottom: 1rem;
 }
+/* An object detector's boxes are drawn on a canvas laid over the picture. */
+.frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+#preview:not([hidden]) {
+  display: block;
+}
+#overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: calc(100% - 1rem);
+  pointer-events: none;
+}
 #results ul {
   list-style: none;
   padding: 0;

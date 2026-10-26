@@ -70,15 +70,17 @@ def resolve_sample_file(input_value: Any, download) -> tuple[str, bytes] | None:
 
 def to_bundle_local(expected: dict[str, Any], sample_filename: str) -> bytes:
     """expected.json rewritten to reference the sample by its bundle-local path."""
-    return dumps(
-        {
-            "schemaVersion": 1,
-            "sampleFile": f"sample/{sample_filename}",
-            "outputColumn": expected.get("outputColumn"),
-            "outputType": expected.get("outputType"),
-            "predictions": expected.get("predictions"),
-        }
-    ).encode()
+    local = {
+        "schemaVersion": 1,
+        "sampleFile": f"sample/{sample_filename}",
+        "outputColumn": expected.get("outputColumn"),
+        "outputType": expected.get("outputType"),
+        "predictions": expected.get("predictions"),
+    }
+    if expected.get("detections") is not None:
+        # A detector's boxes, besides `predictions` (its best confidence per class): what its verify script compares.
+        local["detections"] = expected["detections"]
+    return dumps(local).encode()
 
 
 def assemble_files(

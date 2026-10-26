@@ -1,5 +1,5 @@
-from omnitrain.plugins.export.formats._kits import DevkitFormat
-from omnitrain.plugins.export.readme import LIMITATION_IMAGE_ONLY
+from omnitrain.plugins.export.formats._kits import DETECTION, STANDARD, DevkitFormat
+from omnitrain.plugins.export.readme import DETECTION_LIMITATION, LIMITATION_IMAGE_ONLY
 
 
 class JavaDevkit(DevkitFormat):
@@ -7,6 +7,7 @@ class JavaDevkit(DevkitFormat):
     label = "Java / Kotlin devkit"
     description = "ONNX model plus a Java inference client (onnxruntime) that Kotlin can call directly."
     order = 40
+    handles = frozenset({STANDARD, DETECTION})
     readme_info = {
         "label": "Java / Kotlin",
         "files": "`OmniTrainClient.java`, `Main.java`",
@@ -18,6 +19,7 @@ class JavaDevkit(DevkitFormat):
         "run_cmd": "java Main <path-to-image>",
         "verify_cmd": "java Main verify",
         "limitation": LIMITATION_IMAGE_ONLY,
+        "kinds": {"detection": {"limitation": DETECTION_LIMITATION}},
         "note": "Written in Java for maximum interop: call it directly from Kotlin with zero wrapping.",
     }
     client_files = (
