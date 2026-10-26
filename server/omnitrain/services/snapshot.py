@@ -32,6 +32,7 @@ from omnitrain.db.models import (
 )
 from omnitrain.domain.boxes import boxes_json
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, TaskDescriptor, get_task_descriptor
+from omnitrain.domain.token_tags import tag_count_error, tags_cell
 from omnitrain.services import storage
 from omnitrain.services.augmentation import materialize_augmentations
 from omnitrain.services.derived_items import delete_derived_items
@@ -78,6 +79,15 @@ def resolve_column_value(col: ColumnSpec, member: SnapshotMember, class_name_by_
         case "item_id":
             return str(member.item_id)
         case "label":
+            # Token tags: the item's tags in one space-separated cell, one tag per word of its text. A tag list that
+            # does not fit the text (it was validated when written, so this only guards old or imported data) is no
+            # label at all, so the trainer leaves the row out instead of pairing words with the wrong tags.
+            tagged = next((a for a in member.annotations if a.annotation_type == "token_tags"), None)
+            if tagged is not None:
+                cell = tags_cell(tagged.label_structured)
+                if cell is None or (member.raw_text is not None and tag_count_error(cell.split(), member.raw_text)):
+                    return None
+                return cell
             classification = next((a for a in member.annotations if a.class_id is not None), None)
             if classification is not None and classification.class_id is not None:
                 return class_name_by_id.get(classification.class_id)
@@ -150,6 +160,8 @@ def class_counts(task: TaskDescriptor, columns: list[ColumnSpec], rows: list[dic
     label = next((c for c in columns if c.kind == "label"), None)
     if label is None or not task.annotation.requires_label_classes:
         return None
+    if task.output is not None and task.output.kind == "tokens":
+        return None  # a cell holds a whole text's tags, not one class
     counts: dict[str, int] = {}
     for row in rows:
         value = row[label.name]

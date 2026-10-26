@@ -13,8 +13,10 @@ from omnitrain.api.deps import AnnotationDep, ItemDep, SessionDep
 from omnitrain.db.models import (
     Annotation,
     DatasetItem,
+    TextFeatures,
 )
 from omnitrain.domain.boxes import is_background, validate_box_annotation
+from omnitrain.domain.token_tags import tag_count_error, tag_shape_error
 from omnitrain.schemas.datasets import (
     AnnotationListResponse,
     AnnotationOut,
@@ -58,12 +60,24 @@ async def _check_new_box(session: AsyncSession, item_id: uuid.UUID, class_id: uu
         await session.delete(marker)
 
 
+async def _check_tags_fit_text(session: AsyncSession, item_id: uuid.UUID, tags: list[str]) -> None:
+    """One tag per word of the item's own text (`domain/token_tags.py`): a tag list that is off by one would pair every
+    later word with the wrong tag, and training would learn from it without any sign of a problem."""
+    text = (await session.execute(sa.select(TextFeatures.raw_text).where(TextFeatures.item_id == item_id))).scalar()
+    if text is None:
+        raise HTTPException(400, "Token tags belong on a text item")
+    if problem := tag_count_error(tags, text):
+        raise HTTPException(422, problem)
+
+
 @router.post("/items/{item_id}/annotations", response_model=AnnotationResponse)
 async def create_annotation(body: CreateAnnotationBody, item: ItemDep, session: SessionDep) -> AnnotationResponse:
     if body.class_id and not await svc.class_in_dataset(session, body.class_id, item.dataset_id):
         raise HTTPException(400, "Unknown label class")
     if body.annotation_type == "bounding_box":
         await _check_new_box(session, item.id, body.class_id, body.label_structured)
+    if body.annotation_type == "token_tags":
+        await _check_tags_fit_text(session, item.id, body.label_structured)
     annotation = Annotation(
         item_id=item.id, annotator_id=body.annotator_id, annotation_type=body.annotation_type,
         class_id=body.class_id, label_text_sequence=body.label_text_sequence,
@@ -115,6 +129,10 @@ async def update_annotation(
             )
         except ValueError as e:
             raise HTTPException(422, str(e)) from None
+    if annotation.annotation_type == "token_tags" and body.label_structured is not None:
+        if problem := tag_shape_error(body.label_structured):
+            raise HTTPException(422, problem)
+        await _check_tags_fit_text(session, annotation.item_id, body.label_structured)
     for field in body.model_fields_set:
         value = getattr(body, field)
         if value is None:

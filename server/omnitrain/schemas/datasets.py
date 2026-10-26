@@ -16,6 +16,7 @@ from omnitrain.db.enums import (
     VideoContainer,
 )
 from omnitrain.domain.boxes import validate_box_annotation
+from omnitrain.domain.token_tags import tag_shape_error
 from omnitrain.plugins.augmentation.config import AugmentationConfig, AugmentationInfo
 from omnitrain.plugins.preprocessing.config import PreprocessingConfig, PreprocessingInfo
 from omnitrain.schemas.common import ApiModel
@@ -200,6 +201,9 @@ class AnnotationIn(ApiModel):
         # One annotation is one box (or the "no objects" marker); see domain/boxes.py for the convention.
         if self.annotation_type == "bounding_box":
             validate_box_annotation(self.class_id, self.label_structured)
+        # Token tags are one tag per word; whether the count matches the item's text is checked where the text is known.
+        if self.annotation_type == "token_tags" and (problem := tag_shape_error(self.label_structured)):
+            raise ValueError(problem)
         return self
 
 
