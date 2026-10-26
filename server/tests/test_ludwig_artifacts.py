@@ -92,6 +92,9 @@ def test_export_onnx_handles_ecd_style_forward(tmp_path, num_classes):
     path = str(tmp_path / "model.onnx")
     artifacts._export_onnx(_tiny_ecd_like(num_classes), path)
 
+    # A bundle carries the model as one file, so the weights must be inside it and not in a `model.onnx.data` sidecar.
+    assert [p.name for p in tmp_path.iterdir()] == ["model.onnx"]
+
     session = ort.InferenceSession(path)
     assert [i.name for i in session.get_inputs()] == ["a", "b"]
     assert [o.name for o in session.get_outputs()] == ["y::logits"]  # the name the exported clients match on

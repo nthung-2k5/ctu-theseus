@@ -39,6 +39,9 @@ def convert(model: Any, artifact_id: str, workdir: str) -> str:
                 (sample,),
                 f=path,
                 dynamo=True,
+                # One self-contained file: a bundle carries the model as a single file, and torch's default of
+                # writing the weights to a `model.onnx.data` beside it would ship a graph with no weights.
+                external_data=False,
                 input_names=[INPUT_NAME],
                 output_names=[OUTPUT_NAME],
                 dynamic_shapes=({0: batch},),

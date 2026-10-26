@@ -1,7 +1,8 @@
 # Trainer backends
 
-One package per training framework. Ludwig (`ludwig/`), Ultralytics YOLO (`yolo/`) and torchvision video (`video/`)
-ship today. A backend decides *how* a task is trained; *what* a task is lives in
+One package per training framework. Ludwig (`ludwig/`), Ultralytics YOLO (`yolo/`), scikit-learn (`scikit/`),
+torchvision video (`video/`) and a code-defined PyTorch backend (`pytorch/`: image and audio classification,
+tabular classification and regression) ship today. A backend decides *how* a task is trained; *what* a task is lives in
 [`omnitrain/tasks/`](../../tasks/README.md).
 
 Nothing else needs an edit to add one: no enum, no migration, no frontend change. `training_runs.backend` and

@@ -1,0 +1,149 @@
+"""Per-task model catalog and defaults for the PyTorch backend.
+
+Pure data: no torch or torchvision import, so listing this backend never needs a GPU runtime. Every image model is a
+torchvision classifier (BSD-3-Clause) fine-tuned by swapping in a new classification head. The ids are the ones the
+Ludwig backend's image encoders already use, so a sweep or a stored habit that names `resnet50` keeps meaning the same
+architecture. A table is learned by a small multilayer perceptron trained from scratch, and a sound by a
+convolutional network over its log-mel spectrogram.
+"""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ImageModel:
+    id: str
+    label: str
+    description: str
+    # `torchvision.models.<builder>` and the `<weights>.DEFAULT` enum that goes with it.
+    builder: str
+    weights: str
+    # Dotted path of the final linear layer inside the module, which is replaced by one with the right class count.
+    head: str
+    # Side of the square the pretrained weights were trained on, which is also the default here.
+    size: int
+    # True for a network whose position embeddings are tied to `size` (a vision transformer): no other size works.
+    fixed_size: bool = False
+
+
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
+IMAGE_MODELS: tuple[ImageModel, ...] = (
+    ImageModel(
+        "resnet18", "ResNet-18", "Small and quick, a solid first baseline (about 11M parameters).",
+        "resnet18", "ResNet18_Weights", "fc", 224,
+    ),
+    ImageModel(
+        "resnet50", "ResNet-50", "A deeper ResNet that is usually noticeably more accurate (about 26M parameters).",
+        "resnet50", "ResNet50_Weights", "fc", 224,
+    ),
+    ImageModel(
+        "efficientnet_b0", "EfficientNet-B0", "Accurate for its size, a good default when speed matters (about 5M "
+        "parameters).",
+        "efficientnet_b0", "EfficientNet_B0_Weights", "classifier.1", 224,
+    ),
+    ImageModel(
+        "mobilenet_v3_small", "MobileNetV3-Small", "The lightest here, built for phones and small devices (about 2.5M "
+        "parameters).",
+        "mobilenet_v3_small", "MobileNet_V3_Small_Weights", "classifier.3", 224,
+    ),
+    ImageModel(
+        "convnext_tiny", "ConvNeXt-Tiny", "A modern convolutional network that often beats a ResNet-50 (about 28M "
+        "parameters).",
+        "convnext_tiny", "ConvNeXt_Tiny_Weights", "classifier.2", 224,
+    ),
+    ImageModel(
+        "vit_base", "ViT-Base/16", "A vision transformer: the slowest and hungriest here, and it only works at 224 "
+        "pixels (about 86M parameters).",
+        "vit_b_16", "ViT_B_16_Weights", "heads.head", 224, fixed_size=True,
+    ),
+)  # fmt: skip
+
+MODELS_BY_ID: dict[str, ImageModel] = {m.id: m for m in IMAGE_MODELS}
+
+IMAGE_TASKS: frozenset[str] = frozenset({"image_classification"})
+
+IMAGE_SIZES = [64, 128, 160, 224, 256, 288, 384]
+OPTIMIZERS = ["AdamW", "SGD"]
+
+DEFAULT_EPOCHS = 20
+DEFAULT_BATCH_SIZE = 32
+DEFAULT_LEARNING_RATE = 0.0003
+DEFAULT_EARLY_STOP_PATIENCE = 5
+
+
+@dataclass(frozen=True)
+class TabularModel:
+    id: str
+    label: str
+    description: str
+    # Width of each hidden layer, in order.
+    hidden: tuple[int, ...]
+
+
+TABULAR_MODELS: tuple[TabularModel, ...] = (
+    TabularModel(
+        "mlp_medium", "MLP (medium)", "Three hidden layers of 128, 128 and 64 units: a good default for most tables.",
+        (128, 128, 64),
+    ),
+    TabularModel(
+        "mlp_small", "MLP (small)", "Two hidden layers of 64 units. Trains fastest and overfits least on a small "
+        "table.",
+        (64, 64),
+    ),
+    TabularModel(
+        "mlp_large", "MLP (large)", "Four hidden layers of 256, 256, 128 and 64 units, for a big table with many "
+        "columns and interactions.",
+        (256, 256, 128, 64),
+    ),
+)  # fmt: skip
+
+TABULAR_MODELS_BY_ID: dict[str, TabularModel] = {m.id: m for m in TABULAR_MODELS}
+
+# Task id -> what one row is predicted as.
+TABULAR_TASKS: dict[str, str] = {"tabular_classification": "classify", "tabular_regression": "regress"}
+
+TABULAR_DEFAULTS = {"epochs": 60, "batch": 128, "learning_rate": 0.001, "patience": 10, "dropout": 0.1}
+TABULAR_BATCH_SIZES = [16, 32, 64, 128, 256, 512, 1024]
+
+
+@dataclass(frozen=True)
+class AudioModel:
+    id: str
+    label: str
+    description: str
+    # True when it starts from ImageNet weights (a spectrogram is a one-channel image to a ResNet).
+    pretrained: bool
+
+
+AUDIO_MODELS: tuple[AudioModel, ...] = (
+    AudioModel(
+        "audio_resnet18", "ResNet-18 (pretrained)", "A ResNet-18 that starts from ImageNet weights, which transfer "
+        "well to spectrograms. The most accurate choice when you have few recordings.",
+        True,
+    ),
+    AudioModel(
+        "audio_cnn", "Small CNN (from scratch)", "Four small convolution blocks trained from nothing. Fast and light, "
+        "and fine for clearly different sounds when you have plenty of recordings.",
+        False,
+    ),
+)  # fmt: skip
+
+AUDIO_MODELS_BY_ID: dict[str, AudioModel] = {m.id: m for m in AUDIO_MODELS}
+
+AUDIO_TASKS: frozenset[str] = frozenset({"audio_classification"})
+
+AUDIO_SAMPLE_RATES = [8000, 16000, 22050, 32000, 44100]
+AUDIO_MEL_BANDS = [40, 64, 96, 128]
+AUDIO_DEFAULTS = {
+    "epochs": 30,
+    "batch": 16,
+    "learning_rate": 0.0005,
+    "patience": 6,
+    "sample_rate": 16000,
+    "clip_seconds": 5.0,
+    "n_mels": 64,
+    "clips_per_audio": 3,
+}
+AUDIO_BATCH_SIZES = [4, 8, 16, 32, 64]

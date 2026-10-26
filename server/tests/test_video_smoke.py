@@ -144,6 +144,8 @@ def test_train_load_predict_evaluate_and_export_with_the_real_library(tmp_path, 
 
     path = VideoBackend.convert(loaded, "onnx", str(tmp_path / "export"))
     assert Path(path).name == "model.onnx"
+    # A bundle carries the model as one file, so the weights must be inside it and not in a sidecar.
+    assert [p.name for p in Path(path).parent.iterdir()] == ["model.onnx"]
     session = ort.InferenceSession(path)
     assert session.get_inputs()[0].name == "clips" and session.get_inputs()[0].shape[1:] == [3, 8, 32, 32]
     [array] = frames.load_clips(str(clip), loaded.spec, clips=1)

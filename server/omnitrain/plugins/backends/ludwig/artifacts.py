@@ -79,6 +79,9 @@ def _export_onnx(model: Any, path: str) -> None:
             kwargs={"inputs": sample},
             f=path,
             dynamo=True,
+            # One self-contained file: a bundle carries the model as a single file, and torch's default of
+            # writing the weights to a `model.onnx.data` beside it would ship a graph with no weights.
+            external_data=False,
             input_names=input_names,
             output_names=output_names,
             dynamic_shapes={"inputs": {name: {0: batch} for name in input_names}},

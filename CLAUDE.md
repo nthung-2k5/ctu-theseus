@@ -98,6 +98,49 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   It is the **default backend for the two tabular tasks** (`default_for`, honoured by `registry.preferred_first`: the
   create-run list's first entry, and what a run uses when no backend is named). Ludwig stays offered for them, and stays
   the default for text.
+- **The PyTorch backend (`plugins/backends/pytorch/`, id `pytorch`) is the code-defined alternative to Ludwig.** It trains
+  image classification (torchvision classifiers with a new head; the catalog keeps Ludwig's image encoder ids:
+  `resnet18`, `resnet50`, `efficientnet_b0`, `mobilenet_v3_small`, `convnext_tiny`, `vit_base`) and tabular
+  classification and regression (a perceptron, `mlp_small`/`mlp_medium`/`mlp_large`) and audio classification
+  (`audio_resnet18`, ImageNet weights on a one-channel spectrogram, or `audio_cnn`, from scratch), with a plain loop (`loop.py`: the
+  heartbeat, schedule, clipping and mixed precision that `video` also has, plus an `Objective` for classification or
+  regression and one `fit`) instead of Lightning. **What a model expects as input is one spec (`spec.py`: `ImageSpec`,
+  `TabularSpec`, `AudioSpec`)**: it is stored in `names.json` with the class order, and training, evaluation, serving and the export
+  manifest all read it, so none can drift from the others. `images.preprocess` does exactly what the generated clients
+  do (PIL bilinear, shorter edge then centre crop; `tests/test_pytorch_backend.py` checks it bit for bit against the
+  shipped Python client), which is why it uses PIL and not a torchvision transform. A table's fill value, mean and std
+  are fitted on the **train split only** and applied INSIDE the module (`network.TabularNet`), so the exported ONNX takes
+  raw numbers, the manifest carries no `numberNormalization`, and a client that normalised too would do it twice; a
+  regressor standardises its target the same way and the graph un-does it. A knob of the other kind of input
+  (`imageSize`, `dropout`, ...) is refused in `compile`, not ignored. The reported `loss` is plain cross entropy or a
+  squared error in the target's own units whatever steered the optimiser (class weights, target scaling), because
+  `events/writer.py` compares it across epochs. ONNX is exported straight from the `nn.Module` as logits (a number for a
+  regressor), traced with two rows (a batch of 1 pins the batch axis for `convnext_tiny` and `vit_base`), and a table
+  takes one tensor per column named by the column. It is **not** a default for any task (`default_for` is empty:
+  scikit-learn is the tabular default, Ludwig the image one) until someone has compared it on a real run. Text is not
+  offered, and bring-your-own models are refused in `compile`; a new input kind needs a new spec beside the three.
+  **Audio is one recipe in `audio.py`** (decode: scipy for WAV, torchaudio for the rest; mean to mono; `resample_poly`;
+  a fixed window zero-padded at the end; Hann STFT with no edge padding; power; HTK mel filterbank; `ln(x + 1e-6)`;
+  one scalar mean/std fitted on the train recordings), in numpy so it needs no torch and the same code serves training,
+  evaluation and serving (`tests/test_pytorch_backend.py` checks it against `torchaudio.transforms.MelSpectrogram`).
+  The recording is decoded and resampled once, in the download thread (`data.materialize(prepare=...)`), and cached as
+  a `.npy`, so a file that will not decode is a skipped row. Training sees one random window per recording per epoch
+  (plus SpecAugment); scoring takes `clipsPerAudio` evenly spaced windows and averages their probabilities. The ONNX
+  model takes the standardised **spectrogram** (`spectrograms`, `[batch, 1, nMels, frames]`), not a waveform, so every
+  generated client carries the front end: the manifest's `inputs[0].audioSpectrogram` (recipe `log_mel_v1`, which a
+  client refuses if it does not know) holds every number plus the exact resampler (scipy's `resample_poly` spelled out as
+  a Kaiser-windowed polyphase filter, so no client needs scipy), window rule and mel formula, and each client
+  (`export/templates/*`) re-implements WAV decoding, the resampler, a radix-2 FFT and the filterbank by hand. They match
+  the platform to ~5e-5 in probability (Python, TypeScript, C#, Java, the PWA in Chrome, Dart's front end; the Flutter ONNX
+  session itself was never run). A client reads WAV only (8/16/24/32-bit PCM, float; the Python one also anything
+  `soundfile` opens, the PWA anything the browser decodes), and a verify script skips a bundled sample it cannot read.
+  `ReadmeVars.kind` is `audio` only when the manifest carries `audioSpectrogram`, so a Ludwig audio model still gets the
+  old "adapt the client" README and `NotImplementedError`. Change the recipe in `audio.py` and you must change all six.
+  The shared number report lives in `domain/regression_report.py`, beside the classification one.
+- **A torch ONNX export must be a single file: pass `external_data=False`.** `torch.onnx.export(dynamo=True)` writes the
+  weights to a `model.onnx.data` sidecar by default, always, even for a tiny model, and a bundle (and the S3 copy in
+  `jobs/export.py`) carries only `model.onnx`, so the shipped graph cannot load. Every backend that calls it sets
+  `external_data=False` and its test asserts that the output directory holds only `model.onnx`.
 - **Video is a file modality with its own backend.** `video_classification` (one class per clip, like audio) is
   trained only by `plugins/backends/video/` (torchvision's Kinetics-400 classifiers, BSD-3). Decoding is OpenCV
   (`domain/video.py` to validate an upload and cut a poster frame; `plugins/backends/video/frames.py` to sample clips),
