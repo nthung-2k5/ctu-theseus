@@ -117,8 +117,8 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `events/writer.py` compares it across epochs. ONNX is exported straight from the `nn.Module` as logits (a number for a
   regressor), traced with two rows (a batch of 1 pins the batch axis for `convnext_tiny` and `vit_base`), and a table
   takes one tensor per column named by the column. It is **not** a default for any task (`default_for` is empty:
-  scikit-learn is the tabular default, Ludwig the image one) until someone has compared it on a real run. Text is not
-  offered, and bring-your-own models are refused in `compile`; a new input kind needs a new spec beside the three.
+  scikit-learn is the tabular default, Ludwig the image one) until someone has compared it on a real run. Bring-your-own
+  models are refused in `compile`; a new input kind needs a new spec beside the four.
   **Audio is one recipe in `audio.py`** (decode: scipy for WAV, torchaudio for the rest; mean to mono; `resample_poly`;
   a fixed window zero-padded at the end; Hann STFT with no edge padding; power; HTK mel filterbank; `ln(x + 1e-6)`;
   one scalar mean/std fitted on the train recordings), in numpy so it needs no torch and the same code serves training,
@@ -136,6 +136,21 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `soundfile` opens, the PWA anything the browser decodes), and a verify script skips a bundled sample it cannot read.
   `ReadmeVars.kind` is `audio` only when the manifest carries `audioSpectrogram`, so a Ludwig audio model still gets the
   old "adapt the client" README and `NotImplementedError`. Change the recipe in `audio.py` and you must change all six.
+  **Text is one recipe in `text.py`**, and it is deliberately primitive so that a client in any language can repeat it
+  with no Unicode tables: only the ASCII letters A-Z are lower-cased (no normalisation, no other case folding), a token is a
+  maximal run of characters that are not separators (ASCII controls, space and punctuation, plus a short list of Unicode
+  spaces, `text.SEPARATOR_RANGES`), and every other character, which is every non-ASCII letter, stays inside its token, so
+  a Vietnamese word stays whole (a language without spaces, Chinese or Japanese, is not served). A text is the first
+  `maxTokens` tokens as ids (the vocabulary position plus two; 0 is padding, 1 is an unknown word), built from a vocabulary
+  fitted on the TRAIN texts only and stored in `names.json`. The models (`text_bag`, a fastText-style mean of word vectors,
+  and `text_cnn`, filters over 2-4 words) train from scratch: no pretrained or transformer text model is offered. The ONNX
+  graph takes int64 ids (`tokens`, `[batch, maxTokens]`), padding is masked inside it, and the manifest's
+  `inputs[0].textTokens` (recipe `word_ids_v1`, which a client refuses if it does not know) carries the separator ranges and
+  the whole vocabulary. Every generated client re-implements the split and the lookup (`predict` takes the text itself, never
+  a path; Java and Dart call it `predictText`), and they match the platform exactly on the token ids (Python, TypeScript,
+  C#, Java, Dart) and to ~5e-5 in probability (the PWA in Chrome too; the Flutter ONNX session was never run). It is `kind`
+  `text` in `ReadmeVars` only when the manifest carries `textTokens`, so a scikit-learn or Ludwig text model keeps its
+  old README and `NotImplementedError`. Change the recipe in `text.py` and you must change all six clients.
   The shared number report lives in `domain/regression_report.py`, beside the classification one.
 - **A torch ONNX export must be a single file: pass `external_data=False`.** `torch.onnx.export(dynamo=True)` writes the
   weights to a `model.onnx.data` sidecar by default, always, even for a tiny model, and a bundle (and the S3 copy in

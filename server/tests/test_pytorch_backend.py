@@ -13,14 +13,14 @@ from pydantic import ValidationError
 import omnitrain.plugins.export
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 from omnitrain.plugins.backends.base import ConfigError, CustomModelRef
-from omnitrain.plugins.backends.pytorch import PytorchBackend, audio, data, images, tabular
+from omnitrain.plugins.backends.pytorch import PytorchBackend, audio, data, images, tabular, text
 from omnitrain.plugins.backends.pytorch.compile import (
     PytorchHyperparameters,
     compile_pytorch_config,
     hyperparameter_specs,
 )
 from omnitrain.plugins.backends.pytorch.manifest import build_preprocessing_manifest
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TabularSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TabularSpec, TextSpec
 from omnitrain.plugins.backends.registry import get_backend, trainable_backends
 from omnitrain.plugins.export.formats._kits import supports_generated_clients
 from omnitrain.plugins.export.registry import list_export_formats
@@ -41,19 +41,21 @@ def compile_(ctx: SnapshotContext = SNAPSHOT, **selection):
 
 
 class TestRegistration:
-    def test_the_backend_trains_images_tables_and_sounds_only(self):
+    def test_the_backend_trains_images_tables_sounds_and_texts_only(self):
         assert get_backend("pytorch") is PytorchBackend
         supported_tasks = (
             "image_classification",
             "tabular_classification",
             "tabular_regression",
             "audio_classification",
+            "text_classification",
         )
         for supported in supported_tasks:
             assert PytorchBackend.supports(get_task_descriptor(supported))
         assert not PytorchBackend.supports(get_task_descriptor("video_classification"))
         assert not PytorchBackend.supports(get_task_descriptor("object_detection"))
-        assert not PytorchBackend.supports(get_task_descriptor("text_classification"))
+        assert not PytorchBackend.supports(get_task_descriptor("token_classification"))
+        assert not PytorchBackend.supports(get_task_descriptor("text_generation"))
         assert PytorchBackend in trainable_backends(TASK)
 
     def test_it_offers_the_ludwig_image_encoders_by_the_same_ids(self):
@@ -659,3 +661,219 @@ class TestAudioManifest:
         assert recipe["mel"]["bands"] == 64 and recipe["mel"]["fMax"] == 8000.0
         assert recipe["normalization"] == {"mean": -4.5, "std": 2.0}
         assert m["outputs"] == [{"name": "class", "type": "category", "column": "class", "classes": ["dog", "siren"]}]
+
+
+TEXT = get_task_descriptor("text_classification")
+REVIEWS = SnapshotContext(
+    columns=[
+        ColumnSpec(name="text", kind="inline_text"),
+        ColumnSpec(name="class", kind="label"),
+        ColumnSpec(name="split", kind="split"),
+    ],
+    label_class_names=["negative", "positive"],
+)
+
+
+def compile_text(ctx: SnapshotContext = REVIEWS, **selection):
+    return compile_pytorch_config(TEXT, ctx, PytorchHyperparameters(**selection))
+
+
+class TestTokenizer:
+    def test_it_lower_cases_ascii_letters_only_and_splits_on_ascii_punctuation(self):
+        assert text.tokenize("Hello, World! It's 3.14_ok") == ["hello", "world", "it", "s", "3", "14", "ok"]
+
+    def test_a_non_ascii_letter_is_part_of_a_token_and_is_never_case_folded(self):
+        # Vietnamese stays whole; the ASCII letters of "Nẵng" fold but "Đ" (not ASCII) does not.
+        assert text.tokenize("Xin chào, Việt Nam! Đà Nẵng") == ["xin", "chào", "việt", "nam", "Đà", "nẵng"]
+        assert text.tokenize("ÀÉ") == ["ÀÉ"]
+
+    def test_unicode_spaces_separate_words_too(self):
+        assert text.tokenize("a\u00a0b\u2003c\u3000d\u202fe") == ["a", "b", "c", "d", "e"]
+
+    def test_nothing_to_read_gives_no_tokens(self):
+        assert text.tokenize("") == [] and text.tokenize(" \t\n,.;") == []
+
+    def test_the_separator_ranges_are_exactly_what_splits(self):
+        # The manifest hands these ranges to every client, so they must agree with the regex the platform uses.
+        for code in list(range(0, 0x300)) + [0x2000, 0x200A, 0x200B, 0x2028, 0x202F, 0x3000, 0x3001, 0xFEFF]:
+            char = chr(code)
+            if "A" <= char <= "Z":
+                continue
+            separates = any(lo <= code <= hi for lo, hi in text.SEPARATOR_RANGES)
+            assert (text.tokenize(f"x{char}x") == ["x", "x"]) == separates, hex(code)
+
+
+class TestVocabulary:
+    def test_it_keeps_the_frequent_words_most_frequent_first_and_alphabetical_among_equals(self):
+        texts = ["b a a c", "c b a", "d"]
+        assert text.fit_vocabulary(texts, max_words=10, min_count=1) == ["a", "b", "c", "d"]
+        assert text.fit_vocabulary(texts, max_words=10, min_count=2) == ["a", "b", "c"]
+        assert text.fit_vocabulary(texts, max_words=2, min_count=1) == ["a", "b"]
+
+    def test_the_same_texts_always_give_the_same_vocabulary(self):
+        texts = [f"w{i % 7} w{i % 5} w{i % 3}" for i in range(50)]
+        assert text.fit_vocabulary(texts, max_words=5, min_count=1) == text.fit_vocabulary(
+            list(reversed(texts)), max_words=5, min_count=1
+        )
+
+    def test_a_word_is_counted_every_time_it_occurs(self):
+        assert text.fit_vocabulary(["spam spam spam eggs"], max_words=5, min_count=2) == ["spam"]
+
+
+class TestEncode:
+    SPEC = TextSpec(max_tokens=5, vocab=("good", "bad"))
+
+    def test_ids_are_the_vocabulary_position_plus_two_and_the_end_is_padded(self):
+        assert text.encode(["Good bad GOOD"], self.SPEC).tolist() == [[2, 3, 2, 0, 0]]
+
+    def test_an_unknown_word_is_one_and_a_long_text_is_cut(self):
+        assert text.encode(["good meh bad good good good bad"], self.SPEC).tolist() == [[2, 1, 3, 2, 2]]
+
+    def test_an_empty_text_is_all_padding_and_the_shape_is_fixed(self):
+        out = text.encode(["", "  ", "bad"], self.SPEC)
+        assert out.shape == (3, 5) and out.dtype == np.int64
+        assert out.tolist() == [[0] * 5, [0] * 5, [3, 0, 0, 0, 0]]
+
+    def test_the_embedding_table_has_room_for_padding_and_unknown(self):
+        assert self.SPEC.size == 4
+
+
+class TestTextSpec:
+    def test_it_round_trips_through_names_json(self):
+        spec = TextSpec(max_tokens=64, vocab=("a", "b"))
+        assert TextSpec.from_meta(spec.to_meta()) == spec
+        assert spec.to_meta()["inputKind"] == "text"
+
+    def test_a_vocabulary_can_be_attached_afterwards(self):
+        assert TextSpec(max_tokens=8).with_vocabulary(["x"]).vocab == ("x",)
+
+
+class TestTextData:
+    def frame(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "text": ["great film", "awful film", "meh", None, "  ", "great", "awful", "great", "awful"],
+                "class": ["positive", "negative", "positive", "positive", "positive", None, "other", "positive", None],
+                "split": ["train", "train", "train", "train", "train", "train", "train", "validation", "validation"],
+            }
+        )
+
+    def test_a_row_needs_a_known_class_and_a_text_with_something_in_it(self):
+        parts = text.prepare(
+            self.frame(), text_column="text", label_column="class", class_names=["negative", "positive"],
+            split_column="split",
+        )  # fmt: skip
+        assert parts["train"].texts == ["great film", "awful film", "meh"]
+        assert parts["train"].y.tolist() == [1, 0, 1]
+        assert parts["validation"].texts == ["great"] and parts["validation"].y.tolist() == [1]
+        assert len(parts["test"]) == 0 and parts["test"].y.dtype == np.int64
+
+    def test_a_missing_text_scores_as_the_empty_string(self):
+        assert text.clean(pd.Series(["a", None, float("nan"), 3])) == ["a", "", "", "3"]
+
+
+class TestCompileText:
+    def test_defaults(self):
+        c = compile_text()
+        assert (c["backend"], c["inputKind"], c["task"], c["model"]) == ("pytorch", "text", "classify", "text_bag")
+        assert (c["textColumn"], c["labelColumn"], c["classNames"]) == ("text", "class", ["negative", "positive"])
+        assert c["text"] == {"maxTokens": 128, "vocabSize": 20000, "minWordCount": 2}
+        assert c["network"] == {"dropout": 0.3}
+        assert c["train"]["useClassWeights"] is False and c["train"]["optimizer"] == "AdamW"
+
+    def test_the_selection_is_honoured(self):
+        c = compile_text(
+            model_id="text_cnn", max_tokens=64, vocab_size=500, min_word_count=1, dropout=0.5, use_class_weights=True,
+            epochs=3, batch_size=16, learning_rate=0.01,
+        )  # fmt: skip
+        assert c["model"] == "text_cnn" and c["text"] == {"maxTokens": 64, "vocabSize": 500, "minWordCount": 1}
+        assert c["network"]["dropout"] == 0.5 and c["train"]["useClassWeights"] is True
+        assert (c["train"]["epochs"], c["train"]["batchSize"], c["train"]["learningRate"]) == (3, 16, 0.01)
+
+    def test_a_text_model_has_no_pretrained_weights_to_start_from(self):
+        for selection in ({"pretrained": True}, {"freeze_backbone": False}):
+            with pytest.raises(ConfigError, match="does not support"):
+                compile_text(**selection)
+
+    def test_knobs_of_the_other_kinds_of_input_are_refused(self):
+        for selection in ({"image_size": 64}, {"horizontal_flip": True}, {"sample_rate": 8000}, {"n_mels": 40}):
+            with pytest.raises(ConfigError, match="does not support"):
+                compile_text(**selection)
+
+    def test_the_text_knobs_are_refused_for_every_other_kind(self):
+        for selection in ({"max_tokens": 64}, {"vocab_size": 500}, {"min_word_count": 3}):
+            with pytest.raises(ConfigError, match="does not support"):
+                compile_(**selection)
+            with pytest.raises(ConfigError, match="does not support"):
+                compile_audio(**selection)
+            with pytest.raises(ConfigError, match="does not support"):
+                compile_pytorch_config(
+                    get_task_descriptor("tabular_classification"), TABLE, PytorchHyperparameters(**selection)
+                )
+
+    def test_an_unknown_or_custom_model_is_refused(self):
+        with pytest.raises(ConfigError, match="not a text model"):
+            compile_text(model_id="resnet18")
+        with pytest.raises(ConfigError, match="bring-your-own"):
+            compile_text(model_id="custom:00000000-0000-0000-0000-000000000000")
+        with pytest.raises(ConfigError, match="bring-your-own"):
+            compile_pytorch_config(
+                TEXT, REVIEWS, PytorchHyperparameters(),
+                CustomModelRef(id="u", kind="hf_transformer", source_kind="hub", local_path="unused"),
+            )  # fmt: skip
+
+    def test_a_snapshot_with_one_class_or_no_text_column_is_refused(self):
+        with pytest.raises(ConfigError, match="at least two classes"):
+            compile_text(SnapshotContext(columns=REVIEWS.columns, label_class_names=["only"]))
+        with pytest.raises(ConfigError, match="inline_text"):
+            compile_text(
+                SnapshotContext(columns=[REVIEWS.columns[1], REVIEWS.columns[2]], label_class_names=["a", "b"])
+            )
+
+    def test_the_form_offers_the_text_knobs_and_none_of_the_others(self):
+        names = {p.name for p in hyperparameter_specs(TEXT)}
+        assert {"maxTokens", "vocabSize", "minWordCount", "dropout", "useClassWeights", "optimizer"} <= names
+        assert {"seed", "weightDecay", "lrSchedule", "warmupEpochs", "gradClipNorm", "mixedPrecision"} <= names
+        assert not names & {"imageSize", "pretrained", "freezeBackbone", "sampleRate", "nMels", "specAugment"}
+
+    def test_it_offers_a_bag_and_a_cnn_and_neither_is_pretrained(self):
+        models = PytorchBackend.models(TEXT)
+        assert [m.id for m in models] == ["text_bag", "text_cnn"]
+        assert not any(m.pretrained for m in models)
+
+    def test_it_is_not_the_default_for_text_and_ludwig_stays_offered(self):
+        offered = trainable_backends(TEXT)
+        assert PytorchBackend in offered and get_backend("ludwig") in offered
+        assert offered[0] is not PytorchBackend
+
+
+class TestTextManifest:
+    META = {
+        "task": "classify", "model": "text_bag", **TextSpec(max_tokens=16, vocab=("good", "bad", "ok")).to_meta(),
+        "textColumn": "review", "network": {"dropout": 0.3}, "outputName": "class", "names": ["neg", "pos"],
+    }  # fmt: skip
+
+    def test_the_recipe_is_spelled_out_for_a_client(self):
+        m = build_preprocessing_manifest("r", {}, self.META)
+        [i] = m["inputs"]
+        assert (i["name"], i["type"], i["column"], i["layout"]) == (
+            "tokens",
+            "text",
+            "review",
+            "[batch, maxTokens] int64",
+        )
+        recipe = i["textTokens"]
+        assert recipe["recipe"] == "word_ids_v1"
+        assert (recipe["maxTokens"], recipe["padId"], recipe["unknownId"], recipe["firstWordId"]) == (16, 0, 1, 2)
+        assert recipe["vocabulary"] == ["good", "bad", "ok"]
+        assert recipe["lowercase"] == {"from": 65, "to": 90, "add": 32}
+        assert recipe["separatorRanges"] == [list(r) for r in text.SEPARATOR_RANGES]
+        assert m["outputs"] == [{"name": "class", "type": "category", "column": "class", "classes": ["neg", "pos"]}]
+
+    def test_it_is_not_scikit_learns_string_input(self):
+        [i] = build_preprocessing_manifest("r", {}, self.META)["inputs"]
+        assert "textInput" not in i
+
+    def test_the_class_order_comes_from_the_trained_model_not_the_table(self):
+        meta = {**self.META, "names": ["pos", "neg"]}
+        assert build_preprocessing_manifest("r", {}, meta)["outputs"][0]["classes"] == ["pos", "neg"]

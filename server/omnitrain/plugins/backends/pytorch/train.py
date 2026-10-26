@@ -1,12 +1,15 @@
 """The PyTorch half of training: prepare the data, fit a network, report progress, upload.
 
-Two flows share `loop.fit` and differ in what a row is:
+Four flows share `loop.fit` and differ in what a row is:
 
   * images: download them, fine-tune a torchvision classifier. One epoch shows each training image once, as a fresh
     random crop (and a random flip if enabled). Validation and the final evaluation use `images.preprocess`, the same
     resize-and-crop an export client applies.
   * tables: read the parquet, fit the per-column statistics on the TRAIN rows only, train a small perceptron that
     standardises inside the graph.
+  * sounds: download and decode each recording once, train on random windows of its log-mel spectrogram.
+  * texts: read the parquet, build the vocabulary from the TRAIN texts only, encode every text as word ids, train a
+    word-level network from scratch. Nothing is downloaded: the text is in the snapshot.
 
 Progress, heartbeats and the abort check run in the training loop itself, so `TrainingAborted` from
 `run.check_abort()` stops training the same way it does for the other backends.
@@ -29,10 +32,10 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from omnitrain.core import constants as C
 from omnitrain.plugins.backends.base import ConfigError, TrainContext
-from omnitrain.plugins.backends.pytorch import audio, data, images, loop, network, runtime, tabular
+from omnitrain.plugins.backends.pytorch import audio, data, images, loop, network, runtime, tabular, text
 from omnitrain.plugins.backends.pytorch.model import PytorchLoadedModel
 from omnitrain.plugins.backends.pytorch.model import load as load_model
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TextSpec
 from omnitrain.services import storage
 
 logger = logging.getLogger(__name__)
@@ -310,6 +313,64 @@ def _tabular_setup(run: TrainContext, df: pd.DataFrame, class_names: list[str]) 
     return Setup(net, loader("train", shuffle=True), loader("validation", shuffle=False), objective, meta)
 
 
+def _text_setup(run: TrainContext, df: pd.DataFrame, class_names: list[str]) -> Setup:
+    cfg = run.config
+    hp: dict[str, Any] = cfg["train"]
+    settings: dict[str, Any] = cfg["text"]
+
+    splits = text.prepare(
+        df,
+        text_column=cfg["textColumn"],
+        label_column=cfg["labelColumn"],
+        class_names=class_names,
+        split_column=C.SPLIT_COLUMN_NAME,
+    )
+    for name in ("train", "validation"):
+        if len(splits[name]) == 0:
+            raise ConfigError(
+                f"The {name} split has no usable texts, which training needs. Check the snapshot's split settings "
+                "and that its items are labelled."
+            )
+    if len(set(splits["train"].y.tolist())) < 2:
+        raise ConfigError("The train split has only one class, so there is nothing to tell apart")
+
+    # Built from the train texts alone, so nothing about validation or test leaks into what the model knows.
+    vocabulary = text.fit_vocabulary(
+        splits["train"].texts, max_words=int(settings["vocabSize"]), min_count=int(settings["minWordCount"])
+    )
+    spec = TextSpec(max_tokens=int(settings["maxTokens"])).with_vocabulary(vocabulary)
+    dropout = float(cfg["network"]["dropout"])
+    meta = {
+        "schemaVersion": 1,
+        "task": cfg["task"],
+        "model": cfg["model"],
+        **spec.to_meta(),
+        "textColumn": cfg["textColumn"],
+        "network": {"dropout": dropout},
+        "outputName": cfg["labelColumn"],
+        # The model's class order: index i is class_names[i], because that is how the labels were encoded above.
+        "names": class_names,
+    }
+    net = network.build_text(cfg["model"], spec.size, len(class_names), dropout)
+
+    weights = None
+    if hp.get("useClassWeights"):
+        weights = torch.from_numpy(tabular.balanced_class_weights(splits["train"].y, len(class_names)))
+    batch_size = int(hp["batchSize"])
+
+    def loader(split: str, *, shuffle: bool) -> DataLoader:
+        part = splits[split]
+        return DataLoader(
+            TensorDataset(torch.from_numpy(text.encode(part.texts, spec)), torch.from_numpy(part.y)),
+            batch_size=batch_size,
+            shuffle=shuffle,
+        )
+
+    return Setup(
+        net, loader("train", shuffle=True), loader("validation", shuffle=False), loop.Classification(weights), meta
+    )
+
+
 def train(run: TrainContext) -> PytorchLoadedModel:
     cfg = run.config
     hp: dict[str, Any] = cfg["train"]
@@ -326,6 +387,8 @@ def train(run: TrainContext) -> PytorchLoadedModel:
 
         if cfg["inputKind"] == "tabular":
             setup = _tabular_setup(run, df, class_names)
+        elif cfg["inputKind"] == "text":
+            setup = _text_setup(run, df, class_names)
         elif cfg["inputKind"] == "audio":
             setup = _audio_setup(run, df, workdir, beat, seed, class_names)
         else:

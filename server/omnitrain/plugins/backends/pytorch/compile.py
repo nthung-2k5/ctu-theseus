@@ -4,7 +4,7 @@ The config is a plain dict stored verbatim as `training_runs.config`; `train.py`
 wrong with a request (an unknown model, a snapshot with one class) surfaces here as a `ConfigError`, before a run row is
 committed. No torch import: this module is imported when the backend is merely listed.
 
-`inputKind` in the config says what a row is (`image`, `tabular` or `audio`) and so which of `train.py`'s flows
+`inputKind` in the config says what a row is (`image`, `tabular`, `audio` or `text`) and so which of `train.py`'s flows
 runs. A knob that only makes sense for the other kind is refused rather than ignored, so a sweep over it measures
 something.
 """
@@ -27,7 +27,7 @@ from omnitrain.plugins.backends.base import (
     weight_decay_spec,
 )
 from omnitrain.plugins.backends.pytorch import tasks
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TextSpec
 from omnitrain.schemas.common import ParamSpec
 
 _MODEL = "Model details"
@@ -35,6 +35,7 @@ _TRAINING = "Training"
 _STOPPING = "Stopping"
 _DATA = "Images"
 _AUDIO = "Audio"
+_TEXT = "Text"
 # The narrowest spectrogram (in frames) the networks accept: a ResNet halves each side five times.
 MIN_FRAMES = 32
 
@@ -43,6 +44,7 @@ _IMAGE_ONLY = ("image_size", "horizontal_flip")
 _PRETRAINED = ("pretrained", "freeze_backbone")
 _TABULAR_ONLY = ("dropout", "use_class_weights")
 _AUDIO_ONLY = ("sample_rate", "clip_seconds", "n_mels", "clips_per_audio", "spec_augment")
+_TEXT_ONLY = ("max_tokens", "vocab_size", "min_word_count")
 
 
 class PytorchHyperparameters(HyperparamsBase):
@@ -69,6 +71,11 @@ class PytorchHyperparameters(HyperparamsBase):
     n_mels: int | None = Field(default=None, ge=16, le=256)
     clips_per_audio: int | None = Field(default=None, ge=1, le=10)
     spec_augment: bool | None = None
+    # Text: the most words of a text the model reads (the rest is cut), the most distinct words it learns, and how
+    # often a word must occur in the training texts to be learned (a rarer one is read as unknown).
+    max_tokens: int | None = Field(default=None, ge=8, le=1024)
+    vocab_size: int | None = Field(default=None, ge=100, le=200000)
+    min_word_count: int | None = Field(default=None, ge=1, le=1000)
 
 
 def _refuse(hp: PytorchHyperparameters, task: TaskDescriptor, *names: str) -> None:
@@ -81,17 +88,20 @@ def _refuse(hp: PytorchHyperparameters, task: TaskDescriptor, *names: str) -> No
 def compile_pytorch_config(
     task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef | None = None
 ) -> dict[str, Any]:
-    if task.id not in tasks.IMAGE_TASKS | tasks.AUDIO_TASKS and task.id not in tasks.TABULAR_TASKS:
+    if task.id not in tasks.IMAGE_TASKS | tasks.AUDIO_TASKS | tasks.TEXT_TASKS and task.id not in tasks.TABULAR_TASKS:
         raise ConfigError(f'The PyTorch backend does not support the task "{task.id}"')
     if custom is not None or (hp.model_id and hp.model_id.startswith("custom:")):
         raise ConfigError("The PyTorch backend does not take bring-your-own models yet")
     if task.id in tasks.IMAGE_TASKS:
-        _refuse(hp, task, *_TABULAR_ONLY, *_AUDIO_ONLY)
+        _refuse(hp, task, *_TABULAR_ONLY, *_AUDIO_ONLY, *_TEXT_ONLY)
         return _compile_image(task, ctx, hp)
     if task.id in tasks.AUDIO_TASKS:
-        _refuse(hp, task, *_TABULAR_ONLY, *_IMAGE_ONLY)
+        _refuse(hp, task, *_TABULAR_ONLY, *_IMAGE_ONLY, *_TEXT_ONLY)
         return _compile_audio(task, ctx, hp)
-    _refuse(hp, task, *_IMAGE_ONLY, *_PRETRAINED, *_AUDIO_ONLY)
+    if task.id in tasks.TEXT_TASKS:
+        _refuse(hp, task, *_IMAGE_ONLY, *_PRETRAINED, *_AUDIO_ONLY)
+        return _compile_text(task, ctx, hp)
+    _refuse(hp, task, *_IMAGE_ONLY, *_PRETRAINED, *_AUDIO_ONLY, *_TEXT_ONLY)
     return _compile_tabular(task, ctx, hp)
 
 
@@ -197,6 +207,39 @@ def _compile_audio(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperp
     }
 
 
+def _compile_text(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters) -> dict[str, Any]:
+    if len(ctx.label_class_names) < 2:
+        raise ConfigError("Text classification needs a snapshot with at least two classes")
+    model_id = hp.model_id or tasks.TEXT_MODELS[0].id
+    if model_id not in tasks.TEXT_MODELS_BY_ID:
+        raise ConfigError(f'"{model_id}" is not a text model for the task "{task.id}"')
+
+    d = tasks.TEXT_DEFAULTS
+    # The vocabulary is empty here: `train.py` builds it from the train texts and writes the real one to names.json.
+    spec = TextSpec(max_tokens=hp.max_tokens or d["max_tokens"])
+    return {
+        "backend": "pytorch",
+        "inputKind": "text",
+        "task": "classify",
+        "model": model_id,
+        "textColumn": _column(ctx, "inline_text"),
+        "labelColumn": _column(ctx, "label"),
+        # The index a class gets is its position here. `train.py` writes this order into names.json, and a loaded
+        # model reads it back from there: serving and export never consult this config or the label_classes table.
+        "classNames": list(ctx.label_class_names),
+        "text": {
+            "maxTokens": spec.max_tokens,
+            "vocabSize": hp.vocab_size or d["vocab_size"],
+            "minWordCount": hp.min_word_count or d["min_word_count"],
+        },
+        "network": {"dropout": d["dropout"] if hp.dropout is None else hp.dropout},
+        "train": {
+            **_train_block(hp, d, epochs=hp.epochs or d["epochs"]),
+            "useClassWeights": bool(hp.use_class_weights),
+        },
+    }
+
+
 def _compile_tabular(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters) -> dict[str, Any]:
     kind = tasks.TABULAR_TASKS[task.id]
     if kind == "classify" and len(ctx.label_class_names) < 2:
@@ -246,7 +289,70 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
         return _tabular_specs(tasks.TABULAR_TASKS[task.id])
     if task.id in tasks.AUDIO_TASKS:
         return _audio_specs()
+    if task.id in tasks.TEXT_TASKS:
+        return _text_specs()
     return []
+
+
+def _text_specs() -> list[ParamSpec]:
+    d = tasks.TEXT_DEFAULTS
+    return [
+        ParamSpec(
+            name="epochs", label="Epochs", type="int", group=_TRAINING, default=d["epochs"], min=1, max=500, step=1,
+            description="How many times the model goes through your whole training set (each pass is one epoch).",
+        ),
+        ParamSpec(
+            name="batchSize", label="Batch Size", type="choice", group=_TRAINING,
+            default=str(d["batch"]), choices=[str(n) for n in tasks.TEXT_BATCH_SIZES],
+            description="How many texts the model reads before it updates itself. Bigger batches are faster but "
+            "need more memory.",
+        ),
+        ParamSpec(
+            name="learningRate", label="Learning Rate", type="float", group=_TRAINING,
+            default=d["learning_rate"], min=0.00001, max=0.1, step=0.0001,
+            description="How big a step the model takes each time it learns from some texts. Too high and it "
+            "overshoots; too low and training is slow.",
+        ),
+        seed_spec(_TRAINING),
+        weight_decay_spec(_TRAINING),
+        lr_schedule_spec(_TRAINING),
+        warmup_spec(_TRAINING),
+        grad_clip_spec(_TRAINING),
+        mixed_precision_spec(_TRAINING),
+        _optimizer_spec(),
+        ParamSpec(
+            name="useClassWeights", label="Balance classes", type="bool", group=_TRAINING, default=False,
+            description="Weights each class inversely to how often it appears, so a rare class counts as much as a "
+            "common one. Helps when one class is far more common than the others, at the cost of some accuracy on "
+            "the common one.",
+        ),
+        ParamSpec(
+            name="dropout", label="Dropout", type="float", group=_MODEL, default=d["dropout"], min=0, max=0.9,
+            step=0.05,
+            description="Randomly switches off this share of the model's units while training, so it cannot lean on "
+            "any one of them. Raise it if the model memorises the training texts (validation results get worse "
+            "while training results keep improving), which is common with few texts.",
+        ),
+        _patience_spec(d["patience"]),
+        ParamSpec(
+            name="maxTokens", label="Words read per text", type="int", group=_TEXT, default=d["max_tokens"], min=8,
+            max=1024, step=8,
+            description="The model reads this many words from the start of each text and ignores the rest. Texts "
+            "shorter than this are padded. Reading more of a long text costs more time and memory.",
+        ),
+        ParamSpec(
+            name="vocabSize", label="Vocabulary size", type="int", group=_TEXT, default=d["vocab_size"], min=100,
+            max=200000, step=1000,
+            description="The model learns at most this many different words, the most frequent in your training "
+            "texts. Every other word is read as 'unknown'. A bigger vocabulary makes a bigger exported model.",
+        ),
+        ParamSpec(
+            name="minWordCount", label="Minimum word count", type="int", group=_TEXT, default=d["min_word_count"],
+            min=1, max=1000, step=1,
+            description="A word must appear at least this many times in the training texts to be learned. Raising "
+            "it drops typos and one-off names, which the model could only memorise.",
+        ),
+    ]  # fmt: skip
 
 
 def _audio_specs() -> list[ParamSpec]:

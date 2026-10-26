@@ -140,3 +140,34 @@ class AudioSpec:
             std=float(meta["spectrogramStd"]),
             clips=int(meta["clipsPerAudio"]),
         )
+
+
+@dataclass(frozen=True)
+class TextSpec:
+    """A text as the network sees it: `max_tokens` ids. `text.py` is the one recipe (lower-case ASCII letters, split on
+    separators, look each token up in `vocab`, `UNKNOWN` when absent, cut at `max_tokens`, pad with `PAD`), used by
+    training, evaluation and serving, and written out in full in the export manifest for a client to follow. The
+    vocabulary is built from the TRAIN texts only. A word's id is its position in `vocab` plus two (0 is padding, 1 is
+    an unknown word)."""
+
+    max_tokens: int
+    vocab: tuple[str, ...] = ()
+
+    @property
+    def index(self) -> dict[str, int]:
+        return {word: i + 2 for i, word in enumerate(self.vocab)}
+
+    @property
+    def size(self) -> int:
+        """Rows of the embedding table: the padding and unknown ids plus the vocabulary."""
+        return len(self.vocab) + 2
+
+    def with_vocabulary(self, vocab: list[str]) -> "TextSpec":
+        return replace(self, vocab=tuple(vocab))
+
+    def to_meta(self) -> dict[str, Any]:
+        return {"inputKind": "text", "maxTokens": self.max_tokens, "vocabulary": list(self.vocab)}
+
+    @classmethod
+    def from_meta(cls, meta: dict[str, Any]) -> "TextSpec":
+        return cls(max_tokens=int(meta["maxTokens"]), vocab=tuple(str(w) for w in meta.get("vocabulary", ())))

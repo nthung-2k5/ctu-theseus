@@ -1,10 +1,12 @@
 """The preprocessing.json that makes a bare PyTorch ONNX export usable.
 
 An image graph takes a ready-made float tensor and returns raw class logits: no decoding of an image file, no resize,
-no label lookup. A table graph takes raw numbers (it fills and standardises them itself, so a client does nothing to
-them) and returns logits or the target's number. `names.json` (written at train time) supplies what a client must do
-to an image first and the class list in the model's own index order. The manifest is built from the same spec the model
-was trained, evaluated and served with, so a client that follows it sees what the platform saw.
+no label lookup. A sound or a text is the same: the graph takes the spectrogram or the word ids, and the manifest
+carries the whole recipe that makes them. A table graph takes raw numbers (it fills and standardises them itself, so a
+client does nothing to them) and returns logits or the target's number. `names.json` (written at train time) supplies
+what a client must do to an image first and the class list in the model's own index order. The manifest is built from
+the same spec the model was trained, evaluated and served with, so a client that follows it sees what the platform
+saw.
 
 The class list MUST come from `names.json`, NEVER from the label_classes table: Postgres has no idea which index a run
 assigned each class, so guessing wrong silently mislabels every prediction a generated client makes.
@@ -12,9 +14,9 @@ assigned each class, so guessing wrong silently mislabels every prediction a gen
 
 from typing import Any
 
-from omnitrain.plugins.backends.pytorch import audio
+from omnitrain.plugins.backends.pytorch import audio, text
 from omnitrain.plugins.backends.pytorch.runtime import METADATA_FILENAME
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TextSpec
 
 
 def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict[str, Any] | None) -> dict[str, Any]:
@@ -48,6 +50,9 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
             "outputs": [output],
         }
 
+    if meta["inputKind"] == "text":
+        return {"schemaVersion": 1, "runId": run_id, "inputs": [_text_input(meta)], "outputs": [output]}
+
     spec = ImageSpec.from_meta(meta)
     image = {
         "name": "images",
@@ -63,6 +68,44 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
         "ludwigPreprocessing": {"height": spec.size, "width": spec.size},
     }
     return {"schemaVersion": 1, "runId": run_id, "inputs": [image], "outputs": [output]}
+
+
+TEXT_SPLIT = (
+    "Lower-case the ASCII letters A-Z only (add 32 to a code unit between 65 and 90) and change nothing else. A "
+    "token is a maximal run of code units none of which is in separatorRanges; the text is read as UTF-16 code units "
+    "or as code points, which gives the same tokens because every separator is in the Basic Multilingual Plane. No "
+    "Unicode normalisation, no other case folding."
+)
+TEXT_IDS = (
+    "Take the first maxTokens tokens. Each becomes its position in vocabulary plus firstWordId, or unknownId when "
+    "it is not in vocabulary (an exact, case-sensitive match on the lower-cased token). Pad the end with padId up to "
+    "maxTokens. A text with no tokens is all padding."
+)
+
+
+def _text_input(meta: dict[str, Any]) -> dict[str, Any]:
+    """The whole recipe that turns a text into the model's input; `text.py` is the reference implementation and every
+    generated client follows this object (it refuses a `recipe` it does not know). Per text: split into tokens, turn
+    them into ids, run the model on the one row, softmax the logits."""
+    spec = TextSpec.from_meta(meta)
+    return {
+        "name": "tokens",
+        "type": "text",
+        "column": meta["textColumn"],
+        "layout": "[batch, maxTokens] int64",
+        "textTokens": {
+            "recipe": "word_ids_v1",
+            "split": TEXT_SPLIT,
+            "lowercase": {"from": ord("A"), "to": ord("Z"), "add": 32},
+            "separatorRanges": [[lo, hi] for lo, hi in text.SEPARATOR_RANGES],
+            "ids": TEXT_IDS,
+            "maxTokens": spec.max_tokens,
+            "padId": text.PAD,
+            "unknownId": text.UNKNOWN,
+            "firstWordId": text.FIRST_WORD,
+            "vocabulary": list(spec.vocab),
+        },
+    }
 
 
 RESAMPLE = (

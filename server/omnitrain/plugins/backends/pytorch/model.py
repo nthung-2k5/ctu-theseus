@@ -5,9 +5,9 @@ number) and, for a classifier, `{feature}_probabilities` (one per class, in the 
 `{feature}_probability` (the winner's, for `domain.evaluate.top_errors`), so batch results, the evaluation report and
 the export golden sample work on it unchanged.
 
-What differs between an image model and a table model is only how a frame becomes network output (`outputs`), which
-reads the spec stored in `names.json`; the rest is shared. Images go through `images.preprocess`, the same steps an
-export client applies.
+What differs between the kinds of model is only how a frame becomes network output (`outputs`), which reads the
+spec stored in `names.json`; the rest is shared. Images go through `images.preprocess`, a sound through `audio`, a text
+through `text.encode`: the same steps an export client applies.
 """
 
 import json
@@ -24,15 +24,16 @@ import torch
 
 from omnitrain.domain.predict import ClassificationClass, InferenceOutput
 from omnitrain.plugins.backends.base import LoadedModel, OutputSpec
-from omnitrain.plugins.backends.pytorch import audio, images, network, runtime, tabular
+from omnitrain.plugins.backends.pytorch import audio, images, network, runtime, tabular, text
 from omnitrain.plugins.backends.pytorch.data import split_s3_uri
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TabularSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TabularSpec, TextSpec
 from omnitrain.services import storage
 
 # Rows scored per forward pass, which bounds memory however many rows a frame has.
 IMAGE_PREDICT_BATCH = 32
 TABULAR_PREDICT_BATCH = 4096
 AUDIO_PREDICT_BATCH = 8
+TEXT_PREDICT_BATCH = 256
 # What an evaluation feeds `predict` at a time: the model's own forward batch.
 PREDICT_BATCH = IMAGE_PREDICT_BATCH
 
@@ -199,6 +200,29 @@ class AudioModel(PytorchLoadedModel):
         return np.stack(rows) if rows else np.zeros((0, len(self.output.labels or [])), dtype=np.float32)
 
 
+class TextModel(PytorchLoadedModel):
+    def __init__(self, net: torch.nn.Module, meta: dict[str, Any]) -> None:
+        super().__init__(net, meta)
+        self._spec = TextSpec.from_meta(meta)
+        self.input_columns = [meta["textColumn"]]
+
+    @property
+    def spec(self) -> TextSpec:
+        return self._spec
+
+    @property
+    def predict_batch(self) -> int:
+        return TEXT_PREDICT_BATCH
+
+    def outputs(self, frame: pd.DataFrame) -> np.ndarray:
+        ids = text.encode(text.clean(frame[self.input_columns[0]]), self._spec)
+        out = [
+            self._forward(torch.from_numpy(ids[start : start + TEXT_PREDICT_BATCH]))
+            for start in range(0, len(ids), TEXT_PREDICT_BATCH)
+        ]
+        return np.concatenate(out) if out else np.zeros((0, len(self.output.labels or [])), dtype=np.float32)
+
+
 def _localize(path: str, scratch: str, index: int, default_ext: str = ".jpg") -> str:
     """An `s3://` URI (a batch frame built from a snapshot) is fetched to a local file; a local path (the inference
     endpoint's upload) is used as it is."""
@@ -223,12 +247,15 @@ def build_network(meta: dict[str, Any]) -> torch.nn.Module:
         )
     if meta["inputKind"] == "audio":
         return network.build_audio(meta["model"], len(meta["names"]), pretrained=False)
+    if meta["inputKind"] == "text":
+        spec = TextSpec.from_meta(meta)
+        return network.build_text(meta["model"], spec.size, len(meta["names"]), float(meta["network"]["dropout"]))
     return network.build_model(meta["model"], len(meta["names"]), pretrained=False)
 
 
 def wrap(net: torch.nn.Module, meta: dict[str, Any]) -> PytorchLoadedModel:
     """`net` as the loaded model its `names.json` calls for."""
-    kinds = {"tabular": TabularModel, "audio": AudioModel, "image": ImageModel}
+    kinds = {"tabular": TabularModel, "audio": AudioModel, "image": ImageModel, "text": TextModel}
     return kinds[meta["inputKind"]](net, meta)
 
 

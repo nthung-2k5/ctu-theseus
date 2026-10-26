@@ -7,7 +7,9 @@ Only ONNX is offered, and it is exported straight from the trained `nn.Module`:
     its own softmax to.
   * An audio model takes a batch of log-mel spectrograms as a float tensor `[batch, 1, n_mels, frames]` named
     `spectrograms` (already computed and standardised, see audio.py and manifest.py) and returns raw class logits.
-    No generated client computes the spectrogram yet, so an audio bundle is the bare model plus the manifest.
+    Every generated client computes the spectrogram from the recipe in the manifest.
+  * A text model takes a batch of word ids as an int64 tensor `[batch, max_tokens]` named `tokens` (the text already
+    split and looked up in the vocabulary, see text.py and manifest.py) and returns raw class logits.
   * A table model takes one float tensor `[batch]` per column, named by the column, as RAW values: filling a missing
     value and standardising are inside the graph (so the manifest carries no `numberNormalization`). It returns logits
     for a classifier, or the number in the target's own units for a regressor, in one tensor named by the label column.
@@ -25,6 +27,7 @@ ARTIFACTS: dict[str, Artifact] = {"onnx": Artifact("onnx", ARTIFACT_FILENAMES["o
 IMAGE_INPUT_NAME = "images"
 IMAGE_OUTPUT_NAME = "logits"
 AUDIO_INPUT_NAME = "spectrograms"
+TEXT_INPUT_NAME = "tokens"
 
 
 def convert(model: Any, artifact_id: str, workdir: str) -> str:
@@ -60,6 +63,14 @@ def convert(model: Any, artifact_id: str, workdir: str) -> str:
         export_args = {
             "args": (torch.zeros(2, 1, model.spec.n_mels, model.spec.frames),),
             "input_names": [AUDIO_INPUT_NAME],
+            "dynamic_shapes": ({0: batch},),
+        }
+    elif model.meta["inputKind"] == "text":
+        output_name = IMAGE_OUTPUT_NAME
+        wrapped = net
+        export_args = {
+            "args": (torch.zeros(2, model.spec.max_tokens, dtype=torch.long),),
+            "input_names": [TEXT_INPUT_NAME],
             "dynamic_shapes": ({0: batch},),
         }
     else:

@@ -1,25 +1,27 @@
 """The PyTorch trainer backend (`id = "pytorch"`): code-defined models, trained by a plain PyTorch loop.
 
 Where Ludwig is configured (a YAML of feature types and encoders that Ludwig turns into a network), this backend is
-written: the network is a torchvision model with a new head (images) or a small perceptron (tables), the loop is ours,
-and what a model expects as input is one spec (`ImageSpec`, `TabularSpec`) that training, evaluation, serving and the
+written: the network is a torchvision model with a new head (images), a small perceptron (tables), a convolutional
+network over a spectrogram (sounds) or a word-level network (texts), the loop is ours, and what a model expects as
+input is one spec (`ImageSpec`, `TabularSpec`, `AudioSpec`, `TextSpec`) that training, evaluation, serving and the
 export manifest all read. That is what makes a client's prediction agree with the platform's, and it removes Ludwig's
 hidden preprocessing from the picture. A table's imputation and scaling are fitted on the train split only and live
 inside the exported graph.
 
 Submodules:
   tasks.py      the model catalog and defaults (pure data)
-  spec.py       `ImageSpec`, `TabularSpec` and `AudioSpec`: the single definition of an input (pure data)
+  spec.py       `ImageSpec`, `TabularSpec`, `AudioSpec` and `TextSpec`: the single definition of an input (pure data)
   compile.py    task + snapshot + hyperparameters -> training config dict (no torch import)
   runtime.py    where weights are cached, device and dataloader choice (torch imported only inside functions)
   images.py     image file -> tensor, shared by train, serve and the docs of the export clients (PIL, numpy)
   data.py       snapshot parquet -> local image files and labelled samples per split (pandas, PIL)
   audio.py      audio file -> log-mel spectrogram, the one recipe (numpy, scipy)
+  text.py       text -> word ids, the one recipe: tokenizer, train-only vocabulary, padding (numpy, pandas)
   tabular.py    snapshot parquet -> feature matrix and targets, train-only statistics (numpy, pandas)
-  network.py    builds a torchvision model with a fresh head, or the table perceptron
+  network.py    builds a torchvision model with a fresh head, the table perceptron, or a text model
   loop.py       heartbeats, the optimizer step (schedule, clipping, mixed precision), the objective and `fit`
-  train.py      the two flows (images, tables), progress/abort, uploading the result
-  model.py      PytorchLoadedModel (ImageModel, TabularModel): predict/to_output/golden_prediction
+  train.py      the flows (images, tables, sounds, texts), progress/abort, uploading the result
+  model.py      PytorchLoadedModel (Image/Tabular/Audio/TextModel): predict/to_output/golden_prediction
   evaluate.py   the evaluation report (the shared classification and regression reports)
   artifacts.py  ONNX conversion, straight from the module
   manifest.py   preprocessing.json for a bare model export
@@ -28,8 +30,8 @@ Only tasks.py, spec.py, compile.py, runtime.py, manifest.py and artifacts.py are
 of them imports torch at module level, so listing this backend never needs a GPU runtime. The others import torch, so
 they are imported lazily, inside the classmethods that need them.
 
-Licence: torchvision and its pretrained ImageNet weights are BSD-3-Clause. Not offered yet: text,
-bring-your-own models, categorical table columns.
+Licence: torchvision and its pretrained ImageNet weights are BSD-3-Clause. Not offered yet: pretrained or
+transformer text models, token classification, bring-your-own models, categorical table columns.
 """
 
 import importlib.util
@@ -57,6 +59,8 @@ from omnitrain.plugins.backends.pytorch.tasks import (
     IMAGE_TASKS,
     TABULAR_MODELS,
     TABULAR_TASKS,
+    TEXT_MODELS,
+    TEXT_TASKS,
 )
 from omnitrain.schemas.common import ParamSpec
 
@@ -66,7 +70,8 @@ class PytorchBackend(TrainerBackend):
     label = "PyTorch (torchvision)"
     description = (
         "Image classifiers (ResNet, EfficientNet, MobileNet, ConvNeXt, ViT) fine-tuned from ImageNet weights, and "
-        "multilayer perceptrons for tabular classification and regression, and spectrogram classifiers for sounds."
+        "multilayer perceptrons for tabular classification and regression, spectrogram classifiers for sounds, and "
+        "word-level classifiers for texts."
     )
     Hyperparameters = PytorchHyperparameters
     artifacts = ARTIFACTS
@@ -84,7 +89,7 @@ class PytorchBackend(TrainerBackend):
 
     @classmethod
     def supports(cls, task: TaskDescriptor) -> bool:
-        return task.id in IMAGE_TASKS or task.id in TABULAR_TASKS or task.id in AUDIO_TASKS
+        return task.id in IMAGE_TASKS or task.id in TABULAR_TASKS or task.id in AUDIO_TASKS or task.id in TEXT_TASKS
 
     @classmethod
     def models(cls, task: TaskDescriptor) -> list[ModelChoice]:
@@ -99,6 +104,8 @@ class PytorchBackend(TrainerBackend):
                 ModelChoice(id=m.id, label=m.label, description=m.description, pretrained=m.pretrained)
                 for m in AUDIO_MODELS
             ]
+        if task.id in TEXT_TASKS:
+            return [ModelChoice(id=m.id, label=m.label, description=m.description) for m in TEXT_MODELS]
         return []
 
     @classmethod

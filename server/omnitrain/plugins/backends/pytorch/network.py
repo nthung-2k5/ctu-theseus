@@ -1,5 +1,5 @@
-"""Build the networks: a torchvision image classifier with a fresh head, a multilayer perceptron for a table, and a
-spectrogram classifier for a sound.
+"""Build the networks: a torchvision image classifier with a fresh head, a multilayer perceptron for a table, a
+spectrogram classifier for a sound and a word-level classifier for a text.
 
 Imports torch (lazily imported module)."""
 
@@ -145,3 +145,57 @@ def build_audio(model_id: str, num_classes: int, *, pretrained: bool, freeze_bac
         for p in head.parameters():
             p.requires_grad = True
     return net
+
+
+class TextBag(nn.Module):
+    """The mean of the learned vectors of the words in a text, classified by a linear layer (fastText). Padding is left
+    out of the mean, so a short text is not diluted; an empty one (all padding) averages to the zero vector."""
+
+    def __init__(self, vocab_size: int, num_classes: int, dropout: float) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, tasks.TEXT_EMBEDDING, padding_idx=0)
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(tasks.TEXT_EMBEDDING, num_classes)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        present = (tokens != 0).unsqueeze(-1).to(torch.float32)
+        total = (self.embedding(tokens) * present).sum(dim=1)
+        mean = total / present.sum(dim=1).clamp(min=1.0)
+        return self.fc(self.dropout(mean))
+
+
+class TextCnn(nn.Module):
+    """Convolution filters over runs of 2, 3 and 4 consecutive words, each max-pooled over the whole text (Kim 2014).
+    A filter's activations are non-negative (ReLU), so a window that starts on padding is zeroed before the max and an
+    all-padding text pools to zeros, never to minus infinity."""
+
+    def __init__(self, vocab_size: int, num_classes: int, dropout: float) -> None:
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, tasks.TEXT_EMBEDDING, padding_idx=0)
+        self.convs = nn.ModuleList(
+            nn.Conv1d(tasks.TEXT_EMBEDDING, tasks.TEXT_CNN_FILTERS, kernel_size=w) for w in tasks.TEXT_CNN_WIDTHS
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(tasks.TEXT_CNN_FILTERS * len(tasks.TEXT_CNN_WIDTHS), num_classes)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        present = tokens != 0
+        embedded = self.embedding(tokens).transpose(1, 2)  # [batch, embedding, tokens]
+        pooled = []
+        for conv in self.convs:
+            active = torch.relu(conv(embedded))  # [batch, filters, tokens - width + 1]
+            # A window counts only if it starts on a real word, so one that is all padding adds nothing; a text shorter
+            # than the filter still counts, the rest of the window being the padding's zero vector.
+            starts = present[:, : active.shape[2]].unsqueeze(1)
+            pooled.append(torch.where(starts, active, torch.zeros_like(active)).amax(dim=2))
+        return self.fc(self.dropout(torch.cat(pooled, dim=1)))
+
+
+def build_text(model_id: str, vocab_size: int, num_classes: int, dropout: float) -> nn.Module:
+    """A text classifier over `[batch, max_tokens]` int64 ids with `vocab_size` embedding rows (padding and unknown
+    included). Every text model is trained from scratch."""
+    if model_id not in tasks.TEXT_MODELS_BY_ID:
+        raise ValueError(f'"{model_id}" is not a text model')
+    if model_id == "text_cnn":
+        return TextCnn(vocab_size, num_classes, dropout)
+    return TextBag(vocab_size, num_classes, dropout)

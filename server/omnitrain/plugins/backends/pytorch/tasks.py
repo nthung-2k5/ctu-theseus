@@ -147,3 +147,45 @@ AUDIO_DEFAULTS = {
     "clips_per_audio": 3,
 }
 AUDIO_BATCH_SIZES = [4, 8, 16, 32, 64]
+
+
+@dataclass(frozen=True)
+class TextModel:
+    id: str
+    label: str
+    description: str
+
+
+TEXT_MODELS: tuple[TextModel, ...] = (
+    TextModel(
+        "text_bag", "Word bag (fastText-style)", "Averages the learned vector of every word in the text and classifies "
+        "the average. Very fast, hard to overfit, and a strong baseline when the topic is given away by which words "
+        "appear.",
+    ),
+    TextModel(
+        "text_cnn", "Word CNN", "Slides filters over runs of two, three and four words, so it also sees short phrases "
+        "and negations (\"not good\"), not only which words occur. Slower than the bag, and the better choice when "
+        "word order carries the meaning.",
+    ),
+)  # fmt: skip
+
+TEXT_MODELS_BY_ID: dict[str, TextModel] = {m.id: m for m in TEXT_MODELS}
+
+TEXT_TASKS: frozenset[str] = frozenset({"text_classification"})
+
+TEXT_BATCH_SIZES = [16, 32, 64, 128, 256]
+TEXT_DEFAULTS = {
+    "epochs": 30,
+    "batch": 64,
+    "learning_rate": 0.002,
+    "patience": 5,
+    "dropout": 0.3,
+    "max_tokens": 128,
+    "vocab_size": 20000,
+    "min_word_count": 2,
+}
+# The embedding width of each text model: the size of a word's learned vector.
+TEXT_EMBEDDING = 128
+# A convolution filter spans this many words, and there are this many of each size.
+TEXT_CNN_WIDTHS = (2, 3, 4)
+TEXT_CNN_FILTERS = 100
