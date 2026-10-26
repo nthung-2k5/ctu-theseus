@@ -1,5 +1,5 @@
-from omnitrain.plugins.export.formats._kits import DETECTION, STANDARD, VIDEO, DevkitFormat
-from omnitrain.plugins.export.readme import DETECTION_LIMITATION, LIMITATION_FULL
+from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, VIDEO, DevkitFormat
+from omnitrain.plugins.export.readme import AUDIO_LIMITATION, DETECTION_LIMITATION, LIMITATION_FULL
 
 
 class PythonDevkit(DevkitFormat):
@@ -7,7 +7,7 @@ class PythonDevkit(DevkitFormat):
     label = "Python devkit"
     description = "ONNX model plus a Python inference client (onnxruntime), example and verify script."
     order = 10
-    handles = frozenset({STANDARD, DETECTION, VIDEO})
+    handles = frozenset({STANDARD, DETECTION, VIDEO, AUDIO})
     readme_info = {
         "label": "Python",
         "files": "`omnitrain_client.py`, `example.py`",
@@ -22,6 +22,13 @@ class PythonDevkit(DevkitFormat):
                     "\n# in code: client.detect(path, confidence=, iou=, max_detections=)"
                 ),
                 "limitation": DETECTION_LIMITATION,
+            },
+            "audio": {
+                "dependencies": (
+                    "pip install onnxruntime numpy pillow\npip install soundfile   # optional: formats other than WAV"
+                ),
+                "run_cmd": "python example.py <path-to-audio-file>",
+                "limitation": AUDIO_LIMITATION,
             },
             "video": {
                 "dependencies": "pip install onnxruntime numpy pillow opencv-python-headless",

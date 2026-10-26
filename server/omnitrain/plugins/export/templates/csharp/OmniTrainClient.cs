@@ -15,7 +15,12 @@
 // the letterbox, and `Detect()` returns the boxes. Other input types throw with
 // a pointer to preprocessing.json so you can adapt preprocessing yourself; see
 // README.md.
+//
+// An `audio` input that carries an `audioSpectrogram` recipe (audio classification) is
+// supported too: `Predict()` takes the path of a WAV file, makes the log-mel spectrograms
+// the recipe describes with no audio library, and averages the windows' probabilities.
 
+using System.Buffers.Binary;
 using System.Text.Json;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
@@ -31,10 +36,44 @@ internal sealed class ImageNormalization
     public float[] Std { get; set; } = [];
 }
 
+internal sealed class StftSpec
+{
+    public int NFft { get; set; }
+    public int HopLength { get; set; }
+}
+
+internal sealed class MelSpec
+{
+    public int Bands { get; set; }
+    public double FMin { get; set; }
+    public double FMax { get; set; }
+}
+
+internal sealed class NormalizationSpec
+{
+    public double Mean { get; set; }
+    public double Std { get; set; } = 1;
+}
+
+/// <summary>`inputs[0].audioSpectrogram` (recipe "log_mel_v1"): every number the spectrogram needs.</summary>
+internal sealed class AudioRecipe
+{
+    public string Recipe { get; set; } = "";
+    public int SampleRate { get; set; }
+    public int WindowSamples { get; set; }
+    public int WindowsPerAudio { get; set; }
+    public int Frames { get; set; }
+    public StftSpec Stft { get; set; } = new();
+    public MelSpec Mel { get; set; } = new();
+    public double LogFloor { get; set; } = 1e-6;
+    public NormalizationSpec Normalization { get; set; } = new();
+}
+
 internal sealed class PreprocessingInput
 {
     public string Type { get; set; } = "";
     public string Column { get; set; } = "";
+    public AudioRecipe? AudioSpectrogram { get; set; }
     public Dictionary<string, JsonElement>? LudwigPreprocessing { get; set; }
     // Absent: squash the whole image to height x width.
     public Dictionary<string, JsonElement>? ImageResize { get; set; }
@@ -61,6 +100,228 @@ internal sealed class PreprocessingManifest
     public List<PreprocessingOutput> Outputs { get; set; } = [];
 }
 
+/// <summary>
+/// `inputs[0].audioSpectrogram` spelled out. The platform computes the same thing in numpy; the arithmetic is plain
+/// enough (a polyphase resampler, a radix-2 FFT, a mel filterbank) to follow in any language.
+/// </summary>
+internal static class AudioFrontEnd
+{
+    /// <summary>A WAV file's samples, one array per channel, in [-1, 1], and its sample rate.</summary>
+    public static (float[][] Channels, int Rate) ReadWav(byte[] file)
+    {
+        static string Tag(byte[] b, int at) => System.Text.Encoding.ASCII.GetString(b, at, 4);
+        if (file.Length < 12 || Tag(file, 0) != "RIFF" || Tag(file, 8) != "WAVE")
+            throw new InvalidDataException("Not a WAV file (only WAV is supported)");
+
+        int code = 0, channels = 0, rate = 0, bits = 0, dataAt = -1;
+        long dataSize = 0;
+        for (long at = 12; at + 8 <= file.Length;)
+        {
+            var size = BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan((int)at + 4));
+            var body = at + 8;
+            if (Tag(file, (int)at) == "fmt " && size >= 16)
+            {
+                code = BinaryPrimitives.ReadUInt16LittleEndian(file.AsSpan((int)body));
+                if (code == 0xFFFE && size >= 26) code = BinaryPrimitives.ReadUInt16LittleEndian(file.AsSpan((int)body + 24));
+                channels = BinaryPrimitives.ReadUInt16LittleEndian(file.AsSpan((int)body + 2));
+                rate = (int)BinaryPrimitives.ReadUInt32LittleEndian(file.AsSpan((int)body + 4));
+                bits = BinaryPrimitives.ReadUInt16LittleEndian(file.AsSpan((int)body + 14));
+            }
+            else if (Tag(file, (int)at) == "data")
+            {
+                dataAt = (int)body;
+                dataSize = Math.Min(size, file.Length - body); // a streamed file may claim more than it holds
+                break;
+            }
+            at = body + size + (size & 1);
+        }
+        if (channels < 1 || dataAt < 0 || dataSize == 0) throw new InvalidDataException("The WAV file has no format or no samples");
+        var width = bits >> 3;
+        if (width < 1) throw new InvalidDataException("The WAV file has no channels");
+        var frames = (int)(dataSize / (width * channels));
+
+        float Read(int at) => (code, bits) switch
+        {
+            (1, 8) => (file[at] - 128) / 128f,
+            (1, 16) => BinaryPrimitives.ReadInt16LittleEndian(file.AsSpan(at)) / 32767f,
+            (1, 24) => (((file[at] | (file[at + 1] << 8) | (file[at + 2] << 16)) << 8) >> 8) / 8388607f,
+            (1, 32) => (float)(BinaryPrimitives.ReadInt32LittleEndian(file.AsSpan(at)) / 2147483647.0),
+            (3, 32) => BinaryPrimitives.ReadSingleLittleEndian(file.AsSpan(at)),
+            (3, 64) => (float)BinaryPrimitives.ReadDoubleLittleEndian(file.AsSpan(at)),
+            _ => throw new NotSupportedException($"Unsupported WAV encoding (format {code}, {bits} bits)"),
+        };
+        var result = new float[channels][];
+        for (var c = 0; c < channels; c++) result[c] = new float[frames];
+        for (var f = 0; f < frames; f++)
+            for (var c = 0; c < channels; c++)
+                result[c][f] = Read(dataAt + ((f * channels) + c) * width);
+        return (result, rate);
+    }
+
+    private static long Gcd(long a, long b) => b == 0 ? a : Gcd(b, a % b);
+
+    /// <summary>Modified Bessel function of the first kind, order 0 (the Kaiser window's building block).</summary>
+    private static double BesselI0(double x)
+    {
+        double sum = 1, term = 1;
+        for (var k = 1; k < 500; k++)
+        {
+            term *= Math.Pow(x / (2 * k), 2);
+            sum += term;
+            if (term < sum * 1e-17) break;
+        }
+        return sum;
+    }
+
+    /// <summary>
+    /// `scipy.signal.resample_poly(x, up, down)`: out[i] = sum over k in -H..H of h[H + k] * x[(i * down + k) / up],
+    /// counting the k for which i * down + k is a multiple of `up` and the index is inside the recording. `h` is a
+    /// Kaiser-windowed (beta 5) sinc low-pass of 2H + 1 taps, H = 10 * max(up, down), scaled to a gain of `up`.
+    /// </summary>
+    public static float[] Resample(double[] x, int rate, int target)
+    {
+        var divisor = Gcd(rate, target);
+        var up = target / divisor;
+        var down = rate / divisor;
+        var big = Math.Max(up, down);
+        var half = 10 * big;
+        static double Sinc(double v) => v == 0 ? 1 : Math.Sin(Math.PI * v) / (Math.PI * v);
+        var taps = new double[(2 * half) + 1];
+        var i0Beta = BesselI0(5);
+        double total = 0;
+        for (var n = 0; n <= 2 * half; n++)
+        {
+            var ratio = (double)(n - half) / half;
+            var window = BesselI0(5 * Math.Sqrt(Math.Max(1 - (ratio * ratio), 0))) / i0Beta;
+            taps[n] = Sinc((double)(n - half) / big) / big * window;
+            total += taps[n];
+        }
+        for (var n = 0; n <= 2 * half; n++) taps[n] *= up / total;
+
+        var outLength = (int)(((long)x.Length * up + down - 1) / down);
+        var result = new float[outLength];
+        for (var i = 0; i < outLength; i++)
+        {
+            var position = (long)i * down;
+            var anchor = position / up;
+            var phase = (int)(position % up);
+            var first = -((half - phase) / up);
+            var last = (half + phase) / up;
+            double acc = 0;
+            for (var d = first; d <= last; d++)
+            {
+                var index = anchor + d;
+                if (index >= 0 && index < x.Length) acc += taps[half - phase + (d * up)] * x[index];
+            }
+            result[i] = (float)acc;
+        }
+        return result;
+    }
+
+    /// <summary>Where the windows of a `total`-sample recording start (`audioSpectrogram.windowStarts`).</summary>
+    public static List<int> WindowStarts(int total, int length, int count)
+    {
+        if (total <= length) return [0];
+        var room = total - length;
+        if (count <= 1) return [room / 2];
+        var starts = new SortedSet<int>();
+        for (var i = 0; i < count; i++) starts.Add((int)Math.Round((double)i * room / (count - 1), MidpointRounding.ToEven));
+        return [.. starts];
+    }
+
+    /// <summary>In-place radix-2 FFT of `re` + i `im` (length a power of two).</summary>
+    private static void Fft(double[] re, double[] im)
+    {
+        var n = re.Length;
+        for (int i = 1, j = 0; i < n; i++)
+        {
+            var bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j)
+            {
+                (re[i], re[j]) = (re[j], re[i]);
+                (im[i], im[j]) = (im[j], im[i]);
+            }
+        }
+        for (var size = 2; size <= n; size <<= 1)
+        {
+            var angle = -2 * Math.PI / size;
+            for (var start = 0; start < n; start += size)
+            {
+                for (var k = 0; k < size / 2; k++)
+                {
+                    double wr = Math.Cos(angle * k), wi = Math.Sin(angle * k);
+                    int a = start + k, b = a + (size / 2);
+                    var tr = (re[b] * wr) - (im[b] * wi);
+                    var ti = (re[b] * wi) + (im[b] * wr);
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+        }
+    }
+
+    /// <summary>`[nFft / 2 + 1][bands]` triangular HTK mel filters, no area normalisation.</summary>
+    public static double[][] MelFilterbank(int sampleRate, int nFft, int bands, double fMin, double fMax)
+    {
+        static double ToMel(double hz) => 2595 * Math.Log10(1 + (hz / 700));
+        var edges = new double[bands + 2];
+        for (var i = 0; i < edges.Length; i++)
+        {
+            var mel = ToMel(fMin) + ((ToMel(fMax) - ToMel(fMin)) * i / (bands + 1));
+            edges[i] = 700 * (Math.Pow(10, mel / 2595) - 1);
+        }
+        var bins = (nFft / 2) + 1;
+        var filters = new double[bins][];
+        for (var bin = 0; bin < bins; bin++)
+        {
+            filters[bin] = new double[bands];
+            var hz = sampleRate / 2.0 * bin / (bins - 1);
+            for (var b = 0; b < bands; b++)
+            {
+                var rising = (hz - edges[b]) / (edges[b + 1] - edges[b]);
+                var falling = (edges[b + 2] - hz) / (edges[b + 2] - edges[b + 1]);
+                filters[bin][b] = Math.Max(0, Math.Min(rising, falling));
+            }
+        }
+        return filters;
+    }
+
+    /// <summary>The standardised log-mel spectrogram of one window, `[bands][frames]` flattened row by row.</summary>
+    public static float[] Spectrogram(float[] window, AudioRecipe recipe, double[][] filters)
+    {
+        int nFft = recipe.Stft.NFft, hop = recipe.Stft.HopLength, bands = recipe.Mel.Bands, frames = recipe.Frames;
+        var hann = new double[nFft];
+        for (var n = 0; n < nFft; n++) hann[n] = 0.5 - (0.5 * Math.Cos(2 * Math.PI * n / nFft));
+        var result = new float[bands * frames];
+        var re = new double[nFft];
+        var im = new double[nFft];
+        var bins = (nFft / 2) + 1;
+        var power = new double[bins];
+        for (var f = 0; f < frames; f++)
+        {
+            for (var n = 0; n < nFft; n++)
+            {
+                re[n] = window[(f * hop) + n] * hann[n];
+                im[n] = 0;
+            }
+            Fft(re, im);
+            for (var k = 0; k < bins; k++) power[k] = (re[k] * re[k]) + (im[k] * im[k]);
+            for (var b = 0; b < bands; b++)
+            {
+                double mel = 0;
+                for (var k = 0; k < bins; k++) mel += power[k] * filters[k][b];
+                var logMel = (float)Math.Log(mel + recipe.LogFloor);
+                result[(b * frames) + f] = (float)((logMel - recipe.Normalization.Mean) / recipe.Normalization.Std);
+            }
+        }
+        return result;
+    }
+}
+
 public sealed class OmniTrainClient : IDisposable
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -73,6 +334,9 @@ public sealed class OmniTrainClient : IDisposable
 
     /// <summary>An object detector: use <see cref="Detect"/>; <see cref="Predict"/> is for classifiers and regressors.</summary>
     public bool IsDetector => _outputSpec.Type == "detections";
+
+    /// <summary>An audio classifier: <see cref="Predict"/> takes the path of a WAV file.</summary>
+    public bool IsAudio => _inputSpec.Type == "audio" && _inputSpec.AudioSpectrogram is not null;
 
     public OmniTrainClient(string? modelPath = null, string? preprocessingPath = null)
     {
@@ -88,6 +352,12 @@ public sealed class OmniTrainClient : IDisposable
         _session = new InferenceSession(modelPath);
         _onnxInputName = MatchTensorName(_session.InputMetadata.Keys, _inputSpec.Column);
         _onnxOutputName = MatchTensorName(_session.OutputMetadata.Keys, _outputSpec.Column);
+        if (IsAudio && _inputSpec.AudioSpectrogram!.Recipe != "log_mel_v1")
+        {
+            throw new NotSupportedException(
+                $"Unknown audio recipe '{_inputSpec.AudioSpectrogram.Recipe}'. " +
+                "See preprocessing.json's inputs[0].audioSpectrogram and adapt this client.");
+        }
     }
 
     private static string MatchTensorName(IEnumerable<string> candidates, string preferred)
@@ -325,6 +595,56 @@ public sealed class OmniTrainClient : IDisposable
             .ToList();
     }
 
+    /// <summary>The recording as a batch of spectrograms, `[windows, 1, bands, frames]`, by `audioSpectrogram`.</summary>
+    private DenseTensor<float> AudioSpectrograms(string path)
+    {
+        var recipe = _inputSpec.AudioSpectrogram!;
+        var (channels, rate) = AudioFrontEnd.ReadWav(File.ReadAllBytes(path));
+        var frames = channels[0].Length;
+        // The channels' mean, at double precision as the platform does it.
+        var mono = new double[frames];
+        foreach (var channel in channels)
+            for (var i = 0; i < frames; i++) mono[i] += channel[i];
+        for (var i = 0; i < frames; i++) mono[i] /= channels.Length;
+        var wave = AudioFrontEnd.Resample(mono, rate, recipe.SampleRate);
+        if (wave.Length == 0) throw new InvalidDataException("The recording has no samples");
+
+        var length = recipe.WindowSamples;
+        var filters = AudioFrontEnd.MelFilterbank(recipe.SampleRate, recipe.Stft.NFft, recipe.Mel.Bands, recipe.Mel.FMin, recipe.Mel.FMax);
+        var starts = AudioFrontEnd.WindowStarts(wave.Length, length, recipe.WindowsPerAudio);
+        var size = recipe.Mel.Bands * recipe.Frames;
+        var batch = new float[starts.Count * size];
+        for (var w = 0; w < starts.Count; w++)
+        {
+            var window = new float[length]; // zero-padded at the end when the recording runs out
+            Array.Copy(wave, starts[w], window, 0, Math.Min(length, wave.Length - starts[w]));
+            AudioFrontEnd.Spectrogram(window, recipe, filters).CopyTo(batch, w * size);
+        }
+        return new DenseTensor<float>(batch, [starts.Count, 1, recipe.Mel.Bands, recipe.Frames]);
+    }
+
+    /// <summary>Class probabilities of a recording: each window's logits through a softmax, averaged over the windows.</summary>
+    private Dictionary<string, double> ClassifyAudio(string path, int topK)
+    {
+        var tensor = AudioSpectrograms(path);
+        var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_onnxInputName, tensor) };
+        using var results = _session.Run(inputs);
+        var logits = results.First(r => r.Name == _onnxOutputName).AsEnumerable<float>().ToArray();
+        var classes = _outputSpec.Classes ?? [];
+        var windows = tensor.Dimensions[0];
+        var mean = new double[classes.Count];
+        for (var w = 0; w < windows; w++)
+        {
+            var probs = Softmax(logits.Skip(w * classes.Count).Take(classes.Count).ToArray());
+            for (var c = 0; c < classes.Count; c++) mean[c] += probs[c] / (double)windows;
+        }
+        return classes
+            .Select((name, i) => (name, prob: mean[i]))
+            .OrderByDescending(p => p.prob)
+            .Take(topK)
+            .ToDictionary(p => p.name, p => Math.Round(p.prob, 4));
+    }
+
     private static float[] Softmax(float[] logits)
     {
         var max = logits.Max();
@@ -333,13 +653,17 @@ public sealed class OmniTrainClient : IDisposable
         return exp.Select(v => v / sum).ToArray();
     }
 
-    /// <summary>Runs inference and returns class -&gt; probability (classification, sorted descending) or {"value": x} (regression).</summary>
+    /// <summary>
+    /// Runs inference and returns class -&gt; probability (classification, sorted descending) or {"value": x}
+    /// (regression). `imagePath` is an image file, or for an audio classifier a WAV file.
+    /// </summary>
     public Dictionary<string, double> Predict(string imagePath, int topK = 5)
     {
         if (IsDetector)
         {
             throw new NotSupportedException("This model is an object detector: call Detect(), which returns boxes.");
         }
+        if (IsAudio) return ClassifyAudio(imagePath, topK);
         if (_inputSpec.Type != "image")
         {
             throw new NotSupportedException(

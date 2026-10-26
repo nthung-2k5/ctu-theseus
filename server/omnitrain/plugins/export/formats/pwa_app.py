@@ -1,7 +1,7 @@
 from omnitrain.plugins.export.common import render, template
-from omnitrain.plugins.export.formats._kits import DETECTION, STANDARD, AppFormat
+from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, AppFormat
 from omnitrain.plugins.export.formats.base import BundleContext
-from omnitrain.plugins.export.readme import DETECTION_LIMITATION
+from omnitrain.plugins.export.readme import AUDIO_APP_LIMITATION, DETECTION_LIMITATION
 
 
 class PwaApp(AppFormat):
@@ -9,13 +9,13 @@ class PwaApp(AppFormat):
     label = "Progressive Web App"
     description = "An installable in-browser app running the ONNX model on-device. No server."
     order = 10
-    handles = frozenset({STANDARD, DETECTION})
+    handles = frozenset({STANDARD, DETECTION, AUDIO})
     readme_info = {
         "label": "Progressive Web App",
         "setup_cmd": "python -m http.server 8000   # or: npx serve .",
         "run_cmd": 'Open http://localhost:8000 in a browser, then use the browser\'s "Install" prompt.',
         "verify_note": 'Use the "Run built-in self-check" button on the page.',
-        "kinds": {"detection": {"limitation": DETECTION_LIMITATION}},
+        "kinds": {"detection": {"limitation": DETECTION_LIMITATION}, "audio": {"limitation": AUDIO_APP_LIMITATION}},
     }
 
     @classmethod

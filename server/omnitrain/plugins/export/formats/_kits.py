@@ -7,18 +7,21 @@ from omnitrain.plugins.export.common import template
 from omnitrain.plugins.export.formats.base import BundleContext, ExportFormat
 from omnitrain.plugins.export.readme import app_readme, devkit_readme
 
-STANDARD, DETECTION, VIDEO = "standard", "detection", "video"
+STANDARD, DETECTION, VIDEO, AUDIO = "standard", "detection", "video", "audio"
 
 
 def client_kind(task: TaskDescriptor) -> str:
     """What a generated client has to do for this task: `standard` (classification and regression: one preprocessed
     input, a flat `{label: value}` result), `detection` (the graph returns every candidate box, so the client runs
-    the confidence filter, non-maximum suppression and undoes the letterbox) or `video` (decode a file, sample clips,
-    average the clips' probabilities)."""
+    the confidence filter, non-maximum suppression and undoes the letterbox), `video` (decode a file, sample clips,
+    average the clips' probabilities) or `audio` (decode a recording, resample it, cut windows, make a log-mel
+    spectrogram of each and average the windows' probabilities)."""
     if task.output is not None and task.output.kind == "detections":
         return DETECTION
     if task.modality == "video":
         return VIDEO
+    if task.modality == "audio":
+        return AUDIO
     return STANDARD
 
 
@@ -37,8 +40,8 @@ class DevkitFormat(ExportFormat):
     group = "Devkit"
     notice = (
         "Devkit bundles ship source only (no project or build files; dependencies are documented in the README). "
-        "Preprocessing is implemented for image and tabular inputs, and object detection; video is offered by the "
-        "Python devkit only. See the bundle's README for other modalities."
+        "Preprocessing is implemented for image and tabular inputs, object detection and audio (a trained "
+        "PyTorch model); video is offered by the Python devkit only. See the bundle's README for other modalities."
     )
     artifact = "onnx"
     needs_golden = True
@@ -75,7 +78,7 @@ class AppFormat(ExportFormat):
     group = "App"
     notice = (
         "App bundles run inference on-device, never on a server. Preprocessing is implemented for image "
-        "classification and object detection. See the bundle's README for other modalities."
+        "classification, object detection and audio classification. See the bundle's README for other modalities."
     )
     artifact = "onnx"
     needs_golden = True

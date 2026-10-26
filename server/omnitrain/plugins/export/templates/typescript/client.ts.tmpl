@@ -23,7 +23,11 @@
  *     filter, per-class non-maximum suppression and the undoing of the
  *     letterbox.
  *
- * Every other input type (text, audio, video) throws with a pointer to
+ *   - an `audio` input with an `audioSpectrogram` recipe (audio classification) — pass a
+ *     path to a WAV file. The spectrogram is computed here, from the recipe in
+ *     preprocessing.json; no audio library is needed.
+ *
+ * Every other input type (text, video, Ludwig's audio) throws with a pointer to
  * preprocessing.json so you can adapt preprocessing yourself — text
  * tokenization in particular depends on the chosen encoder's own
  * vocabulary (Ludwig's built-in tokenizer, or a HuggingFace subword
@@ -36,10 +40,24 @@ import { join } from 'node:path'
 import * as ort from 'onnxruntime-node'
 import sharp from 'sharp'
 
+/** `inputs[0].audioSpectrogram` (recipe "log_mel_v1"): every number the spectrogram needs. */
+interface AudioRecipe {
+  recipe: string
+  sampleRate: number
+  windowSamples: number
+  windowsPerAudio: number
+  frames: number
+  stft: { nFft: number; hopLength: number }
+  mel: { bands: number; fMin: number; fMax: number }
+  logFloor: number
+  normalization: { mean: number; std: number }
+}
+
 interface PreprocessingInput {
   name: string
   type: string
   column: string
+  audioSpectrogram?: AudioRecipe
   ludwigPreprocessing?: Record<string, unknown>
   /** Absent: squash the whole image to height x width. */
   imageResize?: { mode?: string; size?: [number, number]; padValue?: number }
@@ -143,6 +161,202 @@ function nonMaxSuppression(boxes: number[][], scores: number[], classes: number[
   return kept.sort((a, b) => scores[b] - scores[a])
 }
 
+// -- Audio -----------------------------------------------------------------------------------------------------
+// `inputs[0].audioSpectrogram` spelled out. The platform computes the same thing in numpy; the arithmetic is plain
+// enough (a polyphase resampler, a radix-2 FFT, a mel filterbank) to follow in any language.
+
+/** A WAV file's samples, one Float32Array per channel, in [-1, 1], and its sample rate. */
+function readWav(file: Uint8Array): { channels: Float32Array[]; rate: number } {
+  const view = new DataView(file.buffer, file.byteOffset, file.byteLength)
+  const tag = (at: number) => String.fromCharCode(file[at], file[at + 1], file[at + 2], file[at + 3])
+  if (file.length < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('Not a WAV file (only WAV is supported)')
+  let format: { code: number; channels: number; rate: number; bits: number } | undefined
+  let dataAt = -1
+  let dataSize = 0
+  for (let at = 12; at + 8 <= file.length; ) {
+    const size = view.getUint32(at + 4, true)
+    const body = at + 8
+    if (tag(at) === 'fmt ' && size >= 16) {
+      let code = view.getUint16(body, true)
+      if (code === 0xfffe && size >= 26) code = view.getUint16(body + 24, true) // extensible: the sub-format's tag
+      format = { code, channels: view.getUint16(body + 2, true), rate: view.getUint32(body + 4, true), bits: view.getUint16(body + 14, true) }
+    } else if (tag(at) === 'data') {
+      dataAt = body
+      dataSize = Math.min(size, file.length - body) // a streamed file may claim more than it holds
+      break
+    }
+    at = body + size + (size & 1)
+  }
+  if (!format || dataAt < 0 || dataSize === 0) throw new Error('The WAV file has no format or no samples')
+  const { code, channels, rate, bits } = format
+  const width = bits >> 3
+  if (channels < 1 || width < 1) throw new Error('The WAV file has no channels')
+  const frames = Math.floor(dataSize / (width * channels))
+  const read = (at: number): number => {
+    if (code === 1 && bits === 8) return (view.getUint8(at) - 128) / 128
+    if (code === 1 && bits === 16) return view.getInt16(at, true) / 32767
+    if (code === 1 && bits === 24) {
+      const v = view.getUint8(at) | (view.getUint8(at + 1) << 8) | (view.getUint8(at + 2) << 16)
+      return (v >= 0x800000 ? v - 0x1000000 : v) / 8388607
+    }
+    if (code === 1 && bits === 32) return view.getInt32(at, true) / 2147483647
+    if (code === 3 && bits === 32) return view.getFloat32(at, true)
+    if (code === 3 && bits === 64) return view.getFloat64(at, true)
+    throw new Error(`Unsupported WAV encoding (format ${code}, ${bits} bits)`)
+  }
+  const out = Array.from({ length: channels }, () => new Float32Array(frames))
+  for (let f = 0; f < frames; f++) {
+    for (let c = 0; c < channels; c++) out[c][f] = read(dataAt + (f * channels + c) * width)
+  }
+  return { channels: out, rate }
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b)
+}
+
+/** Modified Bessel function of the first kind, order 0 (the Kaiser window's building block). */
+function besselI0(x: number): number {
+  let sum = 1
+  let term = 1
+  for (let k = 1; k < 500; k++) {
+    term *= (x / (2 * k)) ** 2
+    sum += term
+    if (term < sum * 1e-17) break
+  }
+  return sum
+}
+
+/**
+ * `scipy.signal.resample_poly(x, up, down)`: out[i] = sum over k in -H..H of h[H + k] * x[(i * down + k) / up],
+ * counting the k for which i * down + k is a multiple of `up` and the index is inside the recording. `h` is a
+ * Kaiser-windowed (beta 5) sinc low-pass of 2H + 1 taps, H = 10 * max(up, down), scaled to a gain of `up`.
+ */
+function resample(x: Float32Array | Float64Array, rate: number, target: number): Float32Array {
+  const divisor = gcd(rate, target)
+  const up = target / divisor
+  const down = rate / divisor
+  const big = Math.max(up, down)
+  const half = 10 * big
+  const sinc = (v: number) => (v === 0 ? 1 : Math.sin(Math.PI * v) / (Math.PI * v))
+  const taps = new Float64Array(2 * half + 1)
+  const i0Beta = besselI0(5)
+  let total = 0
+  for (let n = 0; n <= 2 * half; n++) {
+    const ratio = (n - half) / half
+    const window = besselI0(5 * Math.sqrt(Math.max(1 - ratio * ratio, 0))) / i0Beta
+    taps[n] = (sinc((n - half) / big) / big) * window
+    total += taps[n]
+  }
+  for (let n = 0; n <= 2 * half; n++) taps[n] *= up / total
+
+  const outLength = Math.floor((x.length * up + down - 1) / down)
+  const out = new Float32Array(outLength)
+  for (let i = 0; i < outLength; i++) {
+    const position = i * down
+    const anchor = Math.floor(position / up)
+    const phase = position % up
+    const first = -Math.floor((half - phase) / up)
+    const last = Math.floor((half + phase) / up)
+    let acc = 0
+    for (let d = first; d <= last; d++) {
+      const index = anchor + d
+      if (index >= 0 && index < x.length) acc += taps[half - phase + d * up] * x[index]
+    }
+    out[i] = acc
+  }
+  return out
+}
+
+/** Where the windows of a `total`-sample recording start (`audioSpectrogram.windowStarts`). */
+function windowStarts(total: number, length: number, count: number): number[] {
+  if (total <= length) return [0]
+  const room = total - length
+  if (count <= 1) return [Math.floor(room / 2)]
+  const starts = new Set<number>()
+  for (let i = 0; i < count; i++) starts.add(roundHalfEven((i * room) / (count - 1)))
+  return [...starts].sort((a, b) => a - b)
+}
+
+/** In-place radix-2 FFT of `re` + i `im` (length a power of two). */
+function fft(re: Float64Array, im: Float64Array): void {
+  const n = re.length
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1
+    for (; j & bit; bit >>= 1) j ^= bit
+    j ^= bit
+    if (i < j) {
+      ;[re[i], re[j]] = [re[j], re[i]]
+      ;[im[i], im[j]] = [im[j], im[i]]
+    }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const angle = (-2 * Math.PI) / size
+    for (let start = 0; start < n; start += size) {
+      for (let k = 0; k < size / 2; k++) {
+        const wr = Math.cos(angle * k)
+        const wi = Math.sin(angle * k)
+        const a = start + k
+        const b = a + size / 2
+        const tr = re[b] * wr - im[b] * wi
+        const ti = re[b] * wi + im[b] * wr
+        re[b] = re[a] - tr
+        im[b] = im[a] - ti
+        re[a] += tr
+        im[a] += ti
+      }
+    }
+  }
+}
+
+/** `[nFft / 2 + 1][bands]` triangular HTK mel filters, no area normalisation. */
+function melFilterbank(sampleRate: number, nFft: number, bands: number, fMin: number, fMax: number): Float64Array[] {
+  const toMel = (hz: number) => 2595 * Math.log10(1 + hz / 700)
+  const edges = Array.from({ length: bands + 2 }, (_, i) => {
+    const mel = toMel(fMin) + ((toMel(fMax) - toMel(fMin)) * i) / (bands + 1)
+    return 700 * (10 ** (mel / 2595) - 1)
+  })
+  const bins = nFft / 2 + 1
+  const filters = Array.from({ length: bins }, () => new Float64Array(bands))
+  for (let bin = 0; bin < bins; bin++) {
+    const hz = (sampleRate / 2) * (bin / (bins - 1))
+    for (let b = 0; b < bands; b++) {
+      const rising = (hz - edges[b]) / (edges[b + 1] - edges[b])
+      const falling = (edges[b + 2] - hz) / (edges[b + 2] - edges[b + 1])
+      filters[bin][b] = Math.max(0, Math.min(rising, falling))
+    }
+  }
+  return filters
+}
+
+/** The standardised log-mel spectrogram of one window, `[bands][frames]` flattened row by row. */
+function spectrogramOf(window: Float32Array, recipe: AudioRecipe, filters: Float64Array[]): Float32Array {
+  const { nFft, hopLength } = recipe.stft
+  const bands = recipe.mel.bands
+  const frames = recipe.frames
+  const hann = Float64Array.from({ length: nFft }, (_, n) => 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / nFft))
+  const out = new Float32Array(bands * frames)
+  const re = new Float64Array(nFft)
+  const im = new Float64Array(nFft)
+  const bins = nFft / 2 + 1
+  const power = new Float64Array(bins)
+  for (let f = 0; f < frames; f++) {
+    for (let n = 0; n < nFft; n++) {
+      re[n] = window[f * hopLength + n] * hann[n]
+      im[n] = 0
+    }
+    fft(re, im)
+    for (let k = 0; k < bins; k++) power[k] = re[k] * re[k] + im[k] * im[k]
+    for (let b = 0; b < bands; b++) {
+      let mel = 0
+      for (let k = 0; k < bins; k++) mel += power[k] * filters[k][b]
+      const logMel = Math.fround(Math.log(mel + recipe.logFloor))
+      out[b * frames + f] = (logMel - recipe.normalization.mean) / recipe.normalization.std
+    }
+  }
+  return out
+}
+
 function softmax(x: Float32Array): Float32Array {
   const max = Math.max(...x)
   const exp = x.map((v) => Math.exp(v - max))
@@ -192,6 +406,8 @@ export class OmniTrainClient {
   readonly isTabular: boolean
   /** An object detector: `predict()` / `detect()` return boxes, not a `{className: probability}` record. */
   readonly isDetector: boolean
+  /** An audio classifier: `predict()` takes the path of a WAV file. */
+  readonly isAudio: boolean
 
   constructor(
     private modelPath = join(import.meta.dirname, 'model.onnx'),
@@ -203,6 +419,13 @@ export class OmniTrainClient {
     this.outputSpec = this.manifest.outputs[0]
     this.isTabular = this.inputSpecs.length > 1 || this.inputSpec.type === 'number'
     this.isDetector = this.outputSpec.type === 'detections'
+    this.isAudio = this.inputSpec.type === 'audio' && this.inputSpec.audioSpectrogram !== undefined
+    if (this.isAudio && this.inputSpec.audioSpectrogram?.recipe !== 'log_mel_v1') {
+      throw new Error(
+        `Unknown audio recipe '${this.inputSpec.audioSpectrogram?.recipe}'. ` +
+          "See preprocessing.json's inputs[0].audioSpectrogram and adapt this client.",
+      )
+    }
     this.ready = this.init()
   }
 
@@ -363,6 +586,52 @@ export class OmniTrainClient {
       })
   }
 
+  /** The recording as a batch of spectrograms, `[windows, 1, bands, frames]`, by `audioSpectrogram`. */
+  private audioSpectrograms(path: string): ort.Tensor {
+    const recipe = this.inputSpec.audioSpectrogram as AudioRecipe
+    const { channels, rate } = readWav(readFileSync(path))
+    const frames = channels[0].length
+    // The channels' mean, at double precision as the platform does it.
+    const mono = new Float64Array(frames)
+    for (const channel of channels) for (let i = 0; i < frames; i++) mono[i] += channel[i]
+    for (let i = 0; i < frames; i++) mono[i] /= channels.length
+    const wave = resample(mono, rate, recipe.sampleRate)
+    if (wave.length === 0) throw new Error('The recording has no samples')
+
+    const length = recipe.windowSamples
+    const filters = melFilterbank(recipe.sampleRate, recipe.stft.nFft, recipe.mel.bands, recipe.mel.fMin, recipe.mel.fMax)
+    const starts = windowStarts(wave.length, length, recipe.windowsPerAudio)
+    const size = recipe.mel.bands * recipe.frames
+    const batch = new Float32Array(starts.length * size)
+    starts.forEach((start, w) => {
+      const window = new Float32Array(length) // zero-padded at the end when the recording runs out
+      window.set(wave.subarray(start, Math.min(start + length, wave.length)))
+      batch.set(spectrogramOf(window, recipe, filters), w * size)
+    })
+    return new ort.Tensor('float32', batch, [starts.length, 1, recipe.mel.bands, recipe.frames])
+  }
+
+  /** Class probabilities of a recording: each window's logits through a softmax, averaged over the windows. */
+  private async classifyAudio(path: string, topK: number): Promise<Record<string, number>> {
+    const input = this.audioSpectrograms(path)
+    const outputs = await this.session.run({ [this.onnxInputNames[this.inputSpec.name]]: input })
+    const logits = outputs[this.onnxOutputName].data as Float32Array
+    const windows = input.dims[0]
+    const classes = this.outputSpec.classes ?? []
+    const mean = new Float64Array(classes.length)
+    for (let w = 0; w < windows; w++) {
+      const probs = softmax(logits.subarray(w * classes.length, (w + 1) * classes.length))
+      for (let c = 0; c < classes.length; c++) mean[c] += probs[c] / windows
+    }
+    return Object.fromEntries(
+      classes
+        .map((name, i) => [name, mean[i]] as const)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topK)
+        .map(([name, p]) => [name, Math.round(p * 10000) / 10000]),
+    )
+  }
+
   private preprocessRecord(record: Record<string, number>): Record<string, ort.Tensor> {
     const feed: Record<string, ort.Tensor> = {}
     for (const spec of this.inputSpecs) {
@@ -385,7 +654,7 @@ export class OmniTrainClient {
    * Run inference and return `{className: probability}` sorted descending
    * (classification), or `{value}` (regression).
    *
-   * `input` is a file path for a single `image` input, or a
+   * `input` is a file path for a single `image` or `audio` input, or a
    * `{column: value}` record — one entry per input feature — for a
    * tabular (`number`-only) model. An object detector returns its boxes
    * (see `detect`) instead of a `{className: probability}` record.
@@ -395,6 +664,11 @@ export class OmniTrainClient {
     if (this.outputSpec.type === 'detections') {
       if (typeof input !== 'string') throw new Error('This model takes an image input — pass a file path.')
       return this.detect(input)
+    }
+
+    if (this.isAudio) {
+      if (typeof input !== 'string') throw new Error('This model takes an audio input — pass a path to a WAV file.')
+      return this.classifyAudio(input, topK)
     }
 
     let feed: Record<string, ort.Tensor>

@@ -74,6 +74,10 @@ const expected = JSON.parse(readFileSync(expectedPath, 'utf-8')) as {
 const samplePath = join(import.meta.dirname, expected.sampleFile)
 
 const client = new OmniTrainClient()
+if (client.isAudio && !samplePath.toLowerCase().endsWith('.wav')) {
+  console.log("The bundled sample is not a WAV file, which this client can't read — nothing to verify.")
+  process.exit(0)
+}
 if (client.isDetector) {
   if (!expected.detections) {
     console.log('expected.json has no detections to compare against.')

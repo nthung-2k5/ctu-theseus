@@ -9,6 +9,12 @@
  * YOLO): the ONNX graph returns every candidate box, so for a detector this
  * app does the confidence filter, per-class non-maximum suppression and the
  * undoing of the letterbox, and `predict()` returns the boxes — see README.md.
+ *
+ * An `audio` input that carries an `audioSpectrogram` recipe (audio classification)
+ * is supported too: `predict()` takes an audio File/Blob, makes the log-mel spectrograms
+ * the recipe describes (a WAV file is read here; any other format the browser can decode
+ * is decoded by the browser at the model's sample rate, which can move a score slightly),
+ * and averages the windows' probabilities.
  */
 
 const HERE = new URL('.', import.meta.url)
@@ -62,6 +68,271 @@ function nonMaxSuppression(boxes, scores, classes, iouThreshold) {
   return kept.sort((a, b) => scores[b] - scores[a])
 }
 
+// ---- Audio ----
+// `inputs[0].audioSpectrogram` spelled out. The platform computes the same thing in numpy; the arithmetic is plain
+// enough (a polyphase resampler, a radix-2 FFT, a mel filterbank) to follow in any language.
+
+/** A WAV file's samples, one Float32Array per channel, in [-1, 1], and its sample rate. */
+function readWav(buffer) {
+  const file = new Uint8Array(buffer)
+  const view = new DataView(buffer)
+  const tag = (at) => String.fromCharCode(file[at], file[at + 1], file[at + 2], file[at + 3])
+  if (file.length < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('Not a WAV file')
+  let format = null
+  let dataAt = -1
+  let dataSize = 0
+  for (let at = 12; at + 8 <= file.length; ) {
+    const size = view.getUint32(at + 4, true)
+    const body = at + 8
+    if (tag(at) === 'fmt ' && size >= 16) {
+      let code = view.getUint16(body, true)
+      if (code === 0xfffe && size >= 26) code = view.getUint16(body + 24, true) // extensible: the sub-format's tag
+      format = { code, channels: view.getUint16(body + 2, true), rate: view.getUint32(body + 4, true), bits: view.getUint16(body + 14, true) }
+    } else if (tag(at) === 'data') {
+      dataAt = body
+      dataSize = Math.min(size, file.length - body) // a streamed file may claim more than it holds
+      break
+    }
+    at = body + size + (size & 1)
+  }
+  if (!format || dataAt < 0 || dataSize === 0) throw new Error('The WAV file has no format or no samples')
+  const { code, channels, rate, bits } = format
+  const width = bits >> 3
+  if (channels < 1 || width < 1) throw new Error('The WAV file has no channels')
+  const frames = Math.floor(dataSize / (width * channels))
+  const read = (at) => {
+    if (code === 1 && bits === 8) return (view.getUint8(at) - 128) / 128
+    if (code === 1 && bits === 16) return view.getInt16(at, true) / 32767
+    if (code === 1 && bits === 24) {
+      const v = view.getUint8(at) | (view.getUint8(at + 1) << 8) | (view.getUint8(at + 2) << 16)
+      return (v >= 0x800000 ? v - 0x1000000 : v) / 8388607
+    }
+    if (code === 1 && bits === 32) return view.getInt32(at, true) / 2147483647
+    if (code === 3 && bits === 32) return view.getFloat32(at, true)
+    if (code === 3 && bits === 64) return view.getFloat64(at, true)
+    throw new Error(`Unsupported WAV encoding (format ${code}, ${bits} bits)`)
+  }
+  const out = Array.from({ length: channels }, () => new Float32Array(frames))
+  for (let f = 0; f < frames; f++) {
+    for (let c = 0; c < channels; c++) out[c][f] = read(dataAt + (f * channels + c) * width)
+  }
+  return { channels: out, rate }
+}
+
+/** Any other format: the browser decodes it, resampled to `sampleRate` (the browser's resampler, not the recipe's). */
+async function decodeWithBrowser(buffer, sampleRate) {
+  const context = new AudioContext({ sampleRate })
+  try {
+    const decoded = await context.decodeAudioData(buffer.slice(0))
+    return { channels: Array.from({ length: decoded.numberOfChannels }, (_, c) => decoded.getChannelData(c)), rate: decoded.sampleRate }
+  } finally {
+    context.close()
+  }
+}
+
+function gcd(a, b) {
+  return b === 0 ? a : gcd(b, a % b)
+}
+
+/** Modified Bessel function of the first kind, order 0 (the Kaiser window's building block). */
+function besselI0(x) {
+  let sum = 1
+  let term = 1
+  for (let k = 1; k < 500; k++) {
+    term *= (x / (2 * k)) ** 2
+    sum += term
+    if (term < sum * 1e-17) break
+  }
+  return sum
+}
+
+/**
+ * `scipy.signal.resample_poly(x, up, down)`: out[i] = sum over k in -H..H of h[H + k] * x[(i * down + k) / up],
+ * counting the k for which i * down + k is a multiple of `up` and the index is inside the recording. `h` is a
+ * Kaiser-windowed (beta 5) sinc low-pass of 2H + 1 taps, H = 10 * max(up, down), scaled to a gain of `up`.
+ */
+function resample(x, rate, target) {
+  const divisor = gcd(rate, target)
+  const up = target / divisor
+  const down = rate / divisor
+  const big = Math.max(up, down)
+  const half = 10 * big
+  const sinc = (v) => (v === 0 ? 1 : Math.sin(Math.PI * v) / (Math.PI * v))
+  const taps = new Float64Array(2 * half + 1)
+  const i0Beta = besselI0(5)
+  let total = 0
+  for (let n = 0; n <= 2 * half; n++) {
+    const ratio = (n - half) / half
+    const window = besselI0(5 * Math.sqrt(Math.max(1 - ratio * ratio, 0))) / i0Beta
+    taps[n] = (sinc((n - half) / big) / big) * window
+    total += taps[n]
+  }
+  for (let n = 0; n <= 2 * half; n++) taps[n] *= up / total
+
+  const outLength = Math.floor((x.length * up + down - 1) / down)
+  const out = new Float32Array(outLength)
+  for (let i = 0; i < outLength; i++) {
+    const position = i * down
+    const anchor = Math.floor(position / up)
+    const phase = position % up
+    const first = -Math.floor((half - phase) / up)
+    const last = Math.floor((half + phase) / up)
+    let acc = 0
+    for (let d = first; d <= last; d++) {
+      const index = anchor + d
+      if (index >= 0 && index < x.length) acc += taps[half - phase + d * up] * x[index]
+    }
+    out[i] = acc
+  }
+  return out
+}
+
+/** Where the windows of a `total`-sample recording start (`audioSpectrogram.windowStarts`). */
+function windowStarts(total, length, count) {
+  if (total <= length) return [0]
+  const room = total - length
+  if (count <= 1) return [Math.floor(room / 2)]
+  const starts = new Set()
+  for (let i = 0; i < count; i++) starts.add(roundHalfEven((i * room) / (count - 1)))
+  return [...starts].sort((a, b) => a - b)
+}
+
+/** In-place radix-2 FFT of `re` + i `im` (length a power of two). */
+function fft(re, im) {
+  const n = re.length
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1
+    for (; j & bit; bit >>= 1) j ^= bit
+    j ^= bit
+    if (i < j) {
+      ;[re[i], re[j]] = [re[j], re[i]]
+      ;[im[i], im[j]] = [im[j], im[i]]
+    }
+  }
+  for (let size = 2; size <= n; size <<= 1) {
+    const angle = (-2 * Math.PI) / size
+    for (let start = 0; start < n; start += size) {
+      for (let k = 0; k < size / 2; k++) {
+        const wr = Math.cos(angle * k)
+        const wi = Math.sin(angle * k)
+        const a = start + k
+        const b = a + size / 2
+        const tr = re[b] * wr - im[b] * wi
+        const ti = re[b] * wi + im[b] * wr
+        re[b] = re[a] - tr
+        im[b] = im[a] - ti
+        re[a] += tr
+        im[a] += ti
+      }
+    }
+  }
+}
+
+/** `[nFft / 2 + 1][bands]` triangular HTK mel filters, no area normalisation. */
+function melFilterbank(sampleRate, nFft, bands, fMin, fMax) {
+  const toMel = (hz) => 2595 * Math.log10(1 + hz / 700)
+  const edges = Array.from({ length: bands + 2 }, (_, i) => {
+    const mel = toMel(fMin) + ((toMel(fMax) - toMel(fMin)) * i) / (bands + 1)
+    return 700 * (10 ** (mel / 2595) - 1)
+  })
+  const bins = nFft / 2 + 1
+  const filters = Array.from({ length: bins }, () => new Float64Array(bands))
+  for (let bin = 0; bin < bins; bin++) {
+    const hz = (sampleRate / 2) * (bin / (bins - 1))
+    for (let b = 0; b < bands; b++) {
+      const rising = (hz - edges[b]) / (edges[b + 1] - edges[b])
+      const falling = (edges[b + 2] - hz) / (edges[b + 2] - edges[b + 1])
+      filters[bin][b] = Math.max(0, Math.min(rising, falling))
+    }
+  }
+  return filters
+}
+
+/** The standardised log-mel spectrogram of one window, `[bands][frames]` flattened row by row. */
+function spectrogramOf(window, recipe, filters) {
+  const { nFft, hopLength } = recipe.stft
+  const bands = recipe.mel.bands
+  const frames = recipe.frames
+  const hann = Float64Array.from({ length: nFft }, (_, n) => 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / nFft))
+  const out = new Float32Array(bands * frames)
+  const re = new Float64Array(nFft)
+  const im = new Float64Array(nFft)
+  const bins = nFft / 2 + 1
+  const power = new Float64Array(bins)
+  for (let f = 0; f < frames; f++) {
+    for (let n = 0; n < nFft; n++) {
+      re[n] = window[f * hopLength + n] * hann[n]
+      im[n] = 0
+    }
+    fft(re, im)
+    for (let k = 0; k < bins; k++) power[k] = re[k] * re[k] + im[k] * im[k]
+    for (let b = 0; b < bands; b++) {
+      let mel = 0
+      for (let k = 0; k < bins; k++) mel += power[k] * filters[k][b]
+      const logMel = Math.fround(Math.log(mel + recipe.logFloor))
+      out[b * frames + f] = (logMel - recipe.normalization.mean) / recipe.normalization.std
+    }
+  }
+  return out
+}
+
+/** The recording (a File/Blob) as a batch of spectrograms, `[windows, 1, bands, frames]`, by `audioSpectrogram`. */
+async function audioSpectrograms(source) {
+  const recipe = inputSpec.audioSpectrogram
+  const buffer = await source.arrayBuffer()
+  let decoded
+  try {
+    decoded = readWav(buffer)
+  } catch (wavError) {
+    try {
+      decoded = await decodeWithBrowser(buffer, recipe.sampleRate)
+    } catch {
+      throw wavError // neither a WAV file nor something the browser can decode: say what is wrong with the WAV
+    }
+  }
+  const { channels, rate } = decoded
+  const frames = channels[0].length
+  // The channels' mean, at double precision as the platform does it.
+  const mono = new Float64Array(frames)
+  for (const channel of channels) for (let i = 0; i < frames; i++) mono[i] += channel[i]
+  for (let i = 0; i < frames; i++) mono[i] /= channels.length
+  const wave = resample(mono, rate, recipe.sampleRate)
+  if (wave.length === 0) throw new Error('The recording has no samples')
+
+  const length = recipe.windowSamples
+  const filters = melFilterbank(recipe.sampleRate, recipe.stft.nFft, recipe.mel.bands, recipe.mel.fMin, recipe.mel.fMax)
+  const starts = windowStarts(wave.length, length, recipe.windowsPerAudio)
+  const size = recipe.mel.bands * recipe.frames
+  const batch = new Float32Array(starts.length * size)
+  starts.forEach((start, w) => {
+    const window = new Float32Array(length) // zero-padded at the end when the recording runs out
+    window.set(wave.subarray(start, Math.min(start + length, wave.length)))
+    batch.set(spectrogramOf(window, recipe, filters), w * size)
+  })
+  return new ort.Tensor('float32', batch, [starts.length, 1, recipe.mel.bands, recipe.frames])
+}
+
+/** Class probabilities of a recording: each window's logits through a softmax, averaged over the windows. */
+async function classifyAudio(source, topK) {
+  const input = await audioSpectrograms(source)
+  const outputs = await session.run({ [onnxInputName]: input })
+  const logits = outputs[onnxOutputName].data
+  const windows = input.dims[0]
+  const classes = outputSpec.classes ?? []
+  const mean = new Float64Array(classes.length)
+  for (let w = 0; w < windows; w++) {
+    const probs = softmax(Array.from(logits.subarray(w * classes.length, (w + 1) * classes.length)))
+    for (let c = 0; c < classes.length; c++) mean[c] += probs[c] / windows
+  }
+  return Object.fromEntries(
+    classes
+      .map((name, i) => [name, mean[i]])
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topK)
+      .map(([name, p]) => [name, Math.round(p * 10000) / 10000]),
+  )
+}
+
 function softmax(logits) {
   const max = Math.max(...logits)
   const exp = logits.map((v) => Math.exp(v - max))
@@ -69,11 +340,29 @@ function softmax(logits) {
   return exp.map((v) => v / sum)
 }
 
-async function init() {
+/** An audio classifier: `predict()` takes an audio File/Blob. */
+function isAudio() {
+  return inputSpec?.type === 'audio' && inputSpec.audioSpectrogram !== undefined
+}
+
+let loading = null
+/** Loads the manifest and the model once, however many callers ask. */
+function init() {
+  loading ??= load()
+  return loading
+}
+
+async function load() {
   const res = await fetch(new URL('preprocessing.json', HERE))
   const manifest = await res.json()
   inputSpec = manifest.inputs[0]
   outputSpec = manifest.outputs[0]
+  if (isAudio() && inputSpec.audioSpectrogram.recipe !== 'log_mel_v1') {
+    throw new Error(
+      `Unknown audio recipe '${inputSpec.audioSpectrogram.recipe}'. ` +
+        "See preprocessing.json's inputs[0].audioSpectrogram and adapt app.js.",
+    )
+  }
 
   session = await ort.InferenceSession.create(new URL('model.onnx', HERE).toString())
   onnxInputName = matchTensorName(session.inputNames, inputSpec.column)
@@ -196,7 +485,7 @@ function letterbox(imageBitmap) {
  * thresholds in preprocessing.json (`outputs[0].yoloOutput`).
  */
 export async function detect(imageSource, { confidence, iou, maxDetections = 300 } = {}) {
-  if (!session) await init()
+  await init()
   const info = outputSpec.yoloOutput ?? {}
   const minConfidence = confidence ?? info.confidenceThreshold ?? 0.25
   const maxOverlap = iou ?? info.iouThreshold ?? 0.7
@@ -255,12 +544,14 @@ export async function detect(imageSource, { confidence, iou, maxDetections = 300
 }
 
 /**
- * Run inference on an image File/Blob and return {className: probability} (classification), {value} (regression),
- * or the list of boxes found (an object detector; see `detect`).
+ * Run inference on an image File/Blob (an audio File/Blob for an audio classifier) and return
+ * {className: probability} (classification), {value} (regression), or the list of boxes found (an object detector;
+ * see `detect`).
  */
 export async function predict(imageSource, topK = 5) {
-  if (!session) await init()
+  await init()
   if (outputSpec.type === 'detections') return detect(imageSource)
+  if (isAudio()) return classifyAudio(imageSource, topK)
 
   if (inputSpec.type !== 'image') {
     throw new Error(
@@ -296,6 +587,16 @@ const overlay = document.getElementById('overlay')
 const resultsSection = document.getElementById('results')
 const predictionsList = document.getElementById('predictions')
 const statusEl = document.getElementById('status')
+const audioPreview = document.getElementById('audio-preview')
+
+// An audio model asks for audio files; the rest of the page is the same.
+init()
+  .then(() => {
+    if (!isAudio()) return
+    fileInput.accept = 'audio/*,.wav'
+    document.getElementById('dropzone-label').textContent = 'Choose an audio file, or drag one here'
+  })
+  .catch(() => {})
 
 /** Draws a detector's boxes over the preview image; the canvas has the image's own size, CSS scales both alike. */
 function drawBoxes(detections) {
@@ -326,8 +627,13 @@ async function handleFile(file) {
   if (!file) return
   statusEl.textContent = 'Running inference…'
   overlay.hidden = true
-  preview.src = URL.createObjectURL(file)
-  preview.hidden = false
+  if (isAudio()) {
+    audioPreview.src = URL.createObjectURL(file)
+    audioPreview.hidden = false
+  } else {
+    preview.src = URL.createObjectURL(file)
+    preview.hidden = false
+  }
 
   try {
     const predictions = await predict(file)
@@ -419,6 +725,11 @@ verifyBtn.addEventListener('click', async () => {
       return
     }
     const expected = await res.json()
+    await init()
+    if (isAudio() && !expected.sampleFile.toLowerCase().endsWith('.wav')) {
+      verifyResult.textContent = "The bundled sample is not a WAV file, which this app can't read exactly — nothing to verify."
+      return
+    }
     const sampleRes = await fetch(new URL(expected.sampleFile, HERE))
     const sampleBlob = await sampleRes.blob()
 

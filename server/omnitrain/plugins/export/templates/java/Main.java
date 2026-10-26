@@ -1,5 +1,5 @@
 // Usage (once compiled alongside OmniTrainClient.java, or copied into your own project):
-//   java Main <path-to-image>
+//   java Main <path-to-image | path-to-wav-file>
 //   java Main verify
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -102,6 +102,11 @@ public final class Main {
         JsonNode expected = mapper.readTree(expectedPath.toFile());
         JsonNode expectedPredictions = expected.get("predictions");
         Path samplePath = Path.of(expected.get("sampleFile").asText());
+
+        if (client.isAudio() && !samplePath.toString().toLowerCase().endsWith(".wav")) {
+            System.out.println("The bundled sample is not a WAV file, which this client can't read — nothing to verify.");
+            return 0;
+        }
 
         if (client.isDetector()) {
             JsonNode detections = expected.get("detections");

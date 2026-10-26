@@ -22,8 +22,11 @@ Implements preprocessing for:
     letterbox.
   - a `video` input (video classification) — pass a video file path. Needs
     `opencv-python-headless` to decode it.
+  - an `audio` input with an `audioSpectrogram` recipe (audio classification) — pass an audio file
+    path. A WAV file is read here; other containers need the optional `soundfile` package. The
+    spectrogram is computed with numpy alone, from the recipe in preprocessing.json.
 
-Every other input type (text, audio) raises NotImplementedError with a
+Every other input type (text, Ludwig's audio) raises NotImplementedError with a
 pointer to preprocessing.json so you can adapt preprocessing yourself —
 text tokenization in particular depends on the chosen encoder's own
 vocabulary (Ludwig's built-in tokenizer, or a HuggingFace subword
@@ -35,6 +38,7 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +62,119 @@ def _shorter_edge_geometry(width: int, height: int, size: int) -> tuple[int, int
     else:
         new_width, new_height = int(size * width / height), size
     return new_width, new_height, round((new_width - size) / 2.0), round((new_height - size) / 2.0)
+
+
+# -- Audio ---------------------------------------------------------------------------------------------------------
+# `inputs[0].audioSpectrogram` (recipe "log_mel_v1") spelled out in numpy. Every number comes from the manifest.
+
+
+def _read_wav(data: bytes) -> tuple[np.ndarray, int]:
+    """A WAV file's samples as float32 `(channels, frames)` in [-1, 1], and its sample rate. Integer PCM of 8, 16, 24
+    and 32 bits and 32/64-bit float, including WAVE_FORMAT_EXTENSIBLE. Anything else raises ValueError."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        raise ValueError("not a WAV file")
+    fmt = None
+    pcm = b""
+    position = 12
+    while position + 8 <= len(data):
+        chunk, size = data[position : position + 4], struct.unpack_from("<I", data, position + 4)[0]
+        body = position + 8
+        if chunk == b"fmt " and size >= 16:
+            tag, channels, rate, _, _, bits = struct.unpack_from("<HHIIHH", data, body)
+            if tag == 0xFFFE and size >= 26:  # extensible: the real format tag is the sub-format's first two bytes
+                tag = struct.unpack_from("<H", data, body + 24)[0]
+            fmt = (tag, channels, rate, bits)
+        elif chunk == b"data":
+            pcm = data[body : body + size]  # a streamed file may claim more than it holds
+            break
+        position = body + size + (size & 1)
+    if fmt is None or not pcm:
+        raise ValueError("the WAV file has no format or no samples")
+    tag, channels, rate, bits = fmt
+    if channels < 1:
+        raise ValueError("the WAV file has no channels")
+    width = bits // 8
+    pcm = pcm[: len(pcm) // (width * channels) * (width * channels)]
+    if tag == 1 and bits == 8:
+        values = (np.frombuffer(pcm, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    elif tag == 1 and bits == 16:
+        values = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32767.0
+    elif tag == 1 and bits == 24:
+        raw = np.frombuffer(pcm, dtype=np.uint8).reshape(-1, 3).astype(np.int32)
+        signed = raw[:, 0] | (raw[:, 1] << 8) | (raw[:, 2] << 16)
+        values = np.where(signed >= 1 << 23, signed - (1 << 24), signed).astype(np.float32) / 8388607.0
+    elif tag == 1 and bits == 32:
+        values = np.frombuffer(pcm, dtype="<i4").astype(np.float32) / 2147483647.0
+    elif tag == 3 and bits in (32, 64):
+        values = np.frombuffer(pcm, dtype="<f4" if bits == 32 else "<f8").astype(np.float32)
+    else:
+        raise ValueError(f"unsupported WAV encoding (format {tag}, {bits} bits)")
+    return np.ascontiguousarray(values.reshape(-1, channels).T), int(rate)
+
+
+def _decode_audio(path: str | Path) -> tuple[np.ndarray, int]:
+    try:
+        return _read_wav(Path(path).read_bytes())
+    except ValueError as wav_error:
+        try:
+            import soundfile
+        except ImportError:
+            raise ValueError(
+                f"Could not read {path} as a WAV file ({wav_error}). Other audio formats need the optional "
+                "`soundfile` package (pip install soundfile)."
+            ) from None
+        samples, rate = soundfile.read(str(path), dtype="float32", always_2d=True)
+        return np.ascontiguousarray(samples.T), int(rate)
+
+
+def _resample(x: np.ndarray, rate: int, target: int) -> np.ndarray:
+    """`scipy.signal.resample_poly(x, up, down)` without scipy: the polyphase filter in `audioSpectrogram.resample`."""
+    divisor = math.gcd(rate, target)
+    up, down = target // divisor, rate // divisor
+    big = max(up, down)
+    half = 10 * big
+    n_out = -(-len(x) * up // down)
+    taps = np.arange(2 * half + 1) - half
+    h = np.sinc(taps / big) / big * np.kaiser(2 * half + 1, 5.0)
+    h *= up / h.sum()
+    padded = np.concatenate([np.zeros(half // up + 2), x, np.zeros(half // up + 2)])
+    pad = half // up + 2
+    out = np.zeros(n_out)
+    index = np.arange(n_out)
+    for phase in range(up):
+        # Outputs i whose position i * down lies `phase` samples past a multiple of `up`.
+        mine = index[(index * down) % up == phase]
+        if not mine.size:
+            continue
+        first = -((half - phase) // up)  # smallest d with half - phase + d * up >= 0
+        last = (half + phase) // up  # largest d with half - phase + d * up <= 2 * half
+        d = np.arange(first, last + 1)
+        taps_d = h[half - phase + d * up]
+        starts = mine * down // up + first + pad
+        view = np.lib.stride_tricks.sliding_window_view(padded, len(d))
+        for chunk in range(0, len(mine), 32768):  # bounded memory for a long recording
+            out[mine[chunk : chunk + 32768]] = view[starts[chunk : chunk + 32768]] @ taps_d
+    return out
+
+
+def _window_starts(total: int, length: int, count: int) -> list[int]:
+    if total <= length:
+        return [0]
+    room = total - length
+    if count <= 1:
+        return [room // 2]
+    return sorted({round(i * room / (count - 1)) for i in range(count)})  # Python's round() is half-to-even
+
+
+def _mel_filterbank(sample_rate: int, n_fft: int, bands: int, f_min: float, f_max: float) -> np.ndarray:
+    """`[n_fft // 2 + 1, bands]` triangular HTK filters."""
+    freqs = np.linspace(0.0, sample_rate / 2, n_fft // 2 + 1)
+    mels = np.linspace(2595.0 * np.log10(1.0 + f_min / 700.0), 2595.0 * np.log10(1.0 + f_max / 700.0), bands + 2)
+    edges = 700.0 * (10.0 ** (mels / 2595.0) - 1.0)
+    slopes = edges[None, :] - freqs[:, None]
+    down = -slopes[:, :-2] / np.diff(edges)[:-1]
+    up = slopes[:, 2:] / np.diff(edges)[1:]
+    return np.maximum(0.0, np.minimum(down, up))
 
 
 def _non_max_suppression(
@@ -110,15 +227,22 @@ class OmniTrainClient:
         # Multiple inputs, or a single tabular (number) one, means predict()
         # expects a {column: value} dict rather than a single file path.
         self._is_tabular = len(self.input_specs) > 1 or self.input_spec["type"] == "number"
-        # What `predict()` does with its input: "detection" (an image in, a list of boxes out), "video" (a video file
-        # in, class probabilities out) or "standard" (everything else this client handles).
-        self._kind = (
-            "detection"
-            if self.output_spec["type"] == "detections"
-            else "video"
-            if self.input_spec["type"] == "video"
-            else "standard"
-        )
+        # What `predict()` does with its input: "detection" (an image in, a list of boxes out), "video" or "audio" (a
+        # file in, class probabilities out) or "standard" (everything else this client handles).
+        if self.output_spec["type"] == "detections":
+            self._kind = "detection"
+        elif self.input_spec["type"] == "video":
+            self._kind = "video"
+        elif self.input_spec["type"] == "audio" and "audioSpectrogram" in self.input_spec:
+            self._kind = "audio"
+            self._audio_recipe = self.input_spec["audioSpectrogram"]
+            if self._audio_recipe.get("recipe") != "log_mel_v1":
+                raise NotImplementedError(
+                    f"Unknown audio recipe {self._audio_recipe.get('recipe')!r}. "
+                    "See preprocessing.json's `inputs[0].audioSpectrogram` and adapt this client."
+                )
+        else:
+            self._kind = "standard"
 
     @staticmethod
     def _match_tensor_name(candidates: list[str], preferred: str) -> str:
@@ -213,7 +337,7 @@ class OmniTrainClient:
         descending (classification), or `{"value": float}` (regression), or,
         for a detector, the list `detect()` returns.
 
-        `value` is a file path for a single `image` or `video` input, or a
+        `value` is a file path for a single `image`, `video` or `audio` input, or a
         `{column: value}` dict — one entry per input feature — for a
         tabular (`number`-only) model.
         """
@@ -221,6 +345,8 @@ class OmniTrainClient:
             return self.detect(value)
         if self._kind == "video":
             return self._classify_video(value, top_k)
+        if self._kind == "audio":
+            return self._classify_audio(value, top_k)
         if self._is_tabular:
             if not isinstance(value, dict):
                 raise TypeError("This model has tabular inputs — pass a dict of {column: value}, not a file path.")
@@ -405,6 +531,46 @@ class OmniTrainClient:
         clips = self._video_clips(path)
         raw = self.session.run([self._onnx_output_name], {self._onnx_input_names[self.input_spec["name"]]: clips})[0]
         logits = np.asarray(raw).reshape(len(clips), -1)
+        probs = np.mean([_softmax(row) for row in logits], axis=0)
+        classes = self.output_spec["classes"]
+        ranked = sorted(zip(classes, probs), key=lambda p: p[1], reverse=True)
+        return {name: round(float(p), 4) for name, p in ranked[:top_k]}
+
+    # -- Audio -----------------------------------------------------------------------------------------------------
+
+    def _audio_spectrograms(self, path: str | Path) -> np.ndarray:
+        """The recording as a batch of spectrograms, `[windows, 1, bands, frames]` float32, by `audioSpectrogram`:
+        decode, average the channels, resample, take `windowsPerAudio` windows (the last zero-padded if the recording
+        is shorter), then for each a Hann-windowed power spectrum, mel filterbank, `ln(x + logFloor)` and
+        `(x - mean) / std`."""
+        recipe = self._audio_recipe
+        stft, mel, norm = recipe["stft"], recipe["mel"], recipe["normalization"]
+        samples, rate = _decode_audio(path)
+        mono = samples.mean(axis=0, dtype=np.float64)
+        if not len(mono):
+            raise ValueError("The recording has no samples")
+        wave = _resample(mono, rate, recipe["sampleRate"]).astype(np.float32)
+        length = recipe["windowSamples"]
+        n_fft, hop = stft["nFft"], stft["hopLength"]
+        hann = 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(n_fft) / n_fft)
+        filters = _mel_filterbank(recipe["sampleRate"], n_fft, mel["bands"], mel["fMin"], mel["fMax"])
+        batch = []
+        for start in _window_starts(len(wave), length, recipe["windowsPerAudio"]):
+            window = wave[start : start + length]
+            if len(window) < length:
+                window = np.concatenate([window, np.zeros(length - len(window), dtype=np.float32)])
+            frames = np.lib.stride_tricks.sliding_window_view(window.astype(np.float64), n_fft)[::hop]
+            power = np.abs(np.fft.rfft(frames * hann, axis=1)) ** 2
+            log_mel = np.log(power @ filters + recipe["logFloor"]).T.astype(np.float32)
+            batch.append(((log_mel - norm["mean"]) / norm["std"]).astype(np.float32))
+        return np.stack(batch)[:, np.newaxis]
+
+    def _classify_audio(self, path: str | Path, top_k: int) -> dict[str, float]:
+        """Class probabilities of a recording: each window's logits through a softmax, averaged over the windows."""
+        spectrograms = self._audio_spectrograms(path)
+        feed = {self._onnx_input_names[self.input_spec["name"]]: spectrograms}
+        raw = self.session.run([self._onnx_output_name], feed)[0]
+        logits = np.asarray(raw).reshape(len(spectrograms), -1)
         probs = np.mean([_softmax(row) for row in logits], axis=0)
         classes = self.output_spec["classes"]
         ranked = sorted(zip(classes, probs), key=lambda p: p[1], reverse=True)

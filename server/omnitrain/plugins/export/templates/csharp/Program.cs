@@ -1,4 +1,4 @@
-// Usage: dotnet run -- <path-to-image>
+// Usage: dotnet run -- <path-to-image | path-to-wav-file>
 //        dotnet run -- verify
 
 using System.Text.Json;
@@ -51,6 +51,12 @@ static int Verify(OmniTrainClient client)
     var expected = JsonSerializer.Deserialize<ExpectedJson>(File.ReadAllText(expectedPath), opts)
         ?? throw new InvalidDataException("expected.json is empty or invalid");
     var samplePath = Path.Combine(here, expected.SampleFile);
+
+    if (client.IsAudio && !samplePath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine("The bundled sample is not a WAV file, which this client can't read — nothing to verify.");
+        return 0;
+    }
 
     if (client.IsDetector)
     {

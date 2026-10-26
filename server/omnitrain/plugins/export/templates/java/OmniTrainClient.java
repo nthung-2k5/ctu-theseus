@@ -16,6 +16,11 @@
  * suppression and the undoing of the letterbox, and {@link #detect} returns the
  * boxes. Other input types throw with a pointer to preprocessing.json so you
  * can adapt preprocessing yourself; see README.md.
+ *
+ * An {@code audio} input that carries an {@code audioSpectrogram} recipe (audio
+ * classification) is supported too: {@link #predict} takes the path of a WAV file,
+ * makes the log-mel spectrograms the recipe describes with no audio library, and
+ * averages the windows' probabilities.
  */
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
@@ -31,7 +36,11 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,6 +50,225 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+
+/**
+ * {@code inputs[0].audioSpectrogram} spelled out. The platform computes the same thing in numpy; the arithmetic is
+ * plain enough (a polyphase resampler, a radix-2 FFT, a mel filterbank) to follow in any language.
+ */
+final class AudioFrontEnd {
+    private AudioFrontEnd() {}
+
+    /** The numbers of {@code audioSpectrogram} (recipe "log_mel_v1"). */
+    record Recipe(String recipe, int sampleRate, int windowSamples, int windowsPerAudio, int frames, int nFft, int hop,
+                  int bands, double fMin, double fMax, double logFloor, double mean, double std) {
+        static Recipe of(JsonNode r) {
+            return new Recipe(
+                r.path("recipe").asText(), r.path("sampleRate").asInt(), r.path("windowSamples").asInt(),
+                r.path("windowsPerAudio").asInt(), r.path("frames").asInt(),
+                r.path("stft").path("nFft").asInt(), r.path("stft").path("hopLength").asInt(),
+                r.path("mel").path("bands").asInt(), r.path("mel").path("fMin").asDouble(),
+                r.path("mel").path("fMax").asDouble(), r.path("logFloor").asDouble(1e-6),
+                r.path("normalization").path("mean").asDouble(), r.path("normalization").path("std").asDouble(1));
+        }
+    }
+
+    /** A WAV file's samples, one array per channel, in [-1, 1]; the sample rate is returned in {@code rate[0]}. */
+    static float[][] readWav(byte[] file, int[] rate) throws IOException {
+        if (file.length < 12 || !tag(file, 0).equals("RIFF") || !tag(file, 8).equals("WAVE")) {
+            throw new IOException("Not a WAV file (only WAV is supported)");
+        }
+        ByteBuffer buf = ByteBuffer.wrap(file).order(ByteOrder.LITTLE_ENDIAN);
+        int code = 0, channels = 0, bits = 0, dataAt = -1;
+        long dataSize = 0;
+        for (long at = 12; at + 8 <= file.length; ) {
+            long size = buf.getInt((int) at + 4) & 0xFFFFFFFFL;
+            long body = at + 8;
+            String id = tag(file, (int) at);
+            if (id.equals("fmt ") && size >= 16) {
+                code = buf.getShort((int) body) & 0xFFFF;
+                if (code == 0xFFFE && size >= 26) code = buf.getShort((int) body + 24) & 0xFFFF;
+                channels = buf.getShort((int) body + 2) & 0xFFFF;
+                rate[0] = buf.getInt((int) body + 4);
+                bits = buf.getShort((int) body + 14) & 0xFFFF;
+            } else if (id.equals("data")) {
+                dataAt = (int) body;
+                dataSize = Math.min(size, file.length - body); // a streamed file may claim more than it holds
+                break;
+            }
+            at = body + size + (size & 1);
+        }
+        if (channels < 1 || dataAt < 0 || dataSize == 0) throw new IOException("The WAV file has no format or no samples");
+        int width = bits >> 3;
+        if (width < 1) throw new IOException("The WAV file has no channels");
+        int frames = (int) (dataSize / ((long) width * channels));
+        float[][] out = new float[channels][frames];
+        for (int f = 0; f < frames; f++) {
+            for (int c = 0; c < channels; c++) {
+                int at = dataAt + (f * channels + c) * width;
+                float v;
+                if (code == 1 && bits == 8) v = ((file[at] & 0xFF) - 128) / 128f;
+                else if (code == 1 && bits == 16) v = buf.getShort(at) / 32767f;
+                else if (code == 1 && bits == 24) {
+                    int raw = (file[at] & 0xFF) | ((file[at + 1] & 0xFF) << 8) | ((file[at + 2] & 0xFF) << 16);
+                    v = ((raw << 8) >> 8) / 8388607f;
+                } else if (code == 1 && bits == 32) v = (float) (buf.getInt(at) / 2147483647.0);
+                else if (code == 3 && bits == 32) v = buf.getFloat(at);
+                else if (code == 3 && bits == 64) v = (float) buf.getDouble(at);
+                else throw new UnsupportedOperationException("Unsupported WAV encoding (format " + code + ", " + bits + " bits)");
+                out[c][f] = v;
+            }
+        }
+        return out;
+    }
+
+    private static String tag(byte[] b, int at) {
+        return new String(b, at, 4, StandardCharsets.US_ASCII);
+    }
+
+    private static long gcd(long a, long b) {
+        return b == 0 ? a : gcd(b, a % b);
+    }
+
+    /** Modified Bessel function of the first kind, order 0 (the Kaiser window's building block). */
+    private static double besselI0(double x) {
+        double sum = 1, term = 1;
+        for (int k = 1; k < 500; k++) {
+            term *= Math.pow(x / (2 * k), 2);
+            sum += term;
+            if (term < sum * 1e-17) break;
+        }
+        return sum;
+    }
+
+    private static double sinc(double v) {
+        return v == 0 ? 1 : Math.sin(Math.PI * v) / (Math.PI * v);
+    }
+
+    /**
+     * {@code scipy.signal.resample_poly(x, up, down)}: out[i] = sum over k in -H..H of h[H + k] * x[(i * down + k) / up],
+     * counting the k for which i * down + k is a multiple of {@code up} and the index is inside the recording.
+     * {@code h} is a Kaiser-windowed (beta 5) sinc low-pass of 2H + 1 taps, H = 10 * max(up, down), scaled to a gain
+     * of {@code up}.
+     */
+    static float[] resample(double[] x, int rate, int target) {
+        long divisor = gcd(rate, target);
+        int up = (int) (target / divisor), down = (int) (rate / divisor);
+        int big = Math.max(up, down), half = 10 * big;
+        double[] taps = new double[2 * half + 1];
+        double i0Beta = besselI0(5), total = 0;
+        for (int n = 0; n <= 2 * half; n++) {
+            double ratio = (double) (n - half) / half;
+            double window = besselI0(5 * Math.sqrt(Math.max(1 - ratio * ratio, 0))) / i0Beta;
+            taps[n] = sinc((double) (n - half) / big) / big * window;
+            total += taps[n];
+        }
+        for (int n = 0; n <= 2 * half; n++) taps[n] *= up / total;
+
+        int outLength = (int) (((long) x.length * up + down - 1) / down);
+        float[] out = new float[outLength];
+        for (int i = 0; i < outLength; i++) {
+            long position = (long) i * down;
+            long anchor = position / up;
+            int phase = (int) (position % up);
+            int first = -((half - phase) / up), last = (half + phase) / up;
+            double acc = 0;
+            for (int d = first; d <= last; d++) {
+                long index = anchor + d;
+                if (index >= 0 && index < x.length) acc += taps[half - phase + d * up] * x[(int) index];
+            }
+            out[i] = (float) acc;
+        }
+        return out;
+    }
+
+    /** Where the windows of a {@code total}-sample recording start ({@code audioSpectrogram.windowStarts}). */
+    static List<Integer> windowStarts(int total, int length, int count) {
+        if (total <= length) return List.of(0);
+        int room = total - length;
+        if (count <= 1) return List.of(room / 2);
+        TreeSet<Integer> starts = new TreeSet<>();
+        // rint rounds .5 to the nearest even integer, as Python's round() does.
+        for (int i = 0; i < count; i++) starts.add((int) Math.rint((double) i * room / (count - 1)));
+        return new ArrayList<>(starts);
+    }
+
+    /** In-place radix-2 FFT of {@code re} + i {@code im} (length a power of two). */
+    private static void fft(double[] re, double[] im) {
+        int n = re.length;
+        for (int i = 1, j = 0; i < n; i++) {
+            int bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j) {
+                double t = re[i]; re[i] = re[j]; re[j] = t;
+                t = im[i]; im[i] = im[j]; im[j] = t;
+            }
+        }
+        for (int size = 2; size <= n; size <<= 1) {
+            double angle = -2 * Math.PI / size;
+            for (int start = 0; start < n; start += size) {
+                for (int k = 0; k < size / 2; k++) {
+                    double wr = Math.cos(angle * k), wi = Math.sin(angle * k);
+                    int a = start + k, b = a + size / 2;
+                    double tr = re[b] * wr - im[b] * wi, ti = re[b] * wi + im[b] * wr;
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+        }
+    }
+
+    /** {@code [nFft / 2 + 1][bands]} triangular HTK mel filters, no area normalisation. */
+    static double[][] melFilterbank(int sampleRate, int nFft, int bands, double fMin, double fMax) {
+        double[] edges = new double[bands + 2];
+        for (int i = 0; i < edges.length; i++) {
+            double mel = toMel(fMin) + (toMel(fMax) - toMel(fMin)) * i / (bands + 1);
+            edges[i] = 700 * (Math.pow(10, mel / 2595) - 1);
+        }
+        int bins = nFft / 2 + 1;
+        double[][] filters = new double[bins][bands];
+        for (int bin = 0; bin < bins; bin++) {
+            double hz = sampleRate / 2.0 * bin / (bins - 1);
+            for (int b = 0; b < bands; b++) {
+                double rising = (hz - edges[b]) / (edges[b + 1] - edges[b]);
+                double falling = (edges[b + 2] - hz) / (edges[b + 2] - edges[b + 1]);
+                filters[bin][b] = Math.max(0, Math.min(rising, falling));
+            }
+        }
+        return filters;
+    }
+
+    private static double toMel(double hz) {
+        return 2595 * Math.log10(1 + hz / 700);
+    }
+
+    /** The standardised log-mel spectrogram of one window, {@code [bands][frames]} flattened row by row. */
+    static float[] spectrogram(float[] window, Recipe r, double[][] filters) {
+        double[] hann = new double[r.nFft()];
+        for (int n = 0; n < r.nFft(); n++) hann[n] = 0.5 - 0.5 * Math.cos(2 * Math.PI * n / r.nFft());
+        float[] out = new float[r.bands() * r.frames()];
+        double[] re = new double[r.nFft()], im = new double[r.nFft()];
+        int bins = r.nFft() / 2 + 1;
+        double[] power = new double[bins];
+        for (int f = 0; f < r.frames(); f++) {
+            for (int n = 0; n < r.nFft(); n++) {
+                re[n] = window[f * r.hop() + n] * hann[n];
+                im[n] = 0;
+            }
+            fft(re, im);
+            for (int k = 0; k < bins; k++) power[k] = re[k] * re[k] + im[k] * im[k];
+            for (int b = 0; b < r.bands(); b++) {
+                double mel = 0;
+                for (int k = 0; k < bins; k++) mel += power[k] * filters[k][b];
+                float logMel = (float) Math.log(mel + r.logFloor());
+                out[b * r.frames() + f] = (float) ((logMel - r.mean()) / r.std());
+            }
+        }
+        return out;
+    }
+}
 
 public final class OmniTrainClient implements AutoCloseable {
     /** A box as fractions (0..1) of the image: the top-left corner and the size. */
@@ -55,6 +283,7 @@ public final class OmniTrainClient implements AutoCloseable {
     private final JsonNode outputSpec;
     private final String onnxInputName;
     private final String onnxOutputName;
+    private final AudioFrontEnd.Recipe audioRecipe;
 
     public OmniTrainClient() throws OrtException, IOException {
         this(Path.of("model.onnx"), Path.of("preprocessing.json"));
@@ -71,6 +300,18 @@ public final class OmniTrainClient implements AutoCloseable {
         this.session = env.createSession(modelPath.toString(), new OrtSession.SessionOptions());
         this.onnxInputName = matchTensorName(session.getInputNames(), inputSpec.get("column").asText());
         this.onnxOutputName = matchTensorName(session.getOutputNames(), outputSpec.get("column").asText());
+        this.audioRecipe = "audio".equals(inputSpec.path("type").asText()) && inputSpec.has("audioSpectrogram")
+            ? AudioFrontEnd.Recipe.of(inputSpec.get("audioSpectrogram")) : null;
+        if (audioRecipe != null && !"log_mel_v1".equals(audioRecipe.recipe())) {
+            throw new UnsupportedOperationException(
+                "Unknown audio recipe '" + audioRecipe.recipe() + "'. " +
+                "See preprocessing.json's inputs[0].audioSpectrogram and adapt this client.");
+        }
+    }
+
+    /** An audio classifier: {@link #predict} takes the path of a WAV file. */
+    public boolean isAudio() {
+        return audioRecipe != null;
     }
 
     /** An object detector: use {@link #detect}; {@link #predict} is for classifiers and regressors. */
@@ -341,11 +582,15 @@ public final class OmniTrainClient implements AutoCloseable {
         return exp;
     }
 
-    /** Runs inference and returns {@code {className: probability}} sorted descending (classification), or {@code {"value": x}} (regression). */
+    /**
+     * Runs inference and returns {@code {className: probability}} sorted descending (classification), or
+     * {@code {"value": x}} (regression). {@code imagePath} is an image file, or for an audio classifier a WAV file.
+     */
     public Map<String, Double> predict(Path imagePath, int topK) throws OrtException, IOException {
         if (isDetector()) {
             throw new UnsupportedOperationException("This model is an object detector: call detect(), which returns boxes.");
         }
+        if (isAudio()) return classifyAudio(imagePath, topK);
         String inputType = inputSpec.get("type").asText();
         if (!"image".equals(inputType)) {
             throw new UnsupportedOperationException(
@@ -367,6 +612,55 @@ public final class OmniTrainClient implements AutoCloseable {
                 return decode(logits, topK);
             }
         }
+    }
+
+    /** Class probabilities of a recording: each window's logits through a softmax, averaged over the windows. */
+    private Map<String, Double> classifyAudio(Path path, int topK) throws OrtException, IOException {
+        AudioFrontEnd.Recipe r = audioRecipe;
+        int[] rate = new int[1];
+        float[][] channels = AudioFrontEnd.readWav(Files.readAllBytes(path), rate);
+        int frames = channels[0].length;
+        // The channels' mean, at double precision as the platform does it.
+        double[] mono = new double[frames];
+        for (float[] channel : channels) for (int i = 0; i < frames; i++) mono[i] += channel[i];
+        for (int i = 0; i < frames; i++) mono[i] /= channels.length;
+        float[] wave = AudioFrontEnd.resample(mono, rate[0], r.sampleRate());
+        if (wave.length == 0) throw new IOException("The recording has no samples");
+
+        int length = r.windowSamples();
+        double[][] filters = AudioFrontEnd.melFilterbank(r.sampleRate(), r.nFft(), r.bands(), r.fMin(), r.fMax());
+        List<Integer> starts = AudioFrontEnd.windowStarts(wave.length, length, r.windowsPerAudio());
+        int size = r.bands() * r.frames();
+        float[] batch = new float[starts.size() * size];
+        for (int w = 0; w < starts.size(); w++) {
+            float[] window = new float[length]; // zero-padded at the end when the recording runs out
+            System.arraycopy(wave, starts.get(w), window, 0, Math.min(length, wave.length - starts.get(w)));
+            System.arraycopy(AudioFrontEnd.spectrogram(window, r, filters), 0, batch, w * size, size);
+        }
+
+        long[] shape = {starts.size(), 1, r.bands(), r.frames()};
+        float[] logits;
+        try (OnnxTensor tensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(batch), shape);
+             OrtSession.Result result = session.run(Collections.singletonMap(onnxInputName, tensor))) {
+            OnnxValue outputValue = result.get(onnxOutputName)
+                .orElseThrow(() -> new IllegalStateException("Session produced no output named '" + onnxOutputName + "'"));
+            logits = flatten(outputValue.getValue());
+        }
+        List<String> classes = new ArrayList<>();
+        outputSpec.path("classes").forEach(n -> classes.add(n.asText()));
+        double[] mean = new double[classes.size()];
+        for (int w = 0; w < starts.size(); w++) {
+            float[] probs = softmax(java.util.Arrays.copyOfRange(logits, w * classes.size(), (w + 1) * classes.size()));
+            for (int c = 0; c < classes.size(); c++) mean[c] += probs[c] / (double) starts.size();
+        }
+        List<Integer> order = new ArrayList<>();
+        for (int c = 0; c < classes.size(); c++) order.add(c);
+        order.sort((a, b) -> Double.compare(mean[b], mean[a]));
+        LinkedHashMap<String, Double> out = new LinkedHashMap<>();
+        for (int i = 0; i < Math.min(topK, order.size()); i++) {
+            out.put(classes.get(order.get(i)), Math.round(mean[order.get(i)] * 10000.0) / 10000.0);
+        }
+        return out;
     }
 
     private Map<String, Double> decode(float[] logits, int topK) {

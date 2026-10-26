@@ -15,6 +15,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:onnxruntime/onnxruntime.dart';
 
@@ -53,6 +54,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _loading = true;
   String? _error;
   Uint8List? _previewBytes;
+  // An audio classifier shows the name of the chosen recording instead of a picture.
+  String? _audioName;
   Map<String, double>? _predictions;
   // An object detector's result: the boxes, and the picture's size to lay them over it.
   List<Detection>? _detections;
@@ -108,6 +111,28 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _pickAudioAndPredict() async {
+    final picked = await FilePicker.platform.pickFiles(type: FileType.audio, withData: true);
+    final file = picked?.files.isEmpty ?? true ? null : picked!.files.first;
+    final bytes = file?.bytes;
+    if (file == null || bytes == null) return;
+
+    setState(() {
+      _audioName = file.name;
+      _predicting = true;
+      _predictions = null;
+      _error = null;
+    });
+    try {
+      final predictions = await _client.predict(bytes);
+      setState(() => _predictions = predictions);
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      setState(() => _predicting = false);
+    }
+  }
+
   Future<ui.Image> decodeImageFromBytes(Uint8List bytes) async {
     final codec = await ui.instantiateImageCodec(bytes);
     return (await codec.getNextFrame()).image;
@@ -139,6 +164,23 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 4),
                         const Text('Runs fully on-device — nothing is uploaded.', style: TextStyle(fontSize: 12, color: Colors.grey)),
                         const SizedBox(height: 16),
+                        if (_client.isAudio) ...[
+                          if (_audioName != null)
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.audio_file_outlined),
+                                const SizedBox(width: 8),
+                                Flexible(child: Text(_audioName!, overflow: TextOverflow.ellipsis)),
+                              ],
+                            ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: _pickAudioAndPredict,
+                            icon: const Icon(Icons.library_music_outlined),
+                            label: const Text('Choose a WAV file'),
+                          ),
+                        ] else ...[
                         if (_previewBytes != null && _detections != null && _imageAspect != null)
                           // The boxes are fractions of the picture, so the picture is shown whole, at its own aspect.
                           ClipRRect(
@@ -176,6 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ],
                         ),
+                        ],
                         const SizedBox(height: 24),
                         if (_predicting) const CircularProgressIndicator(),
                         if (_detections != null)
@@ -369,6 +412,14 @@ class _VerifyScreenState extends State<VerifyScreen> {
         (k, v) => MapEntry(k, (v as num).toDouble()),
       );
       final sampleFile = 'assets/${expected['sampleFile'] as String}';
+      if (widget.client.isAudio && !sampleFile.toLowerCase().endsWith('.wav')) {
+        setState(() {
+          _lines = ["The bundled sample is not a WAV file, which this app can't read — nothing to verify."];
+          _ok = true;
+          _running = false;
+        });
+        return;
+      }
       final sampleBytes = (await rootBundle.load(sampleFile)).buffer.asUint8List();
 
       final actual = await widget.client.predict(sampleBytes, topK: expectedPredictions.isEmpty ? 5 : expectedPredictions.length);

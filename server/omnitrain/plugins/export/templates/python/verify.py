@@ -82,6 +82,12 @@ def main() -> int:
 
     sample_path = _HERE / expected["sampleFile"]
     client = OmniTrainClient()
+    if client._kind == "audio" and sample_path.suffix.lower() != ".wav":  # noqa: SLF001 — verify script
+        try:
+            import soundfile  # noqa: F401
+        except ImportError:
+            print("The bundled sample is not a WAV file and `soundfile` is not installed — nothing to verify.")
+            return 0
     if client._kind == "detection":  # noqa: SLF001 — verify script, not a library boundary
         if expected.get("detections") is None:
             print("expected.json has no detections to compare against.")

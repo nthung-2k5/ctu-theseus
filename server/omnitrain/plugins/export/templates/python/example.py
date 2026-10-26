@@ -6,7 +6,8 @@ value per input column) for a tabular model — e.g.:
     python example.py cat.jpg
     python example.py '{"age": 34, "income": 52000}'
 
-An object detector prints one line per box; a video model takes a video file path.
+An object detector prints one line per box; a video model takes a video file path and an audio
+model an audio file path (a WAV file; other formats need `pip install soundfile`).
 """
 
 import json

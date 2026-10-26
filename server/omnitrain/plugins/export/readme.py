@@ -29,6 +29,19 @@ DETECTION_LIMITATION = (
     "prediction runs Ultralytics on the original weights, which letterboxes a little differently, so the verify "
     "script compares confident boxes by overlap rather than for equal numbers."
 )
+# For a client that implements audio classification (see `formats/_kits.client_kind`).
+AUDIO_LIMITATION = (
+    "Audio classification: the model takes a log-mel spectrogram, not a waveform. The client decodes a **WAV** file, "
+    "averages its channels, resamples it, cuts `inputs[0].audioSpectrogram.windowsPerAudio` windows, makes a "
+    "spectrogram of each, scores each and averages the windows' probabilities, all as `audioSpectrogram` in "
+    "`preprocessing.json` spells out. A client that rounds a little differently, or another decoder for a compressed "
+    "format, can move a score by a small amount. Only a model trained by the PyTorch backend carries that recipe."
+)
+AUDIO_APP_LIMITATION = (
+    "Audio classification: the app decodes a **WAV** file you pick, makes the log-mel spectrograms described by "
+    "`inputs[0].audioSpectrogram` in `preprocessing.json`, scores each window and averages the probabilities. Only a "
+    "model trained by the PyTorch backend carries that recipe."
+)
 
 
 APP_LIMITATION = (
@@ -45,7 +58,7 @@ class ReadmeVars:
     format: str  # the export format's display label
     artifact: str  # model file name inside the bundle, e.g. model.onnx
     has_verify: bool
-    # What the client does: "standard", "detection" or "video" (see formats/_kits.client_kind).
+    # What the client does: "standard", "detection", "video" or "audio" (see formats/_kits.client_kind).
     kind: str = "standard"
 
 
