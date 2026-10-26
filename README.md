@@ -81,8 +81,8 @@ once). Nobody chooses where a run trains. A new run is held back for up to
 that time, the server trains it itself. A worker holds one run at a time.
 
 A run on a bring-your-own model goes to a worker only when the worker can get the model **by itself, with no
-secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, today only `video`: a fine-tuned
-Hugging Face video model is saved as a self-contained folder, so it never needs the base model's files again).
+secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, today `video` and `pytorch`: a fine-tuned
+Hugging Face video or image model is saved as a self-contained folder, so it never needs the base model's files again).
 The run spec then carries a `customModel` description; the worker fetches the files with the server's own code
 (`custom_models.ensure_local`: an uploaded bundle from S3 with its checksum re-checked, or a public Hub model at
 its pinned revision, fetched anonymously whatever token the machine has; each `ModelSource` in `omnitrain/plugins/model_sources/` declares which
@@ -376,6 +376,15 @@ text tasks, as the `base_model`), `hf_vision` (image classification: any `transf
 `timm_image` (image tasks, Hub only, needs the `timm` package installed, and fetches weights by name so it
 cannot be pinned). "Any architecture" means any `transformers` architecture: a model that needs its own Python
 code is deliberately not supported, because loading it would run the uploader's code on the server.
+
+The `pytorch` backend offers `hf_image` (image classification: a `transformers` classifier or bare backbone of the
+ViT, DeiT, BEiT, Swin, Swinv2, ConvNeXt, ConvNeXtV2, ResNet or MobileNetV2 families). The model decides the image size and
+normalisation, its weights are loaded strictly (a tensor the files lack is an error, never silently random), and the
+trained model is stored as a Hugging Face folder, so it exports through the same six clients as a built-in one and
+can train on a remote worker. It also offers `hf_text` (text classification: a BERT, DistilBERT, RoBERTa,
+XLM-RoBERTa, ALBERT or ELECTRA encoder, fast tokenizer required), fine-tuned with the model's own tokenizer; the
+Python devkit runs that tokenizer (`pip install tokenizers`) and the other five generated clients ship the bare model
+plus `tokenizer.json` and a README that says they do not tokenize. `video` offers `hf_video` the same way.
 
 ## Local development
 

@@ -29,6 +29,9 @@ Implements preprocessing for:
   - a `text` input with a `textTokens` recipe (text classification) — pass the text itself, a
     `str`, not a file path. It is split into words and looked up in the vocabulary that ships in
     preprocessing.json, with the standard library alone.
+  - a `text` input with an `hfTokenizer` recipe (a fine-tuned Hugging Face transformer) — pass the
+    text itself. It is tokenized by the model's own tokenizer, which ships in the bundle as
+    `tokenizer.json` (or inside preprocessing.json) and is run by the `tokenizers` package.
 
 Every other input type (Ludwig's text and audio, a scikit-learn text model) raises
 NotImplementedError with a pointer to preprocessing.json so you can adapt preprocessing yourself —
@@ -264,6 +267,15 @@ class OmniTrainClient:
             self._text_lower, self._text_split = _text_splitter(self._text_recipe)
             first = self._text_recipe["firstWordId"]
             self._text_ids = {word: first + i for i, word in enumerate(self._text_recipe["vocabulary"])}
+        elif self.input_spec["type"] == "text" and "hfTokenizer" in self.input_spec:
+            self._kind = "text"
+            self._text_recipe = self.input_spec["hfTokenizer"]
+            if self._text_recipe.get("recipe") != "hf_tokenizer_v1":
+                raise NotImplementedError(
+                    f"Unknown text recipe {self._text_recipe.get('recipe')!r}. "
+                    "See preprocessing.json's `inputs[0].hfTokenizer` and adapt this client."
+                )
+            self._hf_tokenizer = self._load_hf_tokenizer(self._text_recipe, Path(preprocessing_path).parent)
         else:
             self._kind = "standard"
 
@@ -603,9 +615,28 @@ class OmniTrainClient:
 
     # -- Text ------------------------------------------------------------------------------------------------------
 
+    @staticmethod
+    def _load_hf_tokenizer(recipe: dict, folder: Path):
+        """The model's own Hugging Face tokenizer, set to cut at `maxTokens` and pad to it. It is stored whole in the
+        recipe (`tokenizer`) or, in a bundle, in the file the recipe names (`tokenizerFile`, `tokenizer.json`)."""
+        try:
+            from tokenizers import Tokenizer
+        except ImportError as e:
+            raise ImportError("This model's text recipe needs the tokenizers package: pip install tokenizers") from e
+        if "tokenizer" in recipe:
+            tokenizer = Tokenizer.from_str(recipe["tokenizer"])
+        else:
+            tokenizer = Tokenizer.from_file(str(folder / recipe["tokenizerFile"]))
+        tokenizer.enable_truncation(recipe["maxTokens"])
+        tokenizer.enable_padding(length=recipe["maxTokens"], pad_id=recipe["padId"], pad_token=recipe["padToken"])
+        return tokenizer
+
     def _text_tokens(self, text: str) -> np.ndarray:
-        """`[1, maxTokens]` int64 word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end."""
+        """`[1, maxTokens]` int64 ids: a word-id model looks the first maxTokens words up in its vocabulary, a
+        Hugging Face model runs its own tokenizer; either way the end is padded."""
         recipe = self._text_recipe
+        if "hfTokenizer" in self.input_spec:
+            return np.array([self._hf_tokenizer.encode(text).ids], dtype=np.int64)
         tokens = [t for t in self._text_split.split(text.translate(self._text_lower)) if t]
         ids = [self._text_ids.get(t, recipe["unknownId"]) for t in tokens[: recipe["maxTokens"]]]
         ids += [recipe["padId"]] * (recipe["maxTokens"] - len(ids))

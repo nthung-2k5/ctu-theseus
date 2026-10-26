@@ -161,8 +161,9 @@ async def test_a_backend_that_did_not_opt_in_keeps_its_custom_model_runs_on_the_
     assert (await run_row(db, rid)).status == "queued"
 
 
-def test_the_installed_backends_decide_who_opted_in_and_only_video_did():
-    assert queue.remote_custom_backends() == ["video"]
+def test_the_installed_backends_decide_who_opted_in_and_only_video_and_pytorch_did():
+    # Ludwig's checkpoint re-reads its model from the path in its config, so it stays on the server.
+    assert sorted(queue.remote_custom_backends()) == ["pytorch", "video"]
 
 
 @MODEL_CASES

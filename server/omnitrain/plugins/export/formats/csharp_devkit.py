@@ -2,6 +2,7 @@ from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, D
 from omnitrain.plugins.export.readme import (
     AUDIO_LIMITATION,
     DETECTION_LIMITATION,
+    HF_TEXT_OTHER_LIMITATION,
     LIMITATION_IMAGE_ONLY,
     TEXT_LIMITATION,
 )
@@ -26,6 +27,7 @@ class CSharpDevkit(DevkitFormat):
         "kinds": {
             "detection": {"limitation": DETECTION_LIMITATION},
             "audio": {"run_cmd": "dotnet run -- <path-to-wav-file>", "limitation": AUDIO_LIMITATION},
+            "hf_text": {"limitation": HF_TEXT_OTHER_LIMITATION},
             "text": {"run_cmd": 'dotnet run -- "<the text to classify>"', "limitation": TEXT_LIMITATION},
         },
         "note": (

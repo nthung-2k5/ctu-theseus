@@ -57,8 +57,22 @@ TEXT_APP_LIMITATION = (
     "`inputs[0].textTokens` of `preprocessing.json` (exact match, ASCII letters lower-cased), and scores the ids. "
     "Only a model trained by the PyTorch backend carries that recipe."
 )
-
-
+# For a client that implements text classification with a Hugging Face model's own tokenizer.
+HF_TEXT_LIMITATION = (
+    "Text classification with a fine-tuned Hugging Face transformer: the model takes token ids from its own "
+    "tokenizer, not text. `predict` is given the text itself (a string, not a file) and runs that tokenizer "
+    "(`tokenizer.json`, named by `inputs[0].hfTokenizer.tokenizerFile`) with the Hugging Face `tokenizers` package, "
+    "cutting at `maxTokens` and padding with `padId`; the model derives its attention mask from the padding. The "
+    "tokenizer is the one the model was published with, so its normalisation and vocabulary are not this "
+    "platform's. Only a model trained by the PyTorch backend carries that recipe."
+)
+HF_TEXT_OTHER_LIMITATION = (
+    "This model is a fine-tuned Hugging Face transformer: it takes token ids made by its own tokenizer, which this "
+    "client does not implement. The tokenizer ships as `tokenizer.json` (named by "
+    "`inputs[0].hfTokenizer.tokenizerFile` in `preprocessing.json`, with `maxTokens`, `padId` and `padToken`): run it "
+    "with any Hugging Face `tokenizers` binding, truncating and padding as `hfTokenizer.run` says, and feed the ids to "
+    "the model. The client raises a clear error rather than guessing."
+)
 APP_LIMITATION = (
     "Only implements preprocessing for **image classification** inputs today. `preprocessing.json` still has the "
     "exact parameters Ludwig used (`inputs[0].ludwigPreprocessing`) for other input types; adapt the client code for "
@@ -73,7 +87,7 @@ class ReadmeVars:
     format: str  # the export format's display label
     artifact: str  # model file name inside the bundle, e.g. model.onnx
     has_verify: bool
-    # What the client does: "standard", "detection", "video", "audio" or "text" (see formats/_kits.client_kind).
+    # What the client does: "standard", "detection", "video", "audio", "text" or "hf_text" (see BundleContext.kind).
     kind: str = "standard"
 
 

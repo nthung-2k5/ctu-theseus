@@ -16,7 +16,7 @@ from typing import Any
 
 from omnitrain.plugins.backends.pytorch import audio, text
 from omnitrain.plugins.backends.pytorch.runtime import METADATA_FILENAME
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TextSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TextSpec
 
 
 def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict[str, Any] | None) -> dict[str, Any]:
@@ -87,6 +87,8 @@ def _text_input(meta: dict[str, Any]) -> dict[str, Any]:
     """The whole recipe that turns a text into the model's input; `text.py` is the reference implementation and every
     generated client follows this object (it refuses a `recipe` it does not know). Per text: split into tokens, turn
     them into ids, run the model on the one row, softmax the logits."""
+    if "hfTokenizer" in meta:
+        return _hf_text_input(meta)
     spec = TextSpec.from_meta(meta)
     return {
         "name": "tokens",
@@ -104,6 +106,35 @@ def _text_input(meta: dict[str, Any]) -> dict[str, Any]:
             "unknownId": text.UNKNOWN,
             "firstWordId": text.FIRST_WORD,
             "vocabulary": list(spec.vocab),
+        },
+    }
+
+
+HF_TOKENIZER_RUN = (
+    "Load tokenizer with the Hugging Face tokenizers library (Tokenizer.from_str, or tokenizer.json in a bundle). Call "
+    "enable_truncation(maxTokens), then enable_padding(length=maxTokens, pad_id=padId, pad_token=padToken), then "
+    "encode the text; the ids are the model input. The special tokens the tokenizer adds count towards maxTokens. A "
+    "missing text is the empty string."
+)
+
+
+def _hf_text_input(meta: dict[str, Any]) -> dict[str, Any]:
+    """A bring-your-own transformer's input: the ids its own tokenizer makes. The tokenizer is data that every Hugging
+    Face `tokenizers` binding runs the same way, so the manifest carries it whole (`tokenizer` is the JSON string that
+    library writes) and a client that has the library needs nothing else."""
+    spec = HFTextSpec.from_meta(meta)
+    return {
+        "name": "input_ids",
+        "type": "text",
+        "column": meta["textColumn"],
+        "layout": "[batch, maxTokens] int64",
+        "hfTokenizer": {
+            "recipe": "hf_tokenizer_v1",
+            "run": HF_TOKENIZER_RUN,
+            "maxTokens": spec.max_tokens,
+            "padId": spec.pad_id,
+            "padToken": spec.pad_token,
+            "tokenizer": spec.tokenizer,
         },
     }
 

@@ -26,7 +26,7 @@ from omnitrain.domain.predict import ClassificationClass, InferenceOutput
 from omnitrain.plugins.backends.base import LoadedModel, OutputSpec
 from omnitrain.plugins.backends.pytorch import audio, images, network, runtime, tabular, text
 from omnitrain.plugins.backends.pytorch.data import split_s3_uri
-from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TabularSpec, TextSpec
+from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TabularSpec, TextSpec
 from omnitrain.services import storage
 
 # Rows scored per forward pass, which bounds memory however many rows a frame has.
@@ -34,6 +34,7 @@ IMAGE_PREDICT_BATCH = 32
 TABULAR_PREDICT_BATCH = 4096
 AUDIO_PREDICT_BATCH = 8
 TEXT_PREDICT_BATCH = 256
+HF_TEXT_PREDICT_BATCH = 16
 # What an evaluation feeds `predict` at a time: the model's own forward batch.
 PREDICT_BATCH = IMAGE_PREDICT_BATCH
 
@@ -223,6 +224,36 @@ class TextModel(PytorchLoadedModel):
         return np.concatenate(out) if out else np.zeros((0, len(self.output.labels or [])), dtype=np.float32)
 
 
+class HFTextModel(PytorchLoadedModel):
+    """A bring-your-own transformer: the texts go through its own tokenizer, cut and padded to `maxTokens`."""
+
+    def __init__(self, net: torch.nn.Module, meta: dict[str, Any]) -> None:
+        super().__init__(net, meta)
+        from omnitrain.plugins.backends.pytorch import hf
+
+        self._spec = HFTextSpec.from_meta(meta)
+        self._tokenizer = hf.make_tokenizer(self._spec)
+        self._encode = hf.encode_texts
+        self.input_columns = [meta["textColumn"]]
+
+    @property
+    def spec(self) -> HFTextSpec:
+        return self._spec
+
+    @property
+    def predict_batch(self) -> int:
+        # A transformer is far heavier per text than a bag of words.
+        return HF_TEXT_PREDICT_BATCH
+
+    def outputs(self, frame: pd.DataFrame) -> np.ndarray:
+        texts = text.clean(frame[self.input_columns[0]])
+        out = [
+            self._forward(self._encode(self._tokenizer, texts[start : start + HF_TEXT_PREDICT_BATCH]))
+            for start in range(0, len(texts), HF_TEXT_PREDICT_BATCH)
+        ]
+        return np.concatenate(out) if out else np.zeros((0, len(self.output.labels or [])), dtype=np.float32)
+
+
 def _localize(path: str, scratch: str, index: int, default_ext: str = ".jpg") -> str:
     """An `s3://` URI (a batch frame built from a snapshot) is fetched to a local file; a local path (the inference
     endpoint's upload) is used as it is."""
@@ -255,6 +286,8 @@ def build_network(meta: dict[str, Any]) -> torch.nn.Module:
 
 def wrap(net: torch.nn.Module, meta: dict[str, Any]) -> PytorchLoadedModel:
     """`net` as the loaded model its `names.json` calls for."""
+    if "hfTokenizer" in meta:
+        return HFTextModel(net, meta)
     kinds = {"tabular": TabularModel, "audio": AudioModel, "image": ImageModel, "text": TextModel}
     return kinds[meta["inputKind"]](net, meta)
 
@@ -262,6 +295,14 @@ def wrap(net: torch.nn.Module, meta: dict[str, Any]) -> PytorchLoadedModel:
 def load(model_dir: str) -> PytorchLoadedModel:
     root = Path(model_dir)
     meta = json.loads((root / runtime.METADATA_FILENAME).read_text(encoding="utf-8"))
+    if meta.get("hf"):
+        # A bring-your-own model was saved as a Hugging Face folder that holds everything, so nothing here points
+        # back at the files it started from.
+        from omnitrain.plugins.backends.pytorch import hf
+
+        if "hfTokenizer" in meta:
+            return wrap(hf.load_text(str(root), HFTextSpec.from_meta(meta).pad_id), meta)
+        return wrap(hf.load(str(root)), meta)
     net = build_network(meta)
     # weights_only: the file is a plain state dict, and nothing here should ever unpickle arbitrary objects.
     net.load_state_dict(torch.load(root / runtime.WEIGHTS_FILENAME, map_location="cpu", weights_only=True))

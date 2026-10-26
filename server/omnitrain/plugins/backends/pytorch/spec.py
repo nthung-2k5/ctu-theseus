@@ -171,3 +171,39 @@ class TextSpec:
     @classmethod
     def from_meta(cls, meta: dict[str, Any]) -> "TextSpec":
         return cls(max_tokens=int(meta["maxTokens"]), vocab=tuple(str(w) for w in meta.get("vocabulary", ())))
+
+
+@dataclass(frozen=True)
+class HFTextSpec:
+    """A text as a bring-your-own Hugging Face model sees it: `max_tokens` ids from the model's own tokenizer. The
+    tokenizer is a Hugging Face `tokenizers` definition (`tokenizer`, the JSON string that library writes), which
+    already holds the normaliser, the splitting rule, the vocabulary and the special tokens it adds ([CLS] and [SEP], or
+    <s> and </s>). A text is encoded with that, cut at `max_tokens` (the special tokens count), and padded at the end
+    with `pad_id` (the token `pad_token`) up to `max_tokens`. The network takes only the ids: it derives its attention
+    mask from `pad_id`, so no real token may carry it."""
+
+    max_tokens: int
+    pad_id: int
+    pad_token: str
+    tokenizer: str
+
+    def to_meta(self) -> dict[str, Any]:
+        return {
+            "inputKind": "text",
+            "hfTokenizer": {
+                "maxTokens": self.max_tokens,
+                "padId": self.pad_id,
+                "padToken": self.pad_token,
+                "tokenizer": self.tokenizer,
+            },
+        }
+
+    @classmethod
+    def from_meta(cls, meta: dict[str, Any]) -> "HFTextSpec":
+        found = meta["hfTokenizer"]
+        return cls(
+            max_tokens=int(found["maxTokens"]),
+            pad_id=int(found["padId"]),
+            pad_token=str(found["padToken"]),
+            tokenizer=str(found["tokenizer"]),
+        )

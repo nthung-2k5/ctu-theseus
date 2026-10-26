@@ -1,5 +1,11 @@
 from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, VIDEO, DevkitFormat
-from omnitrain.plugins.export.readme import AUDIO_LIMITATION, DETECTION_LIMITATION, LIMITATION_FULL, TEXT_LIMITATION
+from omnitrain.plugins.export.readme import (
+    AUDIO_LIMITATION,
+    DETECTION_LIMITATION,
+    HF_TEXT_LIMITATION,
+    LIMITATION_FULL,
+    TEXT_LIMITATION,
+)
 
 
 class PythonDevkit(DevkitFormat):
@@ -34,6 +40,12 @@ class PythonDevkit(DevkitFormat):
                 "dependencies": "pip install onnxruntime numpy",
                 "run_cmd": 'python example.py "<the text to classify>"',
                 "limitation": TEXT_LIMITATION,
+            },
+            "hf_text": {
+                "dependencies": "pip install onnxruntime numpy tokenizers",
+                "run_cmd": 'python example.py "<the text to classify>"',
+                "files": "`omnitrain_client.py`, `example.py`, `tokenizer.json`",
+                "limitation": HF_TEXT_LIMITATION,
             },
             "video": {
                 "dependencies": "pip install onnxruntime numpy pillow opencv-python-headless",

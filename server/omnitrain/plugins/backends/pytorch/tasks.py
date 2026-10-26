@@ -184,6 +184,10 @@ TEXT_DEFAULTS = {
     "vocab_size": 20000,
     "min_word_count": 2,
 }
+# A bring-your-own transformer is fine-tuned, not trained from scratch: the learning rate that suits a randomly
+# initialised model would wreck its weights, so it has its own (used when the form leaves the rate unset). The other
+# defaults, including the epoch limit, work for both, because early stopping ends a fine-tune after a few epochs.
+HF_TEXT_LEARNING_RATE = 0.00002
 # The embedding width of each text model: the size of a word's learned vector.
 TEXT_EMBEDDING = 128
 # A convolution filter spans this many words, and there are this many of each size.

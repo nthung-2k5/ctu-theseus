@@ -16,6 +16,8 @@ from omnitrain.plugins.export.readme import ReadmeVars, model_readme
 
 _registry: Registry["ExportFormat"] = Registry("export format", "omnitrain.plugins.export.formats")
 
+TOKENIZER_FILENAME = "tokenizer.json"
+
 
 @dataclass
 class BundleContext:
@@ -49,7 +51,7 @@ class BundleContext:
 
     @property
     def kind(self) -> str:
-        """Which client kind the manifest describes: detection, video, audio, text or standard."""
+        """Which client kind the manifest describes: detection, video, audio, text, hf_text or standard."""
         if any(o.get("type") == "detections" for o in self.preprocessing.get("outputs", [])):
             return "detection"
         if any(i.get("type") == "video" for i in self.preprocessing.get("inputs", [])):
@@ -58,6 +60,8 @@ class BundleContext:
             return "audio"
         if any(i.get("type") == "text" and "textTokens" in i for i in self.preprocessing.get("inputs", [])):
             return "text"
+        if any(i.get("type") == "text" and "hfTokenizer" in i for i in self.preprocessing.get("inputs", [])):
+            return "hf_text"
         return "standard"
 
     def add(self, path: str, data: str | bytes, compress: bool = True) -> None:
@@ -65,9 +69,23 @@ class BundleContext:
 
     def place_model(self, prefix: str = "") -> None:
         self.add(f"{prefix}{self.artifact_filename}", self.model_bytes, compress=False)
-        self.add(f"{prefix}preprocessing.json", dumps(self.preprocessing))
+        self.add(f"{prefix}preprocessing.json", dumps(self._manifest_without_tokenizer(prefix)))
         if self.labels:
             self.add(f"{prefix}labels.txt", "\n".join(self.labels))
+
+    def _manifest_without_tokenizer(self, prefix: str) -> dict[str, Any]:
+        """A Hugging Face model's tokenizer is a JSON document of its own, megabytes for a multilingual vocabulary, and
+        the file every Hugging Face library reads. It goes beside the manifest as `tokenizer.json`, and the manifest
+        says so (`tokenizerFile`) instead of carrying it a second time."""
+        inputs = []
+        for spec in self.preprocessing.get("inputs", []):
+            recipe = spec.get("hfTokenizer")
+            if isinstance(recipe, dict) and isinstance(recipe.get("tokenizer"), str):
+                self.add(f"{prefix}{TOKENIZER_FILENAME}", recipe["tokenizer"])
+                recipe = {**{k: v for k, v in recipe.items() if k != "tokenizer"}, "tokenizerFile": TOKENIZER_FILENAME}
+                spec = {**spec, "hfTokenizer": recipe}
+            inputs.append(spec)
+        return {**self.preprocessing, "inputs": inputs}
 
     def place_golden(self, prefix: str = "") -> None:
         if self.golden is None:

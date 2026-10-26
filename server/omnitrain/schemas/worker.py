@@ -16,7 +16,9 @@ from omnitrain.schemas.common import ApiModel
 #   2  the run spec can carry a bring-your-own model for the worker to fetch (`WorkerCustomModel`)
 #   3  a run's config can carry weight decay, a learning-rate schedule, warmup, gradient clipping and mixed precision
 #      (a worker on 2 would train without them and not say so)
-PROTOCOL_VERSION = 3
+#   4  the `pytorch` backend can train a bring-your-own image model on a worker (a run's config carries `custom`, and
+#      what it uploads is a Hugging Face folder); a worker on 3 would try to build it as a torchvision model
+PROTOCOL_VERSION = 4
 
 
 class WorkerClaimBody(ApiModel):

@@ -27,6 +27,7 @@ from omnitrain.plugins.backends.base import (
     weight_decay_spec,
 )
 from omnitrain.plugins.backends.pytorch import tasks
+from omnitrain.plugins.backends.pytorch.custom import HF_IMAGE, HF_TEXT
 from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TextSpec
 from omnitrain.schemas.common import ParamSpec
 
@@ -78,6 +79,18 @@ class PytorchHyperparameters(HyperparamsBase):
     min_word_count: int | None = Field(default=None, ge=1, le=1000)
 
 
+# The one bring-your-own kind each input kind takes.
+_CUSTOM_KIND = {"image": HF_IMAGE, "text": HF_TEXT}
+
+
+def _input_kind(task: TaskDescriptor) -> str:
+    if task.id in tasks.IMAGE_TASKS:
+        return "image"
+    if task.id in tasks.TEXT_TASKS:
+        return "text"
+    return "other"
+
+
 def _refuse(hp: PytorchHyperparameters, task: TaskDescriptor, *names: str) -> None:
     try:
         refuse_unsupported(hp, "PyTorch", *names)
@@ -90,17 +103,19 @@ def compile_pytorch_config(
 ) -> dict[str, Any]:
     if task.id not in tasks.IMAGE_TASKS | tasks.AUDIO_TASKS | tasks.TEXT_TASKS and task.id not in tasks.TABULAR_TASKS:
         raise ConfigError(f'The PyTorch backend does not support the task "{task.id}"')
-    if custom is not None or (hp.model_id and hp.model_id.startswith("custom:")):
-        raise ConfigError("The PyTorch backend does not take bring-your-own models yet")
+    if custom is None and hp.model_id and hp.model_id.startswith("custom:"):
+        raise ConfigError(f'Custom model "{hp.model_id}" was not resolved (it may have been removed or disabled)')
+    if custom is not None and custom.kind != _CUSTOM_KIND.get(_input_kind(task)):
+        raise ConfigError(f'A "{custom.kind}" custom model cannot be used for task "{task.id}"')
     if task.id in tasks.IMAGE_TASKS:
         _refuse(hp, task, *_TABULAR_ONLY, *_AUDIO_ONLY, *_TEXT_ONLY)
-        return _compile_image(task, ctx, hp)
+        return _compile_image(task, ctx, hp, custom)
     if task.id in tasks.AUDIO_TASKS:
         _refuse(hp, task, *_TABULAR_ONLY, *_IMAGE_ONLY, *_TEXT_ONLY)
         return _compile_audio(task, ctx, hp)
     if task.id in tasks.TEXT_TASKS:
-        _refuse(hp, task, *_IMAGE_ONLY, *_PRETRAINED, *_AUDIO_ONLY)
-        return _compile_text(task, ctx, hp)
+        _refuse(hp, task, *_IMAGE_ONLY, *_AUDIO_ONLY)
+        return _compile_text(task, ctx, hp, custom)
     _refuse(hp, task, *_IMAGE_ONLY, *_PRETRAINED, *_AUDIO_ONLY, *_TEXT_ONLY)
     return _compile_tabular(task, ctx, hp)
 
@@ -125,16 +140,29 @@ def _train_block(hp: PytorchHyperparameters, defaults: dict[str, Any], *, epochs
     }
 
 
-def _compile_image(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters) -> dict[str, Any]:
+def _compile_image(
+    task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef | None
+) -> dict[str, Any]:
     if len(ctx.label_class_names) < 2:
         raise ConfigError("Image classification needs a snapshot with at least two classes")
-    model_id = hp.model_id or tasks.IMAGE_MODELS[0].id
-    model = tasks.MODELS_BY_ID.get(model_id)
-    if model is None:
-        raise ConfigError(f'"{model_id}" is not an image model for the task "{task.id}"')
-    size = hp.image_size or model.size
-    if model.fixed_size and size != model.size:
-        raise ConfigError(f"{model.label} only works at {model.size} pixels, not {size}")
+    if custom is not None:
+        # The model dictates its own image size and normalisation (see custom.py), and the files are not necessarily
+        # on disk yet, so `train.py` reads both from them when training starts and writes them into names.json. What
+        # is here is a stand-in, and `imageSize` is ignored (the form always sends it).
+        if hp.pretrained is False:
+            raise ConfigError(
+                "A bring-your-own model always starts from its own weights, so it cannot be trained from scratch"
+            )
+        model_id, size, pretrained = hp.model_id or f"custom:{custom.id}", tasks.IMAGE_MODELS[0].size, True
+    else:
+        model_id = hp.model_id or tasks.IMAGE_MODELS[0].id
+        model = tasks.MODELS_BY_ID.get(model_id)
+        if model is None:
+            raise ConfigError(f'"{model_id}" is not an image model for the task "{task.id}"')
+        size = hp.image_size or model.size
+        if model.fixed_size and size != model.size:
+            raise ConfigError(f"{model.label} only works at {model.size} pixels, not {size}")
+        pretrained = True if hp.pretrained is None else hp.pretrained
 
     defaults = {
         "epochs": tasks.DEFAULT_EPOCHS,
@@ -148,7 +176,9 @@ def _compile_image(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperp
         "inputKind": "image",
         "task": "classify",
         "model": model_id,
-        "pretrained": True if hp.pretrained is None else hp.pretrained,
+        "pretrained": pretrained,
+        # Where the bring-your-own model's files are, for train.py. Absent for a built-in model.
+        **({"custom": {"kind": custom.kind, "path": custom.local_path}} if custom is not None else {}),
         "imageColumn": _column(ctx, "storage_uri"),
         "labelColumn": _column(ctx, "label"),
         # The index a class gets is its position here. `train.py` writes this order into names.json, and a loaded
@@ -207,12 +237,19 @@ def _compile_audio(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperp
     }
 
 
-def _compile_text(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters) -> dict[str, Any]:
+def _compile_text(
+    task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef | None
+) -> dict[str, Any]:
     if len(ctx.label_class_names) < 2:
         raise ConfigError("Text classification needs a snapshot with at least two classes")
+    if custom is not None:
+        return _compile_hf_text(ctx, hp, custom)
     model_id = hp.model_id or tasks.TEXT_MODELS[0].id
     if model_id not in tasks.TEXT_MODELS_BY_ID:
         raise ConfigError(f'"{model_id}" is not a text model for the task "{task.id}"')
+    if hp.freeze_backbone or hp.pretrained:
+        # The form always offers the freeze switch (a bring-your-own model may use it), so only turning it ON is wrong.
+        raise ConfigError("The built-in text models are trained from scratch, so there is nothing pretrained to freeze")
 
     d = tasks.TEXT_DEFAULTS
     # The vocabulary is empty here: `train.py` builds it from the train texts and writes the real one to names.json.
@@ -235,6 +272,38 @@ def _compile_text(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperpa
         "network": {"dropout": d["dropout"] if hp.dropout is None else hp.dropout},
         "train": {
             **_train_block(hp, d, epochs=hp.epochs or d["epochs"]),
+            "useClassWeights": bool(hp.use_class_weights),
+        },
+    }
+
+
+def _compile_hf_text(ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef) -> dict[str, Any]:
+    """A bring-your-own transformer. It brings its own tokenizer and vocabulary, so those settings (and the dropout the
+    built-in models have) are ignored (the form always sends them), and it is fine-tuned, so the learning rate defaults
+    to a much smaller one. How many tokens it may read depends on its files, which are not necessarily on disk yet, so
+    `train.py` checks `maxTokens` against them."""
+    if hp.pretrained is False:
+        raise ConfigError(
+            "A bring-your-own model always starts from its own weights, so it cannot be trained from scratch"
+        )
+    d = {**tasks.TEXT_DEFAULTS, "learning_rate": tasks.HF_TEXT_LEARNING_RATE}
+    return {
+        "backend": "pytorch",
+        "inputKind": "text",
+        "task": "classify",
+        "model": hp.model_id or f"custom:{custom.id}",
+        "pretrained": True,
+        # Where the bring-your-own model's files are, for train.py.
+        "custom": {"kind": custom.kind, "path": custom.local_path},
+        "textColumn": _column(ctx, "inline_text"),
+        "labelColumn": _column(ctx, "label"),
+        # The index a class gets is its position here. `train.py` writes this order into names.json, and a loaded
+        # model reads it back from there: serving and export never consult this config or the label_classes table.
+        "classNames": list(ctx.label_class_names),
+        "text": {"maxTokens": hp.max_tokens or d["max_tokens"]},
+        "train": {
+            **_train_block(hp, d, epochs=hp.epochs or d["epochs"]),
+            "freezeBackbone": bool(hp.freeze_backbone),
             "useClassWeights": bool(hp.use_class_weights),
         },
     }
@@ -298,6 +367,12 @@ def _text_specs() -> list[ParamSpec]:
     d = tasks.TEXT_DEFAULTS
     return [
         ParamSpec(
+            name="freezeBackbone", label="Freeze backbone", type="bool", group=_MODEL, default=False,
+            description="For a bring-your-own Hugging Face model: trains only the final classification layer and "
+            "leaves the rest exactly as pretrained. Much faster and needs very few texts, but it adapts less closely "
+            "to your data. The built-in models are trained from scratch and have nothing to freeze.",
+        ),
+        ParamSpec(
             name="epochs", label="Epochs", type="int", group=_TRAINING, default=d["epochs"], min=1, max=500, step=1,
             description="How many times the model goes through your whole training set (each pass is one epoch).",
         ),
@@ -305,13 +380,16 @@ def _text_specs() -> list[ParamSpec]:
             name="batchSize", label="Batch Size", type="choice", group=_TRAINING,
             default=str(d["batch"]), choices=[str(n) for n in tasks.TEXT_BATCH_SIZES],
             description="How many texts the model reads before it updates itself. Bigger batches are faster but "
-            "need more memory.",
+            "need more memory; lower this first if a Hugging Face model runs out of memory.",
         ),
         ParamSpec(
             name="learningRate", label="Learning Rate", type="float", group=_TRAINING,
-            default=d["learning_rate"], min=0.00001, max=0.1, step=0.0001,
+            default=None, min=0.00001, max=0.1, step=0.00001,
             description="How big a step the model takes each time it learns from some texts. Too high and it "
-            "overshoots; too low and training is slow.",
+            "overshoots; too low and training is slow. Left unset it is "
+            f"{d['learning_rate']:g} for the built-in models, which learn from scratch, and "
+            f"{tasks.HF_TEXT_LEARNING_RATE:g} for a Hugging Face model, whose pretrained weights a larger step would "
+            "wreck.",
         ),
         seed_spec(_TRAINING),
         weight_decay_spec(_TRAINING),
@@ -331,26 +409,29 @@ def _text_specs() -> list[ParamSpec]:
             step=0.05,
             description="Randomly switches off this share of the model's units while training, so it cannot lean on "
             "any one of them. Raise it if the model memorises the training texts (validation results get worse "
-            "while training results keep improving), which is common with few texts.",
+            "while training results keep improving), which is common with few texts. A Hugging Face model keeps its "
+            "own dropout and ignores this.",
         ),
         _patience_spec(d["patience"]),
         ParamSpec(
             name="maxTokens", label="Words read per text", type="int", group=_TEXT, default=d["max_tokens"], min=8,
             max=1024, step=8,
-            description="The model reads this many words from the start of each text and ignores the rest. Texts "
-            "shorter than this are padded. Reading more of a long text costs more time and memory.",
+            description="The model reads this many words (for a Hugging Face model, tokens: pieces of words) from the "
+            "start of each text and ignores the rest. Texts shorter than this are padded. Reading more of a long text "
+            "costs more time and memory, and a Hugging Face model has a limit of its own, usually 512.",
         ),
         ParamSpec(
             name="vocabSize", label="Vocabulary size", type="int", group=_TEXT, default=d["vocab_size"], min=100,
             max=200000, step=1000,
             description="The model learns at most this many different words, the most frequent in your training "
-            "texts. Every other word is read as 'unknown'. A bigger vocabulary makes a bigger exported model.",
+            "texts. Every other word is read as 'unknown'. A bigger vocabulary makes a bigger exported model. A "
+            "Hugging Face model brings its own vocabulary and ignores this.",
         ),
         ParamSpec(
             name="minWordCount", label="Minimum word count", type="int", group=_TEXT, default=d["min_word_count"],
             min=1, max=1000, step=1,
             description="A word must appear at least this many times in the training texts to be learned. Raising "
-            "it drops typos and one-off names, which the model could only memorise.",
+            "it drops typos and one-off names, which the model could only memorise. A Hugging Face model ignores this.",
         ),
     ]  # fmt: skip
 
@@ -433,7 +514,7 @@ def _image_specs() -> list[ParamSpec]:
             name="pretrained", label="Start from pretrained weights", type="bool", group=_MODEL, default=True,
             description="Starts from a model that has already learned to see on a million everyday photos "
             "(ImageNet), which needs far fewer of your images and trains much faster. Turn off to train from "
-            "scratch.",
+            "scratch. A bring-your-own model always starts from its own weights.",
         ),
         ParamSpec(
             name="freezeBackbone", label="Freeze backbone", type="bool", group=_MODEL, default=False,
@@ -475,7 +556,7 @@ def _image_specs() -> list[ParamSpec]:
             default=str(tasks.IMAGE_SIZES[3]), choices=[str(n) for n in tasks.IMAGE_SIZES],
             description="Every image is resized so its shorter side is this many pixels, then cropped to a square. "
             "Larger keeps more detail but is much slower. Each model was pretrained at 224, and a vision "
-            "transformer only works at 224.",
+            "transformer only works at 224. A Hugging Face model uses its own size and ignores this.",
         ),
     ]  # fmt: skip
 

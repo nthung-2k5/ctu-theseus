@@ -117,8 +117,38 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `events/writer.py` compares it across epochs. ONNX is exported straight from the `nn.Module` as logits (a number for a
   regressor), traced with two rows (a batch of 1 pins the batch axis for `convnext_tiny` and `vit_base`), and a table
   takes one tensor per column named by the column. It is **not** a default for any task (`default_for` is empty:
-  scikit-learn is the tabular default, Ludwig the image one) until someone has compared it on a real run. Bring-your-own
-  models are refused in `compile`; a new input kind needs a new spec beside the four.
+  scikit-learn is the tabular default, Ludwig the image one) until someone has compared it on a real run. A new input
+  kind needs a new spec beside the four.
+  **Bring-your-own image models** are one kind, `hf_image` (`custom.py`, `hf.py`; image classification only): a Hugging
+  Face classifier or bare backbone of ViT, DeiT, BEiT, Swin, Swinv2, ConvNeXt, ConvNeXtV2, ResNet or MobileNetV2. The
+  model dictates its own image size (the config's `image_size`, else the preprocessor's crop or size, else 224) and
+  mean/std (`preprocessor_config.json`), read from its files when training starts (`custom.image_settings`), so
+  `imageSize` is ignored (the web form always sends it) and `pretrained=False` is refused. The recipe around them is
+  still `images.preprocess`, so the manifest and all six clients are unchanged. A checkpoint is loaded **strictly**
+  (`hf._load_checkpoint`): `from_pretrained` re-initialises any tensor it cannot find and only warns, and for a bare
+  ViT, DeiT or BEiT backbone transformers 5.14 connects none of its keys to the classifier, so the backbone is loaded on
+  its own and copied in, and a tensor missing outside the head is an error, never random weights under a "pretrained"
+  label. The trained model is saved as a Hugging Face folder (`config.json` and `model.safetensors` beside `names.json`,
+  with `hf: true`) that points back at nothing, which is why `remote_custom_models` is True. Add a family to
+  `SUPPORTED_MODEL_TYPES` and a row to `FAMILIES` in `tests/test_pytorch_custom.py` (strict load, freeze, ONNX parity).
+  Validation builds the model and runs one blank image, but does not export, so a family outside that list may still
+  fail at export time.
+  **Bring-your-own text models** are the kind `hf_text` (text classification only; `custom.py`, `hf.py`
+  `HFTextNet`; BERT, DistilBERT, RoBERTa, XLM-RoBERTa, ALBERT, ELECTRA; `tests/test_pytorch_custom_text.py`). Same strict
+  loader and self-contained saved folder as `hf_image`. The model's own tokenizer is the recipe: `hf.read_tokenizer`
+  takes only a **fast** tokenizer (it is data every `tokenizers` binding runs the same way) and refuses a folder with no
+  tokenizer files (transformers would silently build an empty-vocabulary one); its JSON string is stored in `names.json`
+  (`hfTokenizer`, with `maxTokens`, `padId`, `padToken`) and in the manifest's `inputs[0].hfTokenizer` (recipe
+  `hf_tokenizer_v1`). Training and serving encode with `Tokenizer.from_str`, `enable_truncation(max_tokens)`,
+  `enable_padding(length=max_tokens, pad_id, pad_token)`, exactly what the Python client does. The ONNX graph takes
+  **one** int64 input `input_ids` `[batch, maxTokens]` and derives the attention mask from `ids != pad_id` inside
+  (`HFTextNet`), so the pad id must be the model's `pad_token_id` (RoBERTa numbers positions from it), and `maxTokens`
+  is refused above `custom.text_token_limit` (position embeddings, less `pad_token_id + 1` for RoBERTa-likes). The vocab
+  settings and dropout are ignored; the learning rate defaults to `HF_TEXT_LEARNING_RATE` (2e-5), not the from-scratch
+  0.002. Only the **Python** devkit implements the recipe (it needs `pip install tokenizers`); the other five clients
+  gate on `textTokens`, fall through to their "adapt the client" error, and say so in the README
+  (`HF_TEXT_OTHER_LIMITATION`). `BundleContext.place_model` moves the tokenizer out of `preprocessing.json` into
+  `tokenizer.json` (`tokenizerFile`), because a multilingual vocabulary is megabytes. `names.json` still carries it whole.
   **Audio is one recipe in `audio.py`** (decode: scipy for WAV, torchaudio for the rest; mean to mono; `resample_poly`;
   a fixed window zero-padded at the end; Hann STFT with no edge padding; power; HTK mel filterbank; `ln(x + 1e-6)`;
   one scalar mean/std fitted on the train recordings), in numpy so it needs no torch and the same code serves training,

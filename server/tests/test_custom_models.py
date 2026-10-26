@@ -850,10 +850,11 @@ async def test_inspecting_a_hub_model_reads_the_task_from_its_config(new_user, m
 
 
 async def test_a_config_that_does_not_name_the_task_is_only_a_warning(new_user, monkeypatch):
-    fake_inspection(monkeypatch, {"model_type": "bert", "architectures": ["BertModel"]})
+    # (A bare BertModel is no longer such a config: the PyTorch backend's `hf_text` takes a bare encoder.)
+    fake_inspection(monkeypatch, {"model_type": "gpt2", "architectures": ["GPT2Model"]})
     out = await inspect(await new_user())
     assert out["errors"] == [] and out["suggestedKind"] is None
-    assert len(out["warnings"]) == 1 and "BertModel" in out["warnings"][0]
+    assert len(out["warnings"]) == 1 and "GPT2Model" in out["warnings"][0]
 
 
 async def test_a_repo_without_a_config_json_is_only_a_warning(new_user, monkeypatch):

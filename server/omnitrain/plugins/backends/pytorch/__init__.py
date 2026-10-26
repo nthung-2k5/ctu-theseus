@@ -25,13 +25,18 @@ Submodules:
   evaluate.py   the evaluation report (the shared classification and regression reports)
   artifacts.py  ONNX conversion, straight from the module
   manifest.py   preprocessing.json for a bare model export
+  custom.py     bring-your-own Hugging Face models (image and text): kinds, file checks, the image size and
+                normalisation, or the token limit, a model dictates (JSON only, no torch)
+  hf.py         builds, freezes, saves and loads such a model as a plain `[N, 3, H, W] -> logits` or
+                `[N, max_tokens] ids -> logits` module, and runs its tokenizer (torch)
 
-Only tasks.py, spec.py, compile.py, runtime.py, manifest.py and artifacts.py are imported at module level here, and none
-of them imports torch at module level, so listing this backend never needs a GPU runtime. The others import torch, so
-they are imported lazily, inside the classmethods that need them.
+Only tasks.py, spec.py, compile.py, runtime.py, manifest.py, artifacts.py and custom.py are imported at module level
+here, and none of them imports torch at module level, so listing this backend never needs a GPU runtime. The others
+import torch, so they are imported lazily, inside the classmethods that need them.
 
-Licence: torchvision and its pretrained ImageNet weights are BSD-3-Clause. Not offered yet: pretrained or
-transformer text models, token classification, bring-your-own models, categorical table columns.
+Licence: torchvision and its pretrained ImageNet weights are BSD-3-Clause. Not offered yet: built-in pretrained text
+models (a Hugging Face encoder is brought, not bundled), token classification, bring-your-own models other than
+Hugging Face image and text classifiers, categorical table columns.
 """
 
 import importlib.util
@@ -41,6 +46,7 @@ import pandas as pd
 
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.plugins.backends.base import (
+    CustomModelKind,
     CustomModelRef,
     EvalResult,
     LoadedModel,
@@ -48,6 +54,7 @@ from omnitrain.plugins.backends.base import (
     TrainContext,
     TrainerBackend,
 )
+from omnitrain.plugins.backends.pytorch import custom as _custom
 from omnitrain.plugins.backends.pytorch.artifacts import ARTIFACTS
 from omnitrain.plugins.backends.pytorch.compile import PytorchHyperparameters, compile_pytorch_config
 from omnitrain.plugins.backends.pytorch.compile import hyperparameter_specs as _hyperparameter_specs
@@ -76,8 +83,9 @@ class PytorchBackend(TrainerBackend):
     Hyperparameters = PytorchHyperparameters
     artifacts = ARTIFACTS
     metadata_filename = METADATA_FILENAME
-    # No bring-your-own models yet, so a worker has nothing to fetch beyond the built-in weights it downloads itself.
-    remote_custom_models = False
+    # A bring-your-own model is saved as a self-contained Hugging Face folder (hf.py), so a trained model loads, serves
+    # and exports from the run's results alone, wherever its base model's files were.
+    remote_custom_models = True
 
     @classmethod
     def available(cls) -> str | None:
@@ -111,6 +119,18 @@ class PytorchBackend(TrainerBackend):
     @classmethod
     def hyperparameter_specs(cls, task: TaskDescriptor) -> list[ParamSpec]:
         return _hyperparameter_specs(task)
+
+    @classmethod
+    def custom_model_kinds(cls, task: TaskDescriptor) -> list[CustomModelKind]:
+        return _custom.custom_kinds_for(task.id)
+
+    @classmethod
+    def suggest_custom_kind(cls, config: dict[str, Any]) -> str | None:
+        return _custom.suggest_kind(config)
+
+    @classmethod
+    def validate_custom_model(cls, task: TaskDescriptor, ref: CustomModelRef) -> None:
+        _custom.validate_custom_model(task, ref)
 
     @classmethod
     def compile(

@@ -10,6 +10,8 @@ Only ONNX is offered, and it is exported straight from the trained `nn.Module`:
     Every generated client computes the spectrogram from the recipe in the manifest.
   * A text model takes a batch of word ids as an int64 tensor `[batch, max_tokens]` named `tokens` (the text already
     split and looked up in the vocabulary, see text.py and manifest.py) and returns raw class logits.
+    A bring-your-own transformer takes the same kind of tensor named `input_ids`, made by its own tokenizer; its
+    attention mask is derived from the padding id inside the graph, so there is still one input.
   * A table model takes one float tensor `[batch]` per column, named by the column, as RAW values: filling a missing
     value and standardising are inside the graph (so the manifest carries no `numberNormalization`). It returns logits
     for a classifier, or the number in the target's own units for a regressor, in one tensor named by the label column.
@@ -28,6 +30,7 @@ IMAGE_INPUT_NAME = "images"
 IMAGE_OUTPUT_NAME = "logits"
 AUDIO_INPUT_NAME = "spectrograms"
 TEXT_INPUT_NAME = "tokens"
+HF_TEXT_INPUT_NAME = "input_ids"
 
 
 def convert(model: Any, artifact_id: str, workdir: str) -> str:
@@ -70,7 +73,7 @@ def convert(model: Any, artifact_id: str, workdir: str) -> str:
         wrapped = net
         export_args = {
             "args": (torch.zeros(2, model.spec.max_tokens, dtype=torch.long),),
-            "input_names": [TEXT_INPUT_NAME],
+            "input_names": [HF_TEXT_INPUT_NAME if "hfTokenizer" in model.meta else TEXT_INPUT_NAME],
             "dynamic_shapes": ({0: batch},),
         }
     else:

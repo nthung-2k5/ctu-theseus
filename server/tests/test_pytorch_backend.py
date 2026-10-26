@@ -154,11 +154,12 @@ class TestCompile:
         with pytest.raises(ConfigError, match="does not support the task"):
             compile_pytorch_config(get_task_descriptor("video_classification"), SNAPSHOT, PytorchHyperparameters())
 
-    def test_bring_your_own_models_are_not_offered_yet(self):
-        ref = CustomModelRef(id="u", kind="hf_image", source_kind="hub", local_path="unused")
-        with pytest.raises(ConfigError, match="bring-your-own"):
-            compile_pytorch_config(TASK, SNAPSHOT, PytorchHyperparameters(), custom=ref)
-        with pytest.raises(ConfigError, match="bring-your-own"):
+    def test_a_custom_model_of_another_kind_or_an_unresolved_one_is_refused(self):
+        # What a good `hf_image` model compiles to is in tests/test_pytorch_custom.py.
+        other = CustomModelRef(id="u", kind="hf_transformer", source_kind="hub", local_path="unused")
+        with pytest.raises(ConfigError, match="cannot be used"):
+            compile_pytorch_config(TASK, SNAPSHOT, PytorchHyperparameters(), custom=other)
+        with pytest.raises(ConfigError, match="was not resolved"):
             compile_(model_id="custom:abc")
 
     def test_unknown_hyperparameters_are_rejected(self):
@@ -791,9 +792,11 @@ class TestCompileText:
         assert (c["train"]["epochs"], c["train"]["batchSize"], c["train"]["learningRate"]) == (3, 16, 0.01)
 
     def test_a_text_model_has_no_pretrained_weights_to_start_from(self):
-        for selection in ({"pretrained": True}, {"freeze_backbone": False}):
-            with pytest.raises(ConfigError, match="does not support"):
+        # The form always offers the freeze switch (a bring-your-own model uses it), so only turning it ON is refused.
+        for selection in ({"pretrained": True}, {"freeze_backbone": True}):
+            with pytest.raises(ConfigError, match="trained from scratch"):
                 compile_text(**selection)
+        assert compile_text(freeze_backbone=False)["model"] == "text_bag"
 
     def test_knobs_of_the_other_kinds_of_input_are_refused(self):
         for selection in ({"image_size": 64}, {"horizontal_flip": True}, {"sample_rate": 8000}, {"n_mels": 40}):
@@ -814,13 +817,15 @@ class TestCompileText:
     def test_an_unknown_or_custom_model_is_refused(self):
         with pytest.raises(ConfigError, match="not a text model"):
             compile_text(model_id="resnet18")
-        with pytest.raises(ConfigError, match="bring-your-own"):
+        with pytest.raises(ConfigError, match="was not resolved"):
             compile_text(model_id="custom:00000000-0000-0000-0000-000000000000")
-        with pytest.raises(ConfigError, match="bring-your-own"):
-            compile_pytorch_config(
-                TEXT, REVIEWS, PytorchHyperparameters(),
-                CustomModelRef(id="u", kind="hf_transformer", source_kind="hub", local_path="unused"),
-            )  # fmt: skip
+        # The only text kind is `hf_text` (tests/test_pytorch_custom_text.py); any other is for another task.
+        for kind in ("hf_transformer", "hf_image"):
+            with pytest.raises(ConfigError, match="cannot be used"):
+                compile_pytorch_config(
+                    TEXT, REVIEWS, PytorchHyperparameters(),
+                    CustomModelRef(id="u", kind=kind, source_kind="hub", local_path="unused"),
+                )  # fmt: skip
 
     def test_a_snapshot_with_one_class_or_no_text_column_is_refused(self):
         with pytest.raises(ConfigError, match="at least two classes"):
@@ -834,7 +839,9 @@ class TestCompileText:
         names = {p.name for p in hyperparameter_specs(TEXT)}
         assert {"maxTokens", "vocabSize", "minWordCount", "dropout", "useClassWeights", "optimizer"} <= names
         assert {"seed", "weightDecay", "lrSchedule", "warmupEpochs", "gradClipNorm", "mixedPrecision"} <= names
-        assert not names & {"imageSize", "pretrained", "freezeBackbone", "sampleRate", "nMels", "specAugment"}
+        # `freezeBackbone` is there for a bring-your-own transformer; the built-in models refuse to turn it on.
+        assert "freezeBackbone" in names
+        assert not names & {"imageSize", "pretrained", "sampleRate", "nMels", "specAugment"}
 
     def test_it_offers_a_bag_and_a_cnn_and_neither_is_pretrained(self):
         models = PytorchBackend.models(TEXT)
