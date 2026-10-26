@@ -26,18 +26,22 @@ Implements preprocessing for:
     path. A WAV file is read here; other containers need the optional `soundfile` package. The
     spectrogram is computed with numpy alone, from the recipe in preprocessing.json.
 
-Every other input type (text, Ludwig's audio) raises NotImplementedError with a
-pointer to preprocessing.json so you can adapt preprocessing yourself —
-text tokenization in particular depends on the chosen encoder's own
-vocabulary (Ludwig's built-in tokenizer, or a HuggingFace subword
-tokenizer for bert/distilbert/roberta), which can't be generically
-reconstructed from preprocessing.json alone. See README.md.
+  - a `text` input with a `textTokens` recipe (text classification) — pass the text itself, a
+    `str`, not a file path. It is split into words and looked up in the vocabulary that ships in
+    preprocessing.json, with the standard library alone.
+
+Every other input type (Ludwig's text and audio, a scikit-learn text model) raises
+NotImplementedError with a pointer to preprocessing.json so you can adapt preprocessing yourself —
+text tokenization in particular depends on the chosen encoder's own vocabulary (Ludwig's built-in
+tokenizer, or a HuggingFace subword tokenizer for bert/distilbert/roberta), which can't be
+generically reconstructed from preprocessing.json alone. See README.md.
 """
 
 from __future__ import annotations
 
 import json
 import math
+import re
 import struct
 from pathlib import Path
 
@@ -177,6 +181,14 @@ def _mel_filterbank(sample_rate: int, n_fft: int, bands: int, f_min: float, f_ma
     return np.maximum(0.0, np.minimum(down, up))
 
 
+def _text_splitter(recipe: dict) -> tuple[dict[int, int], re.Pattern[str]]:
+    """(the lower-casing table, the pattern a token is cut at), both built from the recipe's own numbers."""
+    lower = recipe["lowercase"]
+    table = {code: code + lower["add"] for code in range(lower["from"], lower["to"] + 1)}
+    ranges = "".join(f"{re.escape(chr(lo))}-{re.escape(chr(hi))}" for lo, hi in recipe["separatorRanges"])
+    return table, re.compile(f"[{ranges}]+")
+
+
 def _non_max_suppression(
     boxes: np.ndarray, scores: np.ndarray, classes: np.ndarray, iou_threshold: float
 ) -> list[int]:
@@ -241,6 +253,17 @@ class OmniTrainClient:
                     f"Unknown audio recipe {self._audio_recipe.get('recipe')!r}. "
                     "See preprocessing.json's `inputs[0].audioSpectrogram` and adapt this client."
                 )
+        elif self.input_spec["type"] == "text" and "textTokens" in self.input_spec:
+            self._kind = "text"
+            self._text_recipe = self.input_spec["textTokens"]
+            if self._text_recipe.get("recipe") != "word_ids_v1":
+                raise NotImplementedError(
+                    f"Unknown text recipe {self._text_recipe.get('recipe')!r}. "
+                    "See preprocessing.json's `inputs[0].textTokens` and adapt this client."
+                )
+            self._text_lower, self._text_split = _text_splitter(self._text_recipe)
+            first = self._text_recipe["firstWordId"]
+            self._text_ids = {word: first + i for i, word in enumerate(self._text_recipe["vocabulary"])}
         else:
             self._kind = "standard"
 
@@ -337,9 +360,9 @@ class OmniTrainClient:
         descending (classification), or `{"value": float}` (regression), or,
         for a detector, the list `detect()` returns.
 
-        `value` is a file path for a single `image`, `video` or `audio` input, or a
-        `{column: value}` dict — one entry per input feature — for a
-        tabular (`number`-only) model.
+        `value` is a file path for a single `image`, `video` or `audio` input, the text
+        itself (a `str`) for a `text` input, or a `{column: value}` dict — one entry per
+        input feature — for a tabular (`number`-only) model.
         """
         if self._kind == "detection":
             return self.detect(value)
@@ -347,6 +370,8 @@ class OmniTrainClient:
             return self._classify_video(value, top_k)
         if self._kind == "audio":
             return self._classify_audio(value, top_k)
+        if self._kind == "text":
+            return self._classify_text(str(value), top_k)
         if self._is_tabular:
             if not isinstance(value, dict):
                 raise TypeError("This model has tabular inputs — pass a dict of {column: value}, not a file path.")
@@ -574,4 +599,22 @@ class OmniTrainClient:
         probs = np.mean([_softmax(row) for row in logits], axis=0)
         classes = self.output_spec["classes"]
         ranked = sorted(zip(classes, probs), key=lambda p: p[1], reverse=True)
+        return {name: round(float(p), 4) for name, p in ranked[:top_k]}
+
+    # -- Text ------------------------------------------------------------------------------------------------------
+
+    def _text_tokens(self, text: str) -> np.ndarray:
+        """`[1, maxTokens]` int64 word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end."""
+        recipe = self._text_recipe
+        tokens = [t for t in self._text_split.split(text.translate(self._text_lower)) if t]
+        ids = [self._text_ids.get(t, recipe["unknownId"]) for t in tokens[: recipe["maxTokens"]]]
+        ids += [recipe["padId"]] * (recipe["maxTokens"] - len(ids))
+        return np.array([ids], dtype=np.int64)
+
+    def _classify_text(self, text: str, top_k: int) -> dict[str, float]:
+        """Class probabilities of a text: the logits of its one row through a softmax."""
+        feed = {self._onnx_input_names[self.input_spec["name"]]: self._text_tokens(text)}
+        logits = np.asarray(self.session.run([self._onnx_output_name], feed)[0]).reshape(-1)
+        classes = self.output_spec["classes"]
+        ranked = sorted(zip(classes, _softmax(logits)), key=lambda p: p[1], reverse=True)
         return {name: round(float(p), 4) for name, p in ranked[:top_k]}

@@ -1,5 +1,10 @@
 from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, DevkitFormat
-from omnitrain.plugins.export.readme import AUDIO_LIMITATION, DETECTION_LIMITATION, LIMITATION_IMAGE_ONLY
+from omnitrain.plugins.export.readme import (
+    AUDIO_LIMITATION,
+    DETECTION_LIMITATION,
+    LIMITATION_IMAGE_ONLY,
+    TEXT_LIMITATION,
+)
 
 
 class CSharpDevkit(DevkitFormat):
@@ -21,6 +26,7 @@ class CSharpDevkit(DevkitFormat):
         "kinds": {
             "detection": {"limitation": DETECTION_LIMITATION},
             "audio": {"run_cmd": "dotnet run -- <path-to-wav-file>", "limitation": AUDIO_LIMITATION},
+            "text": {"run_cmd": 'dotnet run -- "<the text to classify>"', "limitation": TEXT_LIMITATION},
         },
         "note": (
             "`Program.cs` uses top-level statements as its entry point. If your project already has one, "

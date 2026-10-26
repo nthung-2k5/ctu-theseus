@@ -56,6 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Uint8List? _previewBytes;
   // An audio classifier shows the name of the chosen recording instead of a picture.
   String? _audioName;
+  // A text classifier reads what is typed here.
+  final _textController = TextEditingController();
   Map<String, double>? _predictions;
   // An object detector's result: the boxes, and the picture's size to lay them over it.
   List<Detection>? _detections;
@@ -76,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _textController.dispose();
     _client.dispose();
     super.dispose();
   }
@@ -104,6 +107,27 @@ class _HomeScreenState extends State<HomeScreen> {
         final predictions = await _client.predict(bytes);
         setState(() => _predictions = predictions);
       }
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      setState(() => _predicting = false);
+    }
+  }
+
+  Future<void> _classifyText() async {
+    final text = _textController.text;
+    if (text.trim().isEmpty) {
+      setState(() => _error = null);
+      return;
+    }
+    setState(() {
+      _predicting = true;
+      _predictions = null;
+      _error = null;
+    });
+    try {
+      final predictions = await _client.predictText(text);
+      setState(() => _predictions = predictions);
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -164,7 +188,25 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 4),
                         const Text('Runs fully on-device — nothing is uploaded.', style: TextStyle(fontSize: 12, color: Colors.grey)),
                         const SizedBox(height: 16),
-                        if (_client.isAudio) ...[
+                        if (_client.isText) ...[
+                          TextField(
+                            controller: _textController,
+                            minLines: 4,
+                            maxLines: 8,
+                            keyboardType: TextInputType.multiline,
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              labelText: 'Text to classify',
+                              hintText: 'Type or paste a text',
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: _predicting ? null : _classifyText,
+                            icon: const Icon(Icons.text_snippet_outlined),
+                            label: const Text('Classify'),
+                          ),
+                        ] else if (_client.isAudio) ...[
                           if (_audioName != null)
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -422,7 +464,11 @@ class _VerifyScreenState extends State<VerifyScreen> {
       }
       final sampleBytes = (await rootBundle.load(sampleFile)).buffer.asUint8List();
 
-      final actual = await widget.client.predict(sampleBytes, topK: expectedPredictions.isEmpty ? 5 : expectedPredictions.length);
+      // A text model is given the text in the sample file (UTF-8), the rest the bytes of the file.
+      final topK = expectedPredictions.isEmpty ? 5 : expectedPredictions.length;
+      final actual = widget.client.isText
+          ? await widget.client.predictText(utf8.decode(sampleBytes), topK: topK)
+          : await widget.client.predict(sampleBytes, topK: topK);
 
       if (expectedPredictions.isEmpty) {
         lines.add('expected.json has no predictions to compare against.');

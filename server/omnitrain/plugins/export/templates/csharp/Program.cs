@@ -1,4 +1,4 @@
-// Usage: dotnet run -- <path-to-image | path-to-wav-file>
+// Usage: dotnet run -- <path-to-image | path-to-wav-file | "text to classify">
 //        dotnet run -- verify
 
 using System.Text.Json;
@@ -29,6 +29,8 @@ if (client.IsDetector)
     return 0;
 }
 
+// A text model is given the text itself (in the console's encoding: for anything but plain ASCII, call
+// `Predict` from code with a string).
 var predictions = client.Predict(args[0]);
 foreach (var (className, probability) in predictions)
 {
@@ -74,7 +76,9 @@ static int Verify(OmniTrainClient client)
         return 0;
     }
 
-    var actual = client.Predict(samplePath, Math.Max(expected.Predictions.Count, 5));
+    // A text model takes the text in the sample file, not the path to it.
+    var sampleInput = client.IsText ? File.ReadAllText(samplePath, System.Text.Encoding.UTF8) : samplePath;
+    var actual = client.Predict(sampleInput, Math.Max(expected.Predictions.Count, 5));
 
     var expectedTop1 = expected.Predictions.OrderByDescending(p => p.Value).First().Key;
     var actualTop1 = actual.Count > 0 ? actual.OrderByDescending(p => p.Value).First().Key : null;

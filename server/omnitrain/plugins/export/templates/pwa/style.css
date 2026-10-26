@@ -55,6 +55,37 @@ h1 {
 .dropzone:hover {
   border-color: var(--accent);
 }
+/* `display: flex` above would otherwise beat the `hidden` attribute. */
+.dropzone[hidden] {
+  display: none;
+}
+.text-input {
+  margin: 1rem 0;
+}
+.text-input label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+.text-input textarea {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+  resize: vertical;
+}
+.text-input textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.text-input[hidden] {
+  display: none;
+}
 #preview {
   max-width: 100%;
   border-radius: 8px;

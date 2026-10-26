@@ -19,6 +19,10 @@
 // An `audio` input that carries an `audioSpectrogram` recipe (audio classification) is
 // supported too: `Predict()` takes the path of a WAV file, makes the log-mel spectrograms
 // the recipe describes with no audio library, and averages the windows' probabilities.
+//
+// A `text` input that carries a `textTokens` recipe (text classification) is supported as well:
+// `Predict()` takes the text itself (not a file path), splits it into words and looks them up in
+// the vocabulary that ships in preprocessing.json.
 
 using System.Buffers.Binary;
 using System.Text.Json;
@@ -69,11 +73,32 @@ internal sealed class AudioRecipe
     public NormalizationSpec Normalization { get; set; } = new();
 }
 
+internal sealed class LowercaseSpec
+{
+    public int From { get; set; }
+    public int To { get; set; }
+    public int Add { get; set; }
+}
+
+/// <summary>`inputs[0].textTokens` (recipe "word_ids_v1"): how a text becomes word ids.</summary>
+internal sealed class TextRecipe
+{
+    public string Recipe { get; set; } = "";
+    public LowercaseSpec Lowercase { get; set; } = new();
+    public List<int[]> SeparatorRanges { get; set; } = [];
+    public int MaxTokens { get; set; }
+    public int PadId { get; set; }
+    public int UnknownId { get; set; } = 1;
+    public int FirstWordId { get; set; } = 2;
+    public List<string> Vocabulary { get; set; } = [];
+}
+
 internal sealed class PreprocessingInput
 {
     public string Type { get; set; } = "";
     public string Column { get; set; } = "";
     public AudioRecipe? AudioSpectrogram { get; set; }
+    public TextRecipe? TextTokens { get; set; }
     public Dictionary<string, JsonElement>? LudwigPreprocessing { get; set; }
     // Absent: squash the whole image to height x width.
     public Dictionary<string, JsonElement>? ImageResize { get; set; }
@@ -338,6 +363,12 @@ public sealed class OmniTrainClient : IDisposable
     /// <summary>An audio classifier: <see cref="Predict"/> takes the path of a WAV file.</summary>
     public bool IsAudio => _inputSpec.Type == "audio" && _inputSpec.AudioSpectrogram is not null;
 
+    /// <summary>A text classifier: <see cref="Predict"/> takes the text itself, not a path.</summary>
+    public bool IsText => _inputSpec.Type == "text" && _inputSpec.TextTokens is not null;
+
+    private readonly bool[] _separators = new bool[0x10000];
+    private readonly Dictionary<string, int> _wordIds = new(StringComparer.Ordinal);
+
     public OmniTrainClient(string? modelPath = null, string? preprocessingPath = null)
     {
         var here = AppContext.BaseDirectory;
@@ -357,6 +388,21 @@ public sealed class OmniTrainClient : IDisposable
             throw new NotSupportedException(
                 $"Unknown audio recipe '{_inputSpec.AudioSpectrogram.Recipe}'. " +
                 "See preprocessing.json's inputs[0].audioSpectrogram and adapt this client.");
+        }
+        if (IsText)
+        {
+            var recipe = _inputSpec.TextTokens!;
+            if (recipe.Recipe != "word_ids_v1")
+            {
+                throw new NotSupportedException(
+                    $"Unknown text recipe '{recipe.Recipe}'. " +
+                    "See preprocessing.json's inputs[0].textTokens and adapt this client.");
+            }
+            foreach (var range in recipe.SeparatorRanges)
+            {
+                for (var unit = range[0]; unit <= Math.Min(range[1], 0xFFFF); unit++) _separators[unit] = true;
+            }
+            for (var i = 0; i < recipe.Vocabulary.Count; i++) _wordIds[recipe.Vocabulary[i]] = recipe.FirstWordId + i;
         }
     }
 
@@ -623,6 +669,21 @@ public sealed class OmniTrainClient : IDisposable
         return new DenseTensor<float>(batch, [starts.Count, 1, recipe.Mel.Bands, recipe.Frames]);
     }
 
+    /// <summary>Class probabilities of a text: the logits of its one row through a softmax.</summary>
+    private Dictionary<string, double> ClassifyText(string text, int topK)
+    {
+        var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor(_onnxInputName, TextTokens(text)) };
+        using var results = _session.Run(inputs);
+        var logits = results.First(r => r.Name == _onnxOutputName).AsEnumerable<float>().ToArray();
+        var classes = _outputSpec.Classes ?? [];
+        var probs = Softmax(logits);
+        return classes
+            .Select((name, i) => (name, prob: probs[i]))
+            .OrderByDescending(p => p.prob)
+            .Take(topK)
+            .ToDictionary(p => p.name, p => (double)MathF.Round(p.prob, 4));
+    }
+
     /// <summary>Class probabilities of a recording: each window's logits through a softmax, averaged over the windows.</summary>
     private Dictionary<string, double> ClassifyAudio(string path, int topK)
     {
@@ -645,6 +706,42 @@ public sealed class OmniTrainClient : IDisposable
             .ToDictionary(p => p.name, p => Math.Round(p.prob, 4));
     }
 
+    /// <summary>The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units.</summary>
+    private List<string> Tokenize(string text)
+    {
+        var lower = _inputSpec.TextTokens!.Lowercase;
+        var tokens = new List<string>();
+        var current = new System.Text.StringBuilder();
+        foreach (var unit in text)
+        {
+            if (_separators[unit])
+            {
+                if (current.Length > 0) tokens.Add(current.ToString());
+                current.Clear();
+            }
+            else
+            {
+                current.Append(unit >= lower.From && unit <= lower.To ? (char)(unit + lower.Add) : unit);
+            }
+        }
+        if (current.Length > 0) tokens.Add(current.ToString());
+        return tokens;
+    }
+
+    /// <summary>`[1, maxTokens]` int64 word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end.</summary>
+    private DenseTensor<long> TextTokens(string text)
+    {
+        var recipe = _inputSpec.TextTokens!;
+        var ids = new long[recipe.MaxTokens];
+        Array.Fill(ids, (long)recipe.PadId);
+        var tokens = Tokenize(text);
+        for (var i = 0; i < Math.Min(tokens.Count, recipe.MaxTokens); i++)
+        {
+            ids[i] = _wordIds.TryGetValue(tokens[i], out var id) ? id : recipe.UnknownId;
+        }
+        return new DenseTensor<long>(ids, [1, recipe.MaxTokens]);
+    }
+
     private static float[] Softmax(float[] logits)
     {
         var max = logits.Max();
@@ -655,7 +752,8 @@ public sealed class OmniTrainClient : IDisposable
 
     /// <summary>
     /// Runs inference and returns class -&gt; probability (classification, sorted descending) or {"value": x}
-    /// (regression). `imagePath` is an image file, or for an audio classifier a WAV file.
+    /// (regression). `imagePath` is an image file, for an audio classifier a WAV file, and for a text
+    /// classifier the text itself.
     /// </summary>
     public Dictionary<string, double> Predict(string imagePath, int topK = 5)
     {
@@ -664,6 +762,7 @@ public sealed class OmniTrainClient : IDisposable
             throw new NotSupportedException("This model is an object detector: call Detect(), which returns boxes.");
         }
         if (IsAudio) return ClassifyAudio(imagePath, topK);
+        if (IsText) return ClassifyText(imagePath, topK);
         if (_inputSpec.Type != "image")
         {
             throw new NotSupportedException(

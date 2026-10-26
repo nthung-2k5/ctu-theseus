@@ -22,7 +22,7 @@ from PIL import Image
 
 import omnitrain.plugins.export
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
-from omnitrain.plugins.backends.base import TrainContext
+from omnitrain.plugins.backends.base import ConfigError, TrainContext
 from omnitrain.plugins.backends.pytorch import PytorchBackend, data, runtime, tasks
 from omnitrain.plugins.backends.pytorch import train as train_mod
 from omnitrain.plugins.backends.pytorch.compile import PytorchHyperparameters, compile_pytorch_config
@@ -645,3 +645,176 @@ def test_freezing_an_audio_backbone_trains_only_the_head():
     assert {n for n, p in net.named_parameters() if p.requires_grad} == {"fc.weight", "fc.bias"}
     net = network.build_audio("audio_cnn", 3, pretrained=False, freeze_backbone=True)
     assert {n for n, p in net.named_parameters() if p.requires_grad} == {"fc.weight", "fc.bias"}
+
+
+TOPICS = {
+    "sport": "goal match team player score coach league stadium trận bóng đội sân".split(),
+    "food": "recipe soup bake spice dinner flavour kitchen sauce món ăn nấu phở".split(),
+    "tech": "software server code network device chip cloud kernel máy mạng phần mềm".split(),
+}
+FILLER = "the a is very really today and của và".split()
+
+
+def make_texts(rng: np.random.Generator) -> pd.DataFrame:
+    """Short texts whose topic is given away by a few words, mixed with filler. The validation and test splits hold a
+    word the train split never sees, and a few rows are unusable (blank, missing, or of an unknown class)."""
+    rows = []
+    for split, count in (("train", 40), ("validation", 12), ("test", 12)):
+        for label, words in TOPICS.items():
+            for i in range(count):
+                picked = list(rng.choice(words, size=4)) + list(rng.choice(FILLER, size=3))
+                if split != "train" and i == 0:
+                    picked.append("zzzunseen")
+                rng.shuffle(picked)
+                rows.append(
+                    {"text": " ".join(picked).capitalize() + ".", "class": label, "split": split,
+                     "_theseus_item_id": f"{split}-{label}-{i}"}
+                )  # fmt: skip
+    for k, (text_value, label) in enumerate([("", "sport"), (None, "food"), ("goal goal", "gossip")]):
+        rows.append({"text": text_value, "class": label, "split": "train", "_theseus_item_id": f"bad-{k}"})
+    return pd.DataFrame(rows)
+
+
+def train_texts(tmp_path, monkeypatch, df=None, **selection):
+    df = make_texts(np.random.default_rng(0)) if df is None else df
+    uploaded = tmp_path / "uploaded"
+    monkeypatch.setattr(
+        train_mod.storage, "upload_dir", lambda b, p, local_dir, **kw: shutil.copytree(local_dir, uploaded)
+    )
+    monkeypatch.setattr(train_mod.pd, "read_parquet", lambda uri: df)
+    snapshot = SnapshotContext(
+        columns=[
+            ColumnSpec(name="text", kind="inline_text"),
+            ColumnSpec(name="class", kind="label"),
+            ColumnSpec(name="split", kind="split"),
+        ],
+        label_class_names=list(TOPICS),
+    )
+    config = compile_pytorch_config(
+        get_task_descriptor("text_classification"),
+        snapshot,
+        PytorchHyperparameters(**{"seed": 1, "epochs": 25, "batch_size": 16, "min_word_count": 2, **selection}),
+    )
+    reports: list = []
+    ctx = TrainContext(
+        run_id="smoke", config=config, dataset_uri="unused", output_uri="unused", workdir=str(tmp_path / "work"),
+        _heartbeat=lambda: None, _check_abort=lambda: None,
+        _report=lambda epoch, split, metrics: reports.append((epoch, split, metrics)),
+    )  # fmt: skip
+    model = PytorchBackend.train(ctx)
+    return types.SimpleNamespace(model=model, reports=reports, uploaded=uploaded, df=df, config=config)
+
+
+@pytest.mark.parametrize("model_id", [m.id for m in tasks.TEXT_MODELS])
+def test_a_text_classifier_trains_serves_evaluates_and_exports(model_id, tmp_path, monkeypatch):
+    import onnxruntime as ort
+    import torch
+
+    from omnitrain.plugins.backends.pytorch import text
+    from omnitrain.plugins.backends.pytorch.spec import TextSpec
+
+    run = train_texts(tmp_path, monkeypatch, model_id=model_id)
+    assert not (tmp_path / "work").exists()
+    assert sorted(p.name for p in run.uploaded.iterdir()) == ["model.pt", "names.json"]
+    assert all("loss" in m and "accuracy" in m for _, _, m in run.reports)
+    assert max(m["accuracy"] for _, s, m in run.reports if s == "validation") > 0.9
+
+    meta = json.loads((run.uploaded / "names.json").read_text(encoding="utf-8"))
+    assert meta["inputKind"] == "text" and meta["model"] == model_id and meta["names"] == list(TOPICS)
+    assert meta["textColumn"] == "text" and meta["maxTokens"] == 128
+    spec = TextSpec.from_meta(meta)
+    # The vocabulary comes from the train texts alone: a word only the validation and test splits hold is not in it.
+    assert "goal" in spec.vocab and "zzzunseen" not in spec.vocab and "gossip" not in spec.vocab
+    assert len(spec.vocab) == len(set(spec.vocab))
+
+    loaded = PytorchBackend.load(str(run.uploaded))
+    assert loaded.output.labels == list(TOPICS) and loaded.input_columns == ["text"]
+
+    # One text, the way the inference endpoint builds a frame.
+    frame = pd.DataFrame(
+        {"text": ["Their goal won the match for the team", "a spicy soup recipe", "cloud server code"]}
+    )
+    predictions = loaded.predict(frame)
+    assert predictions["class_predictions"].tolist() == ["sport", "food", "tech"]
+    output = loaded.to_output(loaded.predict(frame.iloc[[1]]))
+    assert output["kind"] == "classification" and output["classes"][0]["label"] == "food"
+    assert sum(c["confidence"] for c in output["classes"]) == pytest.approx(1.0, abs=2e-3)
+    # A Vietnamese text and an empty one are scored too (the empty one is all padding).
+    assert loaded.predict(pd.DataFrame({"text": ["một món ăn nấu phở", ""]})).shape[0] == 2
+
+    report = PytorchBackend.evaluate(loaded, run.df, "split", "_theseus_item_id")
+    assert report is not None and report.report["overall"]["accuracy"] > 0.9
+
+    # The ONNX graph takes int64 ids and agrees with the module.
+    path = PytorchBackend.convert(loaded, "onnx", str(tmp_path / "export"))
+    assert [p.name for p in Path(path).parent.iterdir()] == ["model.onnx"]
+    ids = text.encode(frame["text"].tolist(), spec)
+    with torch.no_grad():
+        expected = loaded.net(torch.from_numpy(ids).to(runtime.device())).cpu().numpy()
+    session = ort.InferenceSession(path)
+    assert [(i.name, i.type) for i in session.get_inputs()] == [("tokens", "tensor(int64)")]
+    (logits,) = session.run(["logits"], {"tokens": ids})
+    np.testing.assert_allclose(logits, expected, rtol=1e-3, atol=1e-3)
+    # A batch of one works (the graph was traced with two rows).
+    (one,) = session.run(["logits"], {"tokens": ids[:1]})
+    np.testing.assert_allclose(one, expected[:1], rtol=1e-3, atol=1e-3)
+
+    # The shipped client tokenizes from the manifest alone and agrees with the platform on real texts, a Vietnamese one
+    # and an empty one included.
+    bundle = bundle_for(run, tmp_path)
+    client = load_client(bundle / "model.onnx", bundle / "preprocessing.json")
+    for value in [*frame["text"], "một món ăn nấu phở ngon", "", "ZZZUNSEEN goal, GOAL!"]:
+        from_client = client.predict(value, top_k=3)
+        from_platform = loaded.golden_prediction(loaded.predict(pd.DataFrame({"text": [value]})))
+        for label, p in from_client.items():
+            assert p == pytest.approx(from_platform[label], abs=2e-3)
+
+
+@pytest.mark.parametrize("model_id", [m.id for m in tasks.TEXT_MODELS])
+def test_padding_changes_nothing_and_an_empty_text_is_finite(model_id):
+    import torch
+
+    from omnitrain.plugins.backends.pytorch import network, text
+    from omnitrain.plugins.backends.pytorch.spec import TextSpec
+
+    torch.manual_seed(0)
+    vocab = ["goal", "team", "soup", "code"]
+    net = network.build_text(model_id, len(vocab) + 2, 3, 0.0).eval()
+    sentence = ["goal team the soup code goal"]
+    short = text.encode(sentence, TextSpec(max_tokens=16, vocab=tuple(vocab)))
+    long = text.encode(sentence, TextSpec(max_tokens=64, vocab=tuple(vocab)))
+    with torch.no_grad():
+        a, b = net(torch.from_numpy(short)), net(torch.from_numpy(long))
+        empty = net(torch.zeros(2, 16, dtype=torch.long))
+    # More padding is the same text: logits do not depend on how far a text is padded.
+    torch.testing.assert_close(a, b, rtol=1e-5, atol=1e-5)
+    assert torch.isfinite(empty).all() and empty.shape == (2, 3)
+
+
+@pytest.mark.parametrize("model_id", [m.id for m in tasks.TEXT_MODELS])
+def test_every_text_model_trains_a_step(model_id):
+    import torch
+
+    from omnitrain.plugins.backends.pytorch import network
+
+    net = network.build_text(model_id, 50, 4, 0.2)
+    net.train()
+    tokens = torch.randint(0, 50, (3, 12))
+    loss = torch.nn.functional.cross_entropy(net(tokens), torch.tensor([0, 3, 1]))
+    loss.backward()
+    assert loss.item() == loss.item()  # not NaN
+    # Every weight but the padding row of the embedding gets a gradient through the loss.
+    assert all(p.grad is not None for p in net.parameters() if p.requires_grad)
+
+
+def test_class_weights_train_and_a_longer_read_still_works(tmp_path, monkeypatch):
+    run = train_texts(tmp_path, monkeypatch, use_class_weights=True, max_tokens=24, epochs=8, model_id="text_cnn")
+    assert max(m["accuracy"] for _, s, m in run.reports if s == "validation") > 0.8
+    assert run.model.spec.max_tokens == 24
+
+
+def test_a_train_split_with_one_class_is_refused_for_text(tmp_path, monkeypatch):
+    df = make_texts(np.random.default_rng(0))
+    df = df[(df["split"] != "train") | (df["class"] == "sport")]
+    with pytest.raises(ConfigError, match="only one class"):
+        train_texts(tmp_path, monkeypatch, df=df)

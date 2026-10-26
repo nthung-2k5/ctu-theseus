@@ -22,6 +22,10 @@
 // spectrograms the recipe describes with no audio library, and averages the
 // windows' probabilities.
 //
+// A `text` input that carries a `textTokens` recipe (text classification) is supported as well:
+// `predictText()` takes the text itself, splits it into words and looks them up in the
+// vocabulary that ships in preprocessing.json.
+//
 // model.onnx / preprocessing.json are loaded as Flutter assets (declared in
 // pubspec.yaml under assets/), not filesystem paths — that's why this client
 // reads them through rootBundle rather than dart:io.
@@ -88,11 +92,100 @@ class AudioRecipe {
   final double std;
 }
 
+/// `inputs[0].textTokens` (recipe "word_ids_v1"): how a text becomes word ids.
+class TextRecipe {
+  TextRecipe({
+    required this.recipe,
+    required this.lowerFrom,
+    required this.lowerTo,
+    required this.lowerAdd,
+    required this.separatorRanges,
+    required this.maxTokens,
+    required this.padId,
+    required this.unknownId,
+    required this.firstWordId,
+    required this.vocabulary,
+  }) {
+    for (final (lo, hi) in separatorRanges) {
+      for (var unit = lo; unit <= math.min(hi, 0xFFFF); unit++) {
+        separators[unit] = 1;
+      }
+    }
+    for (var i = 0; i < vocabulary.length; i++) {
+      ids[vocabulary[i]] = firstWordId + i;
+    }
+  }
+
+  factory TextRecipe.fromJson(Map<String, dynamic> json) {
+    final lower = json['lowercase'] as Map<String, dynamic>;
+    final ranges = [
+      for (final r in json['separatorRanges'] as List) (r as List).map((e) => (e as num).toInt()).toList(),
+    ];
+    return TextRecipe(
+      recipe: json['recipe'] as String,
+      lowerFrom: (lower['from'] as num).toInt(),
+      lowerTo: (lower['to'] as num).toInt(),
+      lowerAdd: (lower['add'] as num).toInt(),
+      separatorRanges: [for (final r in ranges) (r[0], r[1])],
+      maxTokens: (json['maxTokens'] as num).toInt(),
+      padId: (json['padId'] as num).toInt(),
+      unknownId: (json['unknownId'] as num).toInt(),
+      firstWordId: (json['firstWordId'] as num).toInt(),
+      vocabulary: [for (final w in json['vocabulary'] as List) w as String],
+    );
+  }
+
+  final String recipe;
+  final int lowerFrom;
+  final int lowerTo;
+  final int lowerAdd;
+  final List<(int, int)> separatorRanges;
+  final int maxTokens;
+  final int padId;
+  final int unknownId;
+  final int firstWordId;
+  final List<String> vocabulary;
+
+  /// Which UTF-16 code units separate tokens, as a lookup table built from the ranges.
+  final Uint8List separators = Uint8List(0x10000);
+
+  /// A token's id.
+  final Map<String, int> ids = {};
+}
+
+/// The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units.
+List<String> tokenizeText(String text, TextRecipe recipe) {
+  final tokens = <String>[];
+  final current = StringBuffer();
+  for (var i = 0; i < text.length; i++) {
+    final unit = text.codeUnitAt(i);
+    if (recipe.separators[unit] == 1) {
+      if (current.isNotEmpty) tokens.add(current.toString());
+      current.clear();
+    } else {
+      current.writeCharCode(unit >= recipe.lowerFrom && unit <= recipe.lowerTo ? unit + recipe.lowerAdd : unit);
+    }
+  }
+  if (current.isNotEmpty) tokens.add(current.toString());
+  return tokens;
+}
+
+/// `maxTokens` word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end.
+Int64List textTokenIds(String text, TextRecipe recipe) {
+  final ids = Int64List(recipe.maxTokens)..fillRange(0, recipe.maxTokens, recipe.padId);
+  final tokens = tokenizeText(text, recipe);
+  for (var i = 0; i < math.min(tokens.length, recipe.maxTokens); i++) {
+    ids[i] = recipe.ids[tokens[i]] ?? recipe.unknownId;
+  }
+  return ids;
+}
+
 class PreprocessingInput {
   PreprocessingInput({
     required this.type,
     required this.column,
     this.audio,
+    this.text,
     this.ludwigPreprocessing,
     this.imageResizeMode,
     this.letterboxSize,
@@ -109,6 +202,7 @@ class PreprocessingInput {
       audio: json['audioSpectrogram'] == null
           ? null
           : AudioRecipe.fromJson(json['audioSpectrogram'] as Map<String, dynamic>),
+      text: json['textTokens'] == null ? null : TextRecipe.fromJson(json['textTokens'] as Map<String, dynamic>),
       ludwigPreprocessing: json['ludwigPreprocessing'] as Map<String, dynamic>?,
       imageResizeMode: (json['imageResize'] as Map<String, dynamic>?)?['mode'] as String?,
       letterboxSize: ((json['imageResize'] as Map<String, dynamic>?)?['size'] as List?)
@@ -124,6 +218,8 @@ class PreprocessingInput {
   final String column;
   /// `audioSpectrogram`, for an audio classifier.
   final AudioRecipe? audio;
+  /// `textTokens`, for a text classifier.
+  final TextRecipe? text;
   final Map<String, dynamic>? ludwigPreprocessing;
   /// `imageResize.mode`. Null: squash the whole image to width x height.
   final String? imageResizeMode;
@@ -587,6 +683,9 @@ class OmniTrainClient {
   /// An audio classifier: [predict] takes the bytes of a WAV file.
   bool get isAudio => _inputSpec.type == 'audio' && _inputSpec.audio != null;
 
+  /// A text classifier: use [predictText], which takes the text itself.
+  bool get isText => _inputSpec.type == 'text' && _inputSpec.text != null;
+
   Future<void> load({
     String modelAssetPath = 'assets/model.onnx',
     String preprocessingAssetPath = 'assets/preprocessing.json',
@@ -605,6 +704,33 @@ class OmniTrainClient {
         'See preprocessing.json inputs[0].audioSpectrogram and adapt this client.',
       );
     }
+    if (isText && _inputSpec.text!.recipe != 'word_ids_v1') {
+      throw UnsupportedError(
+        "Unknown text recipe '${_inputSpec.text!.recipe}'. "
+        'See preprocessing.json inputs[0].textTokens and adapt this client.',
+      );
+    }
+  }
+
+  /// Class probabilities of a text: the logits of its one row through a softmax, sorted descending.
+  Future<Map<String, double>> predictText(String text, {int topK = 5}) async {
+    if (!isText) {
+      throw UnsupportedError('This model does not take text: call predict() with the bytes of a file.');
+    }
+    final recipe = _inputSpec.text!;
+    final inputTensor = OrtValueTensor.createTensorWithDataList(textTokenIds(text, recipe), [1, recipe.maxTokens]);
+    final runOptions = OrtRunOptions();
+    final outputs = await _session.runAsync(runOptions, {_onnxInputName: inputTensor}, [_onnxOutputName]);
+    final raw = outputs?.first?.value;
+    inputTensor.release();
+    runOptions.release();
+    outputs?.first?.release();
+
+    final probs = _softmax(_flatten(raw));
+    final classes = _outputSpec.classes ?? const <String>[];
+    final ranked = List.generate(classes.length, (i) => MapEntry(classes[i], probs[i]))
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return {for (final e in ranked.take(topK)) e.key: (e.value * 10000).round() / 10000};
   }
 
   /// The recording as a batch of spectrograms, `[windows, 1, bands, frames]` flattened, by `audioSpectrogram`.
@@ -785,6 +911,7 @@ class OmniTrainClient {
       throw UnsupportedError('This model is an object detector: call detect(), which returns boxes.');
     }
     if (isAudio) return _classifyAudio(imageBytes, topK);
+    if (isText) throw UnsupportedError('This model takes text: call predictText(text).');
     if (_inputSpec.type != 'image') {
       throw UnsupportedError(
         "No preprocessing implemented for input type '${_inputSpec.type}'. "

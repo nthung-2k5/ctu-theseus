@@ -96,6 +96,8 @@ def main() -> int:
     if client._is_tabular:  # noqa: SLF001 — verify script, not a library boundary
         with open(sample_path, encoding="utf-8") as f:
             sample_input = json.load(f)
+    elif client._kind == "text":  # noqa: SLF001 — a text model is given the text, not a path to it
+        sample_input = sample_path.read_text(encoding="utf-8")
     else:
         sample_input = sample_path
     actual = client.predict(sample_input, top_k=len(expected["predictions"]) or 5)

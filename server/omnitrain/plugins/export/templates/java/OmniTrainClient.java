@@ -21,6 +21,10 @@
  * classification) is supported too: {@link #predict} takes the path of a WAV file,
  * makes the log-mel spectrograms the recipe describes with no audio library, and
  * averages the windows' probabilities.
+ *
+ * A {@code text} input that carries a {@code textTokens} recipe (text classification) is
+ * supported as well: {@link #predictText} takes the text itself, splits it into words and
+ * looks them up in the vocabulary that ships in preprocessing.json.
  */
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
@@ -50,6 +54,71 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+
+/**
+ * {@code inputs[0].textTokens} (recipe "word_ids_v1") spelled out: how a text becomes word ids.
+ */
+final class TextFrontEnd {
+    private TextFrontEnd() {}
+
+    static final class Recipe {
+        final String recipe;
+        final int lowerFrom;
+        final int lowerTo;
+        final int lowerAdd;
+        final boolean[] separators = new boolean[0x10000];
+        final int maxTokens;
+        final int padId;
+        final int unknownId;
+        final java.util.HashMap<String, Integer> ids = new java.util.HashMap<>();
+
+        Recipe(JsonNode node) {
+            recipe = node.path("recipe").asText();
+            lowerFrom = node.path("lowercase").path("from").asInt();
+            lowerTo = node.path("lowercase").path("to").asInt();
+            lowerAdd = node.path("lowercase").path("add").asInt();
+            for (JsonNode range : node.path("separatorRanges")) {
+                for (int unit = range.get(0).asInt(); unit <= Math.min(range.get(1).asInt(), 0xFFFF); unit++) {
+                    separators[unit] = true;
+                }
+            }
+            maxTokens = node.path("maxTokens").asInt();
+            padId = node.path("padId").asInt();
+            unknownId = node.path("unknownId").asInt(1);
+            int first = node.path("firstWordId").asInt(2);
+            int i = 0;
+            for (JsonNode word : node.path("vocabulary")) ids.put(word.asText(), first + i++);
+        }
+    }
+
+    /** The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units. */
+    static List<String> tokenize(String text, Recipe r) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char unit = text.charAt(i);
+            if (r.separators[unit]) {
+                if (current.length() > 0) tokens.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(unit >= r.lowerFrom && unit <= r.lowerTo ? (char) (unit + r.lowerAdd) : unit);
+            }
+        }
+        if (current.length() > 0) tokens.add(current.toString());
+        return tokens;
+    }
+
+    /** {@code maxTokens} word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end. */
+    static long[] tokenIds(String text, Recipe r) {
+        long[] ids = new long[r.maxTokens];
+        java.util.Arrays.fill(ids, r.padId);
+        List<String> tokens = tokenize(text, r);
+        for (int i = 0; i < Math.min(tokens.size(), r.maxTokens); i++) {
+            ids[i] = r.ids.getOrDefault(tokens.get(i), r.unknownId);
+        }
+        return ids;
+    }
+}
 
 /**
  * {@code inputs[0].audioSpectrogram} spelled out. The platform computes the same thing in numpy; the arithmetic is
@@ -284,6 +353,7 @@ public final class OmniTrainClient implements AutoCloseable {
     private final String onnxInputName;
     private final String onnxOutputName;
     private final AudioFrontEnd.Recipe audioRecipe;
+    private final TextFrontEnd.Recipe textRecipe;
 
     public OmniTrainClient() throws OrtException, IOException {
         this(Path.of("model.onnx"), Path.of("preprocessing.json"));
@@ -307,6 +377,18 @@ public final class OmniTrainClient implements AutoCloseable {
                 "Unknown audio recipe '" + audioRecipe.recipe() + "'. " +
                 "See preprocessing.json's inputs[0].audioSpectrogram and adapt this client.");
         }
+        this.textRecipe = "text".equals(inputSpec.path("type").asText()) && inputSpec.has("textTokens")
+            ? new TextFrontEnd.Recipe(inputSpec.get("textTokens")) : null;
+        if (textRecipe != null && !"word_ids_v1".equals(textRecipe.recipe)) {
+            throw new UnsupportedOperationException(
+                "Unknown text recipe '" + textRecipe.recipe + "'. " +
+                "See preprocessing.json's inputs[0].textTokens and adapt this client.");
+        }
+    }
+
+    /** A text classifier: use {@link #predictText}, which takes the text itself. */
+    public boolean isText() {
+        return textRecipe != null;
     }
 
     /** An audio classifier: {@link #predict} takes the path of a WAV file. */
@@ -591,6 +673,9 @@ public final class OmniTrainClient implements AutoCloseable {
             throw new UnsupportedOperationException("This model is an object detector: call detect(), which returns boxes.");
         }
         if (isAudio()) return classifyAudio(imagePath, topK);
+        if (isText()) {
+            throw new UnsupportedOperationException("This model takes text: call predictText(text, topK).");
+        }
         String inputType = inputSpec.get("type").asText();
         if (!"image".equals(inputType)) {
             throw new UnsupportedOperationException(
@@ -612,6 +697,22 @@ public final class OmniTrainClient implements AutoCloseable {
                 return decode(logits, topK);
             }
         }
+    }
+
+    /** Class probabilities of a text: the logits of its one row through a softmax, sorted descending. */
+    public Map<String, Double> predictText(String text, int topK) throws OrtException {
+        if (textRecipe == null) {
+            throw new UnsupportedOperationException("This model does not take text: call predict() with a file path.");
+        }
+        long[] ids = TextFrontEnd.tokenIds(text, textRecipe);
+        float[] logits;
+        try (OnnxTensor tensor = OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(ids), new long[] {1, ids.length});
+             OrtSession.Result result = session.run(Collections.singletonMap(onnxInputName, tensor))) {
+            OnnxValue outputValue = result.get(onnxOutputName)
+                .orElseThrow(() -> new IllegalStateException("Session produced no output named '" + onnxOutputName + "'"));
+            logits = flatten(outputValue.getValue());
+        }
+        return decode(logits, topK);
     }
 
     /** Class probabilities of a recording: each window's logits through a softmax, averaged over the windows. */

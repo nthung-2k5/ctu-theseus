@@ -21,6 +21,11 @@
       <span id="dropzone-label">Choose an image, or drag one here</span>
       <input id="file-input" type="file" accept="image/*" hidden />
     </label>
+    <section class="text-input" id="text-input" hidden>
+      <label for="text-box">Text to classify</label>
+      <textarea id="text-box" rows="6" placeholder="Type or paste a text"></textarea>
+      <button id="classify-btn" type="button">Classify</button>
+    </section>
     <div class="frame">
       <img id="preview" hidden alt="preview" />
       <audio id="audio-preview" controls hidden></audio>

@@ -1,7 +1,7 @@
 from omnitrain.plugins.export.common import dart_package_name, render, template
 from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, AppFormat
 from omnitrain.plugins.export.formats.base import BundleContext
-from omnitrain.plugins.export.readme import AUDIO_APP_LIMITATION, DETECTION_LIMITATION
+from omnitrain.plugins.export.readme import AUDIO_APP_LIMITATION, DETECTION_LIMITATION, TEXT_APP_LIMITATION
 
 
 class FlutterApp(AppFormat):
@@ -15,7 +15,11 @@ class FlutterApp(AppFormat):
         "setup_cmd": "flutter pub get",
         "run_cmd": "flutter run   # or: flutter build apk / flutter build ios",
         "verify_note": "Tap the checkmark icon in the app bar to run the built-in self-check screen.",
-        "kinds": {"detection": {"limitation": DETECTION_LIMITATION}, "audio": {"limitation": AUDIO_APP_LIMITATION}},
+        "kinds": {
+            "detection": {"limitation": DETECTION_LIMITATION},
+            "audio": {"limitation": AUDIO_APP_LIMITATION},
+            "text": {"limitation": TEXT_APP_LIMITATION},
+        },
     }
 
     @classmethod

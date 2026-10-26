@@ -15,6 +15,10 @@
  * the recipe describes (a WAV file is read here; any other format the browser can decode
  * is decoded by the browser at the model's sample rate, which can move a score slightly),
  * and averages the windows' probabilities.
+ *
+ * A `text` input that carries a `textTokens` recipe (text classification) is supported as
+ * well: `predict()` takes the text itself (a string), splits it into words and looks them
+ * up in the vocabulary that ships in preprocessing.json; the page shows a text box.
  */
 
 const HERE = new URL('.', import.meta.url)
@@ -345,6 +349,59 @@ function isAudio() {
   return inputSpec?.type === 'audio' && inputSpec.audioSpectrogram !== undefined
 }
 
+/** A text classifier: `predict()` takes the text itself. */
+function isText() {
+  return inputSpec?.type === 'text' && inputSpec.textTokens !== undefined
+}
+
+let textSeparators = null
+let textIds = null
+
+/** The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units. */
+function tokenize(text, recipe) {
+  const { from, to, add } = recipe.lowercase
+  const tokens = []
+  let current = ''
+  for (let i = 0; i < text.length; i++) {
+    const unit = text.charCodeAt(i)
+    if (textSeparators[unit] === 1) {
+      if (current !== '') tokens.push(current)
+      current = ''
+    } else {
+      current += String.fromCharCode(unit >= from && unit <= to ? unit + add : unit)
+    }
+  }
+  if (current !== '') tokens.push(current)
+  return tokens
+}
+
+/** `[1, maxTokens]` int64 word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end. */
+function textTokens(text) {
+  const recipe = inputSpec.textTokens
+  const ids = new BigInt64Array(recipe.maxTokens).fill(BigInt(recipe.padId))
+  tokenize(text, recipe)
+    .slice(0, recipe.maxTokens)
+    .forEach((token, i) => {
+      ids[i] = BigInt(textIds.get(token) ?? recipe.unknownId)
+    })
+  return new ort.Tensor('int64', ids, [1, recipe.maxTokens])
+}
+
+/** Class probabilities of a text: the logits of its one row through a softmax. */
+async function classifyText(source, topK) {
+  const text = typeof source === 'string' ? source : await source.text()
+  const outputs = await session.run({ [onnxInputName]: textTokens(text) })
+  const probs = softmax(Array.from(outputs[onnxOutputName].data))
+  const classes = outputSpec.classes ?? []
+  return Object.fromEntries(
+    classes
+      .map((name, i) => [name, probs[i]])
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topK)
+      .map(([name, p]) => [name, Math.round(p * 10000) / 10000]),
+  )
+}
+
 let loading = null
 /** Loads the manifest and the model once, however many callers ask. */
 function init() {
@@ -362,6 +419,17 @@ async function load() {
       `Unknown audio recipe '${inputSpec.audioSpectrogram.recipe}'. ` +
         "See preprocessing.json's inputs[0].audioSpectrogram and adapt app.js.",
     )
+  }
+  if (isText()) {
+    const recipe = inputSpec.textTokens
+    if (recipe.recipe !== 'word_ids_v1') {
+      throw new Error(
+        `Unknown text recipe '${recipe.recipe}'. See preprocessing.json's inputs[0].textTokens and adapt app.js.`,
+      )
+    }
+    textSeparators = new Uint8Array(0x10000)
+    for (const [lo, hi] of recipe.separatorRanges) textSeparators.fill(1, lo, Math.min(hi, 0xffff) + 1)
+    textIds = new Map(recipe.vocabulary.map((word, i) => [word, recipe.firstWordId + i]))
   }
 
   session = await ort.InferenceSession.create(new URL('model.onnx', HERE).toString())
@@ -544,7 +612,8 @@ export async function detect(imageSource, { confidence, iou, maxDetections = 300
 }
 
 /**
- * Run inference on an image File/Blob (an audio File/Blob for an audio classifier) and return
+ * Run inference on an image File/Blob (an audio File/Blob for an audio classifier, the text itself for a text
+ * classifier) and return
  * {className: probability} (classification), {value} (regression), or the list of boxes found (an object detector;
  * see `detect`).
  */
@@ -552,6 +621,7 @@ export async function predict(imageSource, topK = 5) {
   await init()
   if (outputSpec.type === 'detections') return detect(imageSource)
   if (isAudio()) return classifyAudio(imageSource, topK)
+  if (isText()) return classifyText(imageSource, topK)
 
   if (inputSpec.type !== 'image') {
     throw new Error(
@@ -588,10 +658,18 @@ const resultsSection = document.getElementById('results')
 const predictionsList = document.getElementById('predictions')
 const statusEl = document.getElementById('status')
 const audioPreview = document.getElementById('audio-preview')
+const textSection = document.getElementById('text-input')
+const textBox = document.getElementById('text-box')
+const classifyBtn = document.getElementById('classify-btn')
 
-// An audio model asks for audio files; the rest of the page is the same.
+// An audio model asks for audio files and a text model for a text; the rest of the page is the same.
 init()
   .then(() => {
+    if (isText()) {
+      dropzone.hidden = true
+      textSection.hidden = false
+      return
+    }
     if (!isAudio()) return
     fileInput.accept = 'audio/*,.wav'
     document.getElementById('dropzone-label').textContent = 'Choose an audio file, or drag one here'
@@ -627,7 +705,9 @@ async function handleFile(file) {
   if (!file) return
   statusEl.textContent = 'Running inference…'
   overlay.hidden = true
-  if (isAudio()) {
+  if (isText()) {
+    // Nothing to preview: the text is in the box.
+  } else if (isAudio()) {
     audioPreview.src = URL.createObjectURL(file)
     audioPreview.hidden = false
   } else {
@@ -661,6 +741,15 @@ async function handleFile(file) {
     statusEl.textContent = `Error: ${err.message}`
   }
 }
+
+// A text model is given the text in the box (a string, not a file).
+classifyBtn.addEventListener('click', () => {
+  if (textBox.value.trim() === '') {
+    statusEl.textContent = 'Type or paste some text first.'
+    return
+  }
+  handleFile(textBox.value)
+})
 
 fileInput.addEventListener('change', () => handleFile(fileInput.files?.[0]))
 dropzone.addEventListener('dragover', (e) => e.preventDefault())
@@ -731,7 +820,8 @@ verifyBtn.addEventListener('click', async () => {
       return
     }
     const sampleRes = await fetch(new URL(expected.sampleFile, HERE))
-    const sampleBlob = await sampleRes.blob()
+    // A text model is given the text in the sample file (UTF-8), the rest the file itself.
+    const sampleBlob = isText() ? await sampleRes.text() : await sampleRes.blob()
 
     if (outputSpec?.type === 'detections' || expected.outputType === 'detections') {
       if (!expected.detections) {

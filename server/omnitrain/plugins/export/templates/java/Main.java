@@ -47,7 +47,9 @@ public final class Main {
                 if (found.isEmpty()) System.out.println("No objects found.");
                 return;
             }
-            Map<String, Double> predictions = client.predict(Path.of(args[0]), 5);
+            // A text model is given the text itself (in the platform's default charset: for anything but plain
+            // ASCII, call predictText from code with a String).
+            Map<String, Double> predictions = client.isText() ? client.predictText(args[0], 5) : client.predict(Path.of(args[0]), 5);
             predictions.forEach((className, probability) -> System.out.printf("%s: %.4f%n", className, probability));
         }
     }
@@ -129,7 +131,11 @@ public final class Main {
             return 0;
         }
 
-        Map<String, Double> actual = client.predict(samplePath, Math.max(expectedPredictions.size(), 5));
+        // A text model takes the text in the sample file, not the path to it.
+        int topK = Math.max(expectedPredictions.size(), 5);
+        Map<String, Double> actual = client.isText()
+            ? client.predictText(java.nio.file.Files.readString(samplePath, java.nio.charset.StandardCharsets.UTF_8), topK)
+            : client.predict(samplePath, topK);
 
         String expectedTop1 = null;
         double expectedTop1Prob = Double.NEGATIVE_INFINITY;

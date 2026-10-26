@@ -27,8 +27,12 @@
  *     path to a WAV file. The spectrogram is computed here, from the recipe in
  *     preprocessing.json; no audio library is needed.
  *
- * Every other input type (text, video, Ludwig's audio) throws with a pointer to
- * preprocessing.json so you can adapt preprocessing yourself — text
+ *   - a `text` input with a `textTokens` recipe (text classification) — pass the text
+ *     itself, a string, not a file path. It is split into words and looked up in the
+ *     vocabulary that ships in preprocessing.json; no library is needed.
+ *
+ * Every other input type (video, Ludwig's text and audio, a scikit-learn text model) throws
+ * with a pointer to preprocessing.json so you can adapt preprocessing yourself — text
  * tokenization in particular depends on the chosen encoder's own
  * vocabulary (Ludwig's built-in tokenizer, or a HuggingFace subword
  * tokenizer for bert/distilbert/roberta), which can't be generically
@@ -53,11 +57,24 @@ interface AudioRecipe {
   normalization: { mean: number; std: number }
 }
 
+/** `inputs[0].textTokens` (recipe "word_ids_v1"): how a text becomes word ids. */
+interface TextRecipe {
+  recipe: string
+  lowercase: { from: number; to: number; add: number }
+  separatorRanges: [number, number][]
+  maxTokens: number
+  padId: number
+  unknownId: number
+  firstWordId: number
+  vocabulary: string[]
+}
+
 interface PreprocessingInput {
   name: string
   type: string
   column: string
   audioSpectrogram?: AudioRecipe
+  textTokens?: TextRecipe
   ludwigPreprocessing?: Record<string, unknown>
   /** Absent: squash the whole image to height x width. */
   imageResize?: { mode?: string; size?: [number, number]; padValue?: number }
@@ -393,6 +410,31 @@ function preprocessNumber(value: number, spec: PreprocessingInput): Float32Array
   return new Float32Array([x])
 }
 
+/** Which UTF-16 code units separate tokens, as a lookup table built from the recipe's ranges. */
+function separatorTable(ranges: [number, number][]): Uint8Array {
+  const table = new Uint8Array(0x10000)
+  for (const [lo, hi] of ranges) table.fill(1, lo, Math.min(hi, 0xffff) + 1)
+  return table
+}
+
+/** The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units. */
+function tokenize(text: string, recipe: TextRecipe, separators: Uint8Array): string[] {
+  const { from, to, add } = recipe.lowercase
+  const tokens: string[] = []
+  let current = ''
+  for (let i = 0; i < text.length; i++) {
+    const unit = text.charCodeAt(i)
+    if (separators[unit] === 1) {
+      if (current !== '') tokens.push(current)
+      current = ''
+    } else {
+      current += String.fromCharCode(unit >= from && unit <= to ? unit + add : unit)
+    }
+  }
+  if (current !== '') tokens.push(current)
+  return tokens
+}
+
 export class OmniTrainClient {
   private session!: ort.InferenceSession
   private manifest: PreprocessingManifest
@@ -408,6 +450,10 @@ export class OmniTrainClient {
   readonly isDetector: boolean
   /** An audio classifier: `predict()` takes the path of a WAV file. */
   readonly isAudio: boolean
+  /** A text classifier: `predict()` takes the text itself, not a path. */
+  readonly isText: boolean
+  private textSeparators = new Uint8Array(0)
+  private textIds = new Map<string, number>()
 
   constructor(
     private modelPath = join(import.meta.dirname, 'model.onnx'),
@@ -425,6 +471,17 @@ export class OmniTrainClient {
         `Unknown audio recipe '${this.inputSpec.audioSpectrogram?.recipe}'. ` +
           "See preprocessing.json's inputs[0].audioSpectrogram and adapt this client.",
       )
+    }
+    this.isText = this.inputSpec.type === 'text' && this.inputSpec.textTokens !== undefined
+    if (this.isText) {
+      const recipe = this.inputSpec.textTokens as TextRecipe
+      if (recipe.recipe !== 'word_ids_v1') {
+        throw new Error(
+          `Unknown text recipe '${recipe.recipe}'. See preprocessing.json's inputs[0].textTokens and adapt this client.`,
+        )
+      }
+      this.textSeparators = separatorTable(recipe.separatorRanges)
+      recipe.vocabulary.forEach((word, i) => this.textIds.set(word, recipe.firstWordId + i))
     }
     this.ready = this.init()
   }
@@ -632,6 +689,17 @@ export class OmniTrainClient {
     )
   }
 
+  /** `[1, maxTokens]` int64 word ids: the first maxTokens tokens looked up in the vocabulary, padded at the end. */
+  private textTokens(text: string): ort.Tensor {
+    const recipe = this.inputSpec.textTokens as TextRecipe
+    const ids = new BigInt64Array(recipe.maxTokens).fill(BigInt(recipe.padId))
+    const tokens = tokenize(text, recipe, this.textSeparators).slice(0, recipe.maxTokens)
+    tokens.forEach((token, i) => {
+      ids[i] = BigInt(this.textIds.get(token) ?? recipe.unknownId)
+    })
+    return new ort.Tensor('int64', ids, [1, recipe.maxTokens])
+  }
+
   private preprocessRecord(record: Record<string, number>): Record<string, ort.Tensor> {
     const feed: Record<string, ort.Tensor> = {}
     for (const spec of this.inputSpecs) {
@@ -654,8 +722,8 @@ export class OmniTrainClient {
    * Run inference and return `{className: probability}` sorted descending
    * (classification), or `{value}` (regression).
    *
-   * `input` is a file path for a single `image` or `audio` input, or a
-   * `{column: value}` record — one entry per input feature — for a
+   * `input` is a file path for a single `image` or `audio` input, the text itself for a
+   * `text` input, or a `{column: value}` record — one entry per input feature — for a
    * tabular (`number`-only) model. An object detector returns its boxes
    * (see `detect`) instead of a `{className: probability}` record.
    */
@@ -672,7 +740,10 @@ export class OmniTrainClient {
     }
 
     let feed: Record<string, ort.Tensor>
-    if (this.isTabular) {
+    if (this.isText) {
+      if (typeof input !== 'string') throw new Error('This model takes a text input — pass the text as a string.')
+      feed = { [this.onnxInputNames[this.inputSpec.name]]: this.textTokens(input) }
+    } else if (this.isTabular) {
       if (typeof input !== 'object') {
         throw new Error('This model has tabular inputs — pass a {column: value} record, not a file path.')
       }

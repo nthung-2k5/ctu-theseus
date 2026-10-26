@@ -85,9 +85,12 @@ if (client.isDetector) {
   }
   process.exit(verifyDetections(expected.detections, await client.detect(samplePath)) ? 0 : 1)
 }
+// A tabular model takes the record in the sample file, a text model the text in it; the rest take the path.
 const sampleInput: string | Record<string, number> = client.isTabular
   ? JSON.parse(readFileSync(samplePath, 'utf-8'))
-  : samplePath
+  : client.isText
+    ? readFileSync(samplePath, 'utf-8')
+    : samplePath
 const actual = (await client.predict(sampleInput, Object.keys(expected.predictions).length || 5)) as Record<string, number>
 
 const entries = Object.entries(expected.predictions)

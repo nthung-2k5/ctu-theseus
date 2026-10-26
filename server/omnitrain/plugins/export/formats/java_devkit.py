@@ -1,5 +1,10 @@
 from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, DevkitFormat
-from omnitrain.plugins.export.readme import AUDIO_LIMITATION, DETECTION_LIMITATION, LIMITATION_IMAGE_ONLY
+from omnitrain.plugins.export.readme import (
+    AUDIO_LIMITATION,
+    DETECTION_LIMITATION,
+    LIMITATION_IMAGE_ONLY,
+    TEXT_LIMITATION,
+)
 
 
 class JavaDevkit(DevkitFormat):
@@ -22,6 +27,7 @@ class JavaDevkit(DevkitFormat):
         "kinds": {
             "detection": {"limitation": DETECTION_LIMITATION},
             "audio": {"run_cmd": "java Main <path-to-wav-file>", "limitation": AUDIO_LIMITATION},
+            "text": {"run_cmd": 'java Main "<the text to classify>"', "limitation": TEXT_LIMITATION},
         },
         "note": "Written in Java for maximum interop: call it directly from Kotlin with zero wrapping.",
     }

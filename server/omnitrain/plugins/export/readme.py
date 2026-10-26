@@ -42,6 +42,21 @@ AUDIO_APP_LIMITATION = (
     "`inputs[0].audioSpectrogram` in `preprocessing.json`, scores each window and averages the probabilities. Only a "
     "model trained by the PyTorch backend carries that recipe."
 )
+# For a client that implements text classification with the word-id recipe.
+TEXT_LIMITATION = (
+    "Text classification: the model takes word ids, not text. `predict` is given the text itself (a string, not a "
+    "file), lower-cases the ASCII letters A-Z, cuts it into tokens at the separators listed in "
+    "`inputs[0].textTokens.separatorRanges`, looks each token up in `textTokens.vocabulary` (an unknown word is "
+    "`unknownId`), keeps the first `maxTokens` and pads the rest. The vocabulary was built from the training texts "
+    "only. Words are matched exactly (no Unicode normalisation, no case folding beyond A-Z), so text in a different "
+    "form than the training texts (decomposed accents) reads as unknown words. Only a model trained by the PyTorch "
+    "backend carries that recipe."
+)
+TEXT_APP_LIMITATION = (
+    "Text classification: type or paste a text; the app splits it into words and looks them up in the vocabulary in "
+    "`inputs[0].textTokens` of `preprocessing.json` (exact match, ASCII letters lower-cased), and scores the ids. "
+    "Only a model trained by the PyTorch backend carries that recipe."
+)
 
 
 APP_LIMITATION = (
@@ -58,7 +73,7 @@ class ReadmeVars:
     format: str  # the export format's display label
     artifact: str  # model file name inside the bundle, e.g. model.onnx
     has_verify: bool
-    # What the client does: "standard", "detection", "video" or "audio" (see formats/_kits.client_kind).
+    # What the client does: "standard", "detection", "video", "audio" or "text" (see formats/_kits.client_kind).
     kind: str = "standard"
 
 
