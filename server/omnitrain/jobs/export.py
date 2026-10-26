@@ -49,9 +49,7 @@ def _plain(v: Any) -> Any:
     return v.item() if hasattr(v, "item") else v
 
 
-def _shape_input_value(
-    input_columns: list[str], sample_row: "pd.Series"
-) -> tuple[str | None, Any]:
+def _shape_input_value(input_columns: list[str], sample_row: "pd.Series") -> tuple[str | None, Any]:
     """(inputColumn, inputValue) for expected.json.
 
     A single input column keeps the original scalar shape (an s3:// URI for file-backed
@@ -64,9 +62,7 @@ def _shape_input_value(
     return None, {c: _plain(sample_row[c]) for c in input_columns}
 
 
-def _build_golden_sample(
-    backend: type[TrainerBackend], model_dir: str, dataset_key: str
-) -> dict[str, Any] | None:
+def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_key: str) -> dict[str, Any] | None:
     """Run one real test-split row through the trained model.
 
     Returns the input/output pair the devkit verify script checks its own (re-implemented)
@@ -76,11 +72,7 @@ def _build_golden_sample(
     try:
         model = backend.load(model_dir)
         df = pd.read_parquet(storage.s3fs_path(C.BUCKET_DATASETS, dataset_key))
-        rows = (
-            df[df[C.SPLIT_COLUMN_NAME] == "test"]
-            if C.SPLIT_COLUMN_NAME in df.columns
-            else df
-        )
+        rows = df[df[C.SPLIT_COLUMN_NAME] == "test"] if C.SPLIT_COLUMN_NAME in df.columns else df
         if len(rows) == 0:
             rows = df
         sample = rows.iloc[[0]]
@@ -89,9 +81,7 @@ def _build_golden_sample(
         # threshold=0.0: this is a reference fixture, not a filtered result. The verify script
         # wants the full distribution to compare.
         predicted = model.golden_prediction(predictions, threshold=0.0)
-        input_column, input_value = _shape_input_value(
-            model.input_columns, sample.iloc[0]
-        )
+        input_column, input_value = _shape_input_value(model.input_columns, sample.iloc[0])
         golden: dict[str, Any] = {
             "schemaVersion": 1,
             "inputColumn": input_column,
@@ -111,9 +101,7 @@ def _build_golden_sample(
         logger.exception("Bug while building the golden sample for export verification")
         raise
     except Exception:
-        logger.exception(
-            "Failed to build golden sample for export verification, skipping expected.json"
-        )
+        logger.exception("Failed to build golden sample for export verification, skipping expected.json")
         return None
 
 
@@ -133,16 +121,12 @@ def _convert(
         model = backend.load(model_dir)
         artifact = backend.artifacts[artifact_id]
         export_path = backend.convert(model, artifact_id, workdir)
-        storage.upload_file(
-            C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename), export_path
-        )
+        storage.upload_file(C.BUCKET_MODELS, storage.export_key(run_id, artifact.filename), export_path)
 
         # Best effort, and idempotent (same S3 key), so re-running per artifact is fine.
         golden = _build_golden_sample(backend, model_dir, dataset_key)
         if golden is not None:
-            storage.upload_json(
-                C.BUCKET_MODELS, storage.expected_sample_key(run_id), golden
-            )
+            storage.upload_json(C.BUCKET_MODELS, storage.expected_sample_key(run_id), golden)
         storage.cleanup_temp("exports", export_id)
 
 
@@ -206,6 +190,4 @@ async def handle_failure(job_id: uuid.UUID, exc: BaseException) -> None:
     """An attempt failed: retry after a delay, or fail for good once attempts are exhausted."""
     error = f"{type(exc).__name__}: {exc}"
     logger.error("Export %s failed: %s", job_id, error)
-    await queue.release_or_fail(
-        queue.EXPORT, job_id, error, final_values={"failed_message": error[:500]}
-    )
+    await queue.release_or_fail(queue.EXPORT, job_id, error, final_values={"failed_message": error[:500]})

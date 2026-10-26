@@ -480,7 +480,7 @@ def hyperparameter_specs(task: TaskDescriptor) -> list[ParamSpec]:
 
     # The head and the freeze switch only exist for ECD tasks (an LLM is fine-tuned as a whole).
     head: list[ParamSpec] = []
-    
+
     assert spec is not None
     if spec.model_type == "ecd":
         if any(e.pretrained for e in spec.encoders):

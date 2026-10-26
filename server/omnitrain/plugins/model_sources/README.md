@@ -55,8 +55,7 @@ class HttpsZip(ModelSource):
         return ref
 
     @classmethod
-    def fetch(cls, row, dest: Path, token):
-        ...  # download row.source_ref and unpack it into dest
+    def fetch(cls, row, dest: Path, token): ...  # download row.source_ref and unpack it into dest
 
     @classmethod
     def validate(cls, row, token, limit):

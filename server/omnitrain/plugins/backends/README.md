@@ -64,7 +64,14 @@ import pandas as pd
 
 from omnitrain.domain.task_registry import SnapshotContext, TaskDescriptor
 from omnitrain.plugins.backends.base import (
-    ARTIFACT_FILENAMES, Artifact, CustomModelRef, HyperparamsBase, LoadedModel, ModelChoice, TrainContext, TrainerBackend,
+    ARTIFACT_FILENAMES,
+    Artifact,
+    CustomModelRef,
+    HyperparamsBase,
+    LoadedModel,
+    ModelChoice,
+    TrainContext,
+    TrainerBackend,
 )
 
 
@@ -92,8 +99,9 @@ class MyBackend(TrainerBackend):
         return [ModelChoice(id="small", label="Small", pretrained=True)]
 
     @classmethod
-    def compile(cls, task: TaskDescriptor, ctx: SnapshotContext, hp: MyHyperparameters,
-                custom: CustomModelRef | None = None) -> dict[str, Any]:
+    def compile(
+        cls, task: TaskDescriptor, ctx: SnapshotContext, hp: MyHyperparameters, custom: CustomModelRef | None = None
+    ) -> dict[str, Any]:
         return {"model": hp.model_id or "small", "epochs": hp.epochs or 10}
 
     @classmethod
@@ -102,7 +110,7 @@ class MyBackend(TrainerBackend):
 
         df = pd.read_parquet(run.dataset_uri)
         for epoch in range(run.config["epochs"]):
-            run.check_abort()                       # raises TrainingAborted if the run was cancelled
+            run.check_abort()  # raises TrainingAborted if the run was cancelled
             run.heartbeat()
             run.report(epoch, "validation", {"loss": 0.0})
         ...  # write the model under run.output_uri, return it already loaded
