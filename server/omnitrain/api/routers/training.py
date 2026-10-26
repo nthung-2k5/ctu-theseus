@@ -28,7 +28,13 @@ from omnitrain.domain.task_registry import get_task_descriptor
 from omnitrain.events import get_event_bus, get_event_writer
 from omnitrain.events.stream import stream_run_events
 from omnitrain.jobs import abort
-from omnitrain.plugins.backends.registry import describe, find_backend, list_backends, model_param_name
+from omnitrain.plugins.backends.registry import (
+    describe,
+    find_backend,
+    list_backends,
+    model_param_name,
+    preferred_first,
+)
 from omnitrain.schemas.training import (
     ErrorItem,
     EvaluationErrorRow,
@@ -90,7 +96,7 @@ async def list_project_training_backends(project: ProjectDep, session: SessionDe
     project's owner may use: their own private ones and the global ones an admin made available."""
     task = get_task_descriptor(project.task)
     backends = []
-    for b in list_backends():
+    for b in preferred_first(task, list_backends()):
         if b.available() is not None or not b.supports(task):
             continue
         info = describe(b, task)

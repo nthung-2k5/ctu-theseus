@@ -316,6 +316,9 @@ class TrainerBackend(ABC):
     # must load, serve and export from the run's results alone. Ludwig fails that (its checkpoint re-reads the model
     # from the path in its config), so its custom-model runs stay on the server.
     remote_custom_models: ClassVar[bool] = False
+    # Task ids this backend is the first choice for: it comes first in the create-run list and is what a run
+    # uses when the caller names no backend. Every other backend keeps its place after it, in id order.
+    default_for: ClassVar[frozenset[str]] = frozenset()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

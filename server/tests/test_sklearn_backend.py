@@ -58,6 +58,18 @@ class TestRegistration:
         assert not SklearnBackend.supports(get_task_descriptor("image_classification"))
         assert not SklearnBackend.supports(get_task_descriptor("tabular_clustering"))
 
+    def test_it_is_the_default_for_tabular_tasks_only(self):
+        from omnitrain.services.training import default_backend
+
+        for task in (TABULAR, REGRESSION):
+            assert trainable_backends(task)[0] is SklearnBackend
+            assert default_backend(task.id) is SklearnBackend
+            # Ludwig is still offered, right after it.
+            assert "ludwig" in [b.id for b in trainable_backends(task)]
+        # Text keeps Ludwig's pretrained encoders as the default.
+        assert trainable_backends(TEXT)[0].id == "ludwig"
+        assert default_backend(TEXT.id).id == "ludwig"
+
     def test_models_differ_per_task(self):
         assert [m.id for m in SklearnBackend.models(TABULAR)] == [
             "hist_gradient_boosting", "random_forest", "logistic_regression",

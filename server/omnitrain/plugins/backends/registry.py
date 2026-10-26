@@ -22,17 +22,26 @@ def list_backends() -> list[type[TrainerBackend]]:
     return sorted(_registry.all(), key=lambda b: b.id)
 
 
+def preferred_first(task: TaskDescriptor, backends: list[type[TrainerBackend]]) -> list[type[TrainerBackend]]:
+    """`backends` with the ones that are the default for `task` (`TrainerBackend.default_for`) moved to the front.
+    The sort is stable, so the rest keep their order."""
+    return sorted(backends, key=lambda b: task.id not in b.default_for)
+
+
 def trainable_backends(task: TaskDescriptor) -> list[type[TrainerBackend]]:
-    """Installed, available backends that can train this task. What the create-run UI offers.
+    """Installed, available backends that can train this task, the task's default first. What the create-run UI offers.
 
     A backend an admin switched off for this task is left out. That only stops NEW runs: a finished
     run is still loaded, served and exported through `get_backend`, which is not filtered.
     """
-    return [
-        b
-        for b in list_backends()
-        if b.available() is None and b.supports(task) and plugin_settings.is_enabled("backend", b.id, task.id)
-    ]
+    return preferred_first(
+        task,
+        [
+            b
+            for b in list_backends()
+            if b.available() is None and b.supports(task) and plugin_settings.is_enabled("backend", b.id, task.id)
+        ],
+    )
 
 
 @dataclass
