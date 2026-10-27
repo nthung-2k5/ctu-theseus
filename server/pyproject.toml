@@ -58,6 +58,9 @@ dependencies = [
   'skops>=0.16.0',
   'skl2onnx>=1.20.0',
 
+  # Language-model trainer backend: LoRA adapters on a bring-your-own causal LM (Apache-2.0; brings accelerate)
+  'peft>=0.21.2',
+
   # Telemetry
   "opentelemetry-sdk>=1.44.0",
   "opentelemetry-exporter-otlp-proto-http>=1.44.0",

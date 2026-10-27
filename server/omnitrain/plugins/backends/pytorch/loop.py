@@ -40,7 +40,11 @@ class Beat:
 
 class Stepper:
     """Everything one optimizer step needs beyond the optimizer: the learning-rate curve, gradient clipping and mixed
-    precision (a loss scaler and `autocast`, both only on a CUDA device, where half precision is worth it)."""
+    precision (a loss scaler and `autocast`, both only on a CUDA device, where half precision is worth it).
+
+    With `hp["gradAccumulation"]` above 1 the gradients of that many batches are added up before one optimizer step, so
+    a batch too big for the device's memory can still be trained on at its full size. The learning-rate curve counts
+    optimizer steps, and `flush` takes the step for the batches left over at the end of an epoch."""
 
     def __init__(
         self,
@@ -53,22 +57,35 @@ class Stepper:
         self.optimizer = optimizer
         self._parameters = parameters
         self._clip = hp.get("gradClipNorm")
+        self._accumulate = int(hp.get("gradAccumulation") or 1)
+        self._pending = 0
         self.amp = bool(hp.get("mixedPrecision")) and device.startswith("cuda")
         self._device_type = "cuda" if device.startswith("cuda") else "cpu"
         self._scaler = torch.amp.GradScaler("cuda", enabled=self.amp)
-        total = hp["epochs"] * steps_per_epoch
-        warmup = round(float(hp.get("warmupEpochs") or 0) * steps_per_epoch)
+        total = hp["epochs"] * -(-steps_per_epoch // self._accumulate)
+        warmup = round(float(hp.get("warmupEpochs") or 0) * -(-steps_per_epoch // self._accumulate))
         schedule = hp.get("lrSchedule") or "constant"
         self._scheduler = torch.optim.lr_scheduler.LambdaLR(
             optimizer, lambda step: lr_factor(step, total, warmup, schedule)
         )
+        optimizer.zero_grad(set_to_none=True)
 
     def autocast(self) -> Any:
         return torch.autocast(self._device_type, dtype=torch.float16, enabled=self.amp)
 
     def step(self, loss: torch.Tensor) -> None:
-        self.optimizer.zero_grad(set_to_none=True)
-        self._scaler.scale(loss).backward()
+        """Add this batch's gradient; take the optimizer step once enough batches have been added up."""
+        # Each batch's loss is a mean, so scaling by 1 / n makes the sum of n of them the mean over all n batches.
+        self._scaler.scale(loss / self._accumulate).backward()
+        self._pending += 1
+        if self._pending >= self._accumulate:
+            self.flush()
+
+    def flush(self) -> None:
+        """Take the optimizer step for the batches added up so far (none: nothing to do)."""
+        if self._pending == 0:
+            return
+        self._pending = 0
         if self._clip is not None:
             # Gradients are still multiplied by the loss scale; undo that first so the norm is the real one.
             self._scaler.unscale_(self.optimizer)
@@ -76,6 +93,7 @@ class Stepper:
         self._scaler.step(self.optimizer)
         self._scaler.update()
         self._scheduler.step()
+        self.optimizer.zero_grad(set_to_none=True)
 
 
 def make_optimizer(name: str, parameters: list[torch.nn.Parameter], lr: float, weight_decay: float | None) -> Any:
@@ -210,6 +228,8 @@ def run_epoch(
         for key, value in objective.sums(outputs.detach(), targets).items():
             totals[key] = totals.get(key, 0.0) + value
         seen += len(targets)
+    if stepper is not None:
+        stepper.flush()
     return objective.summarise(totals, seen)
 
 
@@ -225,9 +245,14 @@ def fit(
     objective: Objective,
     span: str,
     on_epoch: Callable[[int], None] | None = None,
+    keep: Callable[[str], bool] | None = None,
 ) -> None:
     """Train `net` for up to `hp["epochs"]`, reporting each epoch, and leave it holding the weights of the epoch with
-    the lowest validation loss. Stops early after `hp["patience"]` epochs without improvement."""
+    the lowest validation loss. Stops early after `hp["patience"]` epochs without improvement.
+
+    `keep` names the weights that can change (by their state-dict key): only those are copied aside and restored. A
+    network that trains a few adapters inside a model of billions of weights must not copy the whole model each time the
+    loss improves. Unset, every weight and buffer is kept."""
     trainable = [p for p in net.parameters() if p.requires_grad]
     optimizer = make_optimizer(hp["optimizer"], trainable, hp["learningRate"], hp.get("weightDecay"))
     stepper = Stepper(optimizer, trainable, device, hp, len(train_loader))
@@ -244,10 +269,12 @@ def fit(
             run.report(epoch, "validation", validation)
             if validation["loss"] < best_loss - 1e-6:
                 best_loss, stale = validation["loss"], 0
-                best_state = {k: v.detach().cpu().clone() for k, v in net.state_dict().items()}
+                best_state = {
+                    k: v.detach().cpu().clone() for k, v in net.state_dict().items() if keep is None or keep(k)
+                }
             else:
                 stale += 1
                 if stale >= hp["patience"]:
                     break
     if best_state is not None:
-        net.load_state_dict(best_state)
+        net.load_state_dict(best_state, strict=keep is None)
