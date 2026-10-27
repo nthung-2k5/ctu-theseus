@@ -1,8 +1,9 @@
-import { Box, Button, Code, Group, NumberInput, Select, Text } from '@mantine/core'
+import { Box, Button, Group, NumberInput, Select, Text } from '@mantine/core'
 import { CheckIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 import { CaptionEditor } from './CaptionEditor'
 import { findGroundTruth, type GroundTruthSpec, groundTruthKind, targetValue } from './groundTruth'
+import { TagEditor } from './TagEditor'
 import type { CaptionEditing, DatasetListItem, ItemEditing } from './types'
 
 /** A regression target: one number per item, stored as `labelStructured.value`. */
@@ -60,18 +61,20 @@ const TargetEditor = ({
 
 /**
  * The label section of the item drawer. What it renders is decided by the task registry's annotation spec:
- * a class picker, a numeric target, free text, or a read-only view of token tags.
+ * a class picker, a numeric target, free text, or a word-by-word tag editor.
  */
 export const GroundTruthEditor = ({
   item,
   spec,
   classNameById,
+  classColorById,
   captionEditing,
   editing,
 }: {
   item: DatasetListItem
   spec: GroundTruthSpec
   classNameById: Map<string, string>
+  classColorById?: Map<string, string>
   captionEditing?: CaptionEditing
   editing?: ItemEditing
 }) => {
@@ -117,14 +120,16 @@ export const GroundTruthEditor = ({
         </Box>
       )
     case 'tags':
-      // Editing token tags needs a span editor; until then they are shown, not changed.
+      // Keyed by item: the editor holds the tags being typed, which must not carry over to the next item.
       return (
-        <Box>
-          <Text size="sm" c="dimmed">
-            Tags
-          </Text>
-          {current ? <Code block>{JSON.stringify(current.labelStructured, null, 2)}</Code> : <Text size="sm">—</Text>}
-        </Box>
+        <TagEditor
+          key={item.id}
+          item={item}
+          stored={current?.labelStructured}
+          storedId={current?.id ?? null}
+          editing={editing}
+          classColorById={classColorById}
+        />
       )
     default:
       return null

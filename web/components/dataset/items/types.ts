@@ -76,6 +76,11 @@ export interface ItemEditing {
   onSetClass: (itemId: string, classId: string) => void
   /** A regression target: creates the annotation, or updates `existingAnnotationId` in place. */
   onSaveTarget: (itemId: string, existingAnnotationId: string | null, value: number) => Promise<void>
+  /**
+   * Token tags: one tag per word of the text, in order. Creates the annotation, or updates `existingAnnotationId`, and
+   * resolves to the annotation's id so the next save of the same item updates it.
+   */
+  onSaveTags: (itemId: string, existingAnnotationId: string | null, tags: string[]) => Promise<string>
   onDelete: (itemId: string) => void
   /** Only for an object-detection project: boxes are drawn on the image, one annotation each. */
   boxes?: BoxEditing

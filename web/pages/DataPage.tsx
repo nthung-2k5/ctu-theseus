@@ -92,8 +92,18 @@ export function DataPage() {
 
   // Free-text ground truth (captioning/ASR/generation) is edited per-item from the detail
   // drawer instead of in bulk — see items/CaptionEditor.tsx.
-  const { saveCaption, saveTarget, reassignSplit, assignClass, removeItems, addBox, updateBox, removeBox, markEmpty } =
-    useItemMutations(projectId)
+  const {
+    saveCaption,
+    saveTarget,
+    saveTags,
+    reassignSplit,
+    assignClass,
+    removeItems,
+    addBox,
+    updateBox,
+    removeBox,
+    markEmpty,
+  } = useItemMutations(projectId)
   const outputColumn = descriptor.output?.column ?? 'text'
   const captionLabel =
     descriptor.annotation.type !== 'text_sequence'
@@ -122,6 +132,7 @@ export function DataPage() {
     onSaveTarget: async (itemId, existingAnnotationId, value) => {
       await saveTarget.mutateAsync({ itemId, existingAnnotationId, value })
     },
+    onSaveTags: (itemId, existingAnnotationId, tags) => saveTags.mutateAsync({ itemId, existingAnnotationId, tags }),
     onDelete: (itemId) => removeItems.mutate({ selection: oneItem(itemId) }),
     boxes: labelsWithBoxes
       ? {

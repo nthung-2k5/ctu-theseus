@@ -109,6 +109,27 @@ export function useItemMutations(projectId: string) {
     onError: onError('Failed to save'),
   })
 
+  // Token tags: one annotation per item holding one tag per word of its text, written whole. Resolves to the
+  // annotation's id, because a second save before the item list has refetched must update it, not create another.
+  const saveTags = useMutation({
+    mutationFn: async ({
+      itemId,
+      existingAnnotationId,
+      tags,
+    }: {
+      itemId: string
+      existingAnnotationId: string | null
+      tags: string[]
+    }): Promise<string> => {
+      const { annotation } = existingAnnotationId
+        ? await updateAnnotation(existingAnnotationId, { labelStructured: tags })
+        : await createAnnotation(itemId, { annotationType: 'token_tags', labelStructured: tags })
+      return annotation.id
+    },
+    onSuccess: invalidate,
+    onError: onError('Failed to save the tags'),
+  })
+
   // Boxes: one annotation each, drawn on the image, so every change is a single-annotation call (no bulk class).
   const addBox = useMutation({
     mutationFn: ({ itemId, classId, box }: { itemId: string; classId: string; box: Box }) =>
@@ -142,5 +163,16 @@ export function useItemMutations(projectId: string) {
     onError: onError('Failed to mark the image'),
   })
 
-  return { reassignSplit, assignClass, removeItems, saveCaption, saveTarget, addBox, updateBox, removeBox, markEmpty }
+  return {
+    reassignSplit,
+    assignClass,
+    removeItems,
+    saveCaption,
+    saveTarget,
+    saveTags,
+    addBox,
+    updateBox,
+    removeBox,
+    markEmpty,
+  }
 }

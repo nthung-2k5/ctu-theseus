@@ -131,6 +131,7 @@ export const ItemDetail = ({
               item={item}
               spec={spec}
               classNameById={classNameById}
+              classColorById={classColorById}
               captionEditing={captionEditing}
               editing={editing}
             />
