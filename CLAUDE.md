@@ -202,8 +202,29 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `tag_word_ids_v1`, which a client refuses if it does not know). Only the Python devkit implements it (`predict` returns
   `[{token, tag, confidence}]`, verified against `expected.json`'s `tags`); the other five clients ship the bare model and
   a README that says so (`TAGS_OTHER_LIMITATION`). Change `tagging.py` and its recipe and the Python client must change
-  with it, and a client in another language needs a table for `str.split()`'s whitespace first. There is no bring-your-own
-  token classifier yet (`_CUSTOM_KIND` has no entry for it), and the web has no tag editor: tags are written through the API.
+  with it, and a client in another language needs a table for `str.split()`'s whitespace first. The web tags a text word by word
+  (`web/components/dataset/items/TagEditor.tsx`, logic in `tagEditing.ts`: pick a tag from the project's classes, click
+  the words; `splitWords` must stay the same set of whitespace as Python's `str.split()`, because the server counts tags
+  against it; never rendered in a browser, only typechecked and built).
+  **Bring-your-own token classifiers are the kind `hf_token`** (`custom.py`, `hf.py`, `HFTaggerModel`; the same six
+  families as `hf_text`, `AutoModelForTokenClassification`, tested in `tests/test_pytorch_custom_token.py`). It is
+  `hf_text` plus one problem: a tagger's tags belong to words but its output has a row per TOKEN, and the model's own
+  tokenizer cuts a word into pieces. So the tokenizer reads the words joined by **single spaces** (`hf.encode_words`),
+  its character offsets say which token covers which word (`hf.word_positions`: a token belongs to the word its first
+  non-space character is in, so punctuation split off a word, a byte-level token's leading space and a word's later
+  pieces all fall into that word), and **the first token of a word speaks for it**: training puts the word's tag
+  there and `-100` everywhere else (`tagging.token_labels`), prediction reads that row. A word no token covers (the
+  text was cut at `maxTokens`, or BERT's normaliser removed all of its characters) was not read and gets `O` (else the
+  first tag) with probability 0, exactly like a word past a built-in tagger's `maxTokens`; `TaggerModel._run` returns
+  the row of each word (`-1` for those) for both kinds. `maxTokens` counts tokens, special tokens included, and is
+  checked against `custom.text_token_limit`; a rare word can cost many tokens, so give it room. Meta is `inputKind:
+  "words"` plus `hfTokenizer`; the manifest keeps the `hfTokenizer` key (so `BundleContext.place_model` still moves the
+  tokenizer out to `tokenizer.json`) with recipe `hf_word_tokens_v1` and a `fallbackTag`, and `BundleContext.kind` is
+  `hf_tags` (Python devkit only, needs `pip install tokenizers`; the others say so, `HF_TAGS_OTHER_LIMITATION`). The
+  client's `_first_tokens` re-implements `word_positions` and offsets are code points (Python), so a client in another
+  language must count them the same way (UTF-16 in TypeScript, C# and Java would not match for characters beyond the
+  BMP). A bare encoder is suggested as `hf_text` (`suggest_kind`), a checkpoint that already is a
+  `...ForTokenClassification` as `hf_token`.
 - **A torch ONNX export must be a single file: pass `external_data=False`.** `torch.onnx.export(dynamo=True)` writes the
   weights to a `model.onnx.data` sidecar by default, always, even for a tiny model, and a bundle (and the S3 copy in
   `jobs/export.py`) carries only `model.onnx`, so the shipped graph cannot load. Every backend that calls it sets

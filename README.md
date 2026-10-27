@@ -386,11 +386,13 @@ XLM-RoBERTa, ALBERT or ELECTRA encoder, fast tokenizer required), fine-tuned wit
 Python devkit runs that tokenizer (`pip install tokenizers`) and the other five generated clients ship the bare model
 plus `tokenizer.json` and a README that says they do not tokenize. `video` offers `hf_video` the same way.
 
-`token_classification` (one tag per whitespace-separated word, `token_tags` annotations in the API only: there is no web
-tag editor yet) trains on the `pytorch` backend's `tagger_cnn`, from scratch. Its report counts words and, when the tags
+`token_classification` (one tag per whitespace-separated word, `token_tags` annotations, tagged word by word in the item
+drawer with the project's classes as the tag set) trains on the `pytorch` backend's `tagger_cnn`, from scratch. Its report counts words and, when the tags
 are BIO (`B-PER`, `I-PER`, `O`), whole entities: **Entity F1** is then the run's headline score. The Python devkit tags
 text (`predict` returns `[{token, tag, confidence}]`); the other five generated clients ship the bare model and a README
-that says they do not implement it.
+that says they do not implement it. A Hugging Face encoder (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, ALBERT, ELECTRA) can
+be brought as a token classifier (`hf_token`): its own tokenizer reads the words, which it may cut into pieces, and the
+first piece of a word carries that word's tag. The Python devkit runs it (`pip install tokenizers`).
 
 ## Local development
 
