@@ -15,8 +15,7 @@ export const STATUS_COLORS: Record<string, string> = {
 export { SPLIT_CHART_COLORS as SPLIT_COLORS } from '@public/lib/constants'
 
 /**
- * Human-readable labels for Ludwig metric keys, sourced from
- * ludwig/modules/metric_modules.py's registered metric names. Metrics not
+ * Human-readable labels for the metric keys the trainer backends report. Metrics not
  * listed here (e.g. per-output-feature custom names) fall back to a
  * title-cased rendering of the raw key — see `formatMetricLabel`.
  */
@@ -69,7 +68,7 @@ export function formatMetricLabel(metricName: string): string {
   if (metricName === 'loss') return 'Average Loss'
 
   const key = metricName.replace('class.', '')
-  // Ludwig emits metrics beyond the table above (per-output-feature names,
+  // Backends emit metrics beyond the table above (per-output-feature names,
   // `accuracy_macro`, `f1_micro`, `combined`, ...). Without this fallback they
   // rendered as an empty <Select> option and a blank metrics-table cell.
   return (

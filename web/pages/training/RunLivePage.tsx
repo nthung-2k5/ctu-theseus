@@ -20,7 +20,7 @@ const fmt = (v: number | null | undefined, digits = 4) => (v == null ? '—' : v
 // Loss first, then the score that says how good the model is: accuracy for a classifier, mAP for a detector.
 const PRIORITY = ['loss', 'accuracy', 'mAP50', 'mAP50-95']
 
-/** `class.accuracy` -> `accuracy`: Ludwig namespaces per-output-feature metrics as `{feature}.{metric}`. */
+/** `class.accuracy` -> `accuracy`: a backend may namespace per-output-feature metrics as `{feature}.{metric}`. */
 const baseName = (name: string) => name.slice(name.lastIndexOf('.') + 1)
 
 /** The metric named `base` (`loss`, `accuracy`): unprefixed if the backend reports it so, else the first feature's. */

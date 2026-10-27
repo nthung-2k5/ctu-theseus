@@ -3,7 +3,7 @@
  *
  * Almost everything here is a re-export of the Orval-generated models (`lib/api/generated/models`, produced
  * from `schema/openapi.json`) under the names the UI already uses. The exceptions are the evaluation report
- * types: the report is an opaque JSON blob in OpenAPI (it is Ludwig-evaluator output ingested verbatim), so its
+ * types: the report is an opaque JSON blob in OpenAPI (it is the backend's evaluator output ingested verbatim), so its
  * shape is described here.
  */
 
@@ -89,7 +89,7 @@ export type EvaluationReport = {
   outputFeature: string
   outputType: 'category' | 'number' | 'sequence' | 'text' | string
   rowCount: number
-  /** Classification only — Ludwig's own class-index order. Confusion matrix rows/columns and topErrors' actual/predicted values are always label strings, never bare indices — never re-derive axis labels from the label_classes table, see domain/evaluate.py's module docstring. */
+  /** Classification only — the trained model's own class-index order. Confusion matrix rows/columns and topErrors' actual/predicted values are always label strings, never bare indices — never re-derive axis labels from the label_classes table, see domain/evaluate.py's module docstring. */
   idx2str?: string[]
   truncated?: boolean
   confusionMatrix?: number[][]

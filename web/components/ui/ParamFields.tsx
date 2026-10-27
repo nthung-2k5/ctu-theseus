@@ -65,7 +65,7 @@ export function ParamField({
     )
   }
   if (spec.type === 'choice') {
-    // A spec whose own declared default is null/unset (e.g. Ludwig's optional "optimizer" knob)
+    // A spec whose own declared default is null/unset (e.g. an optional "optimizer" knob)
     // means "let the backend decide" is a valid choice, so the field is clearable back to that;
     // one with a concrete default (an augmentation op's params are always initialized to theirs)
     // must always hold some value.
@@ -85,7 +85,7 @@ export function ParamField({
     )
   }
   if (spec.disabledValue != null) {
-    // A number with an "off" state stored as one sentinel (Ludwig's early stopping uses -1): show a switch and
+    // A number with an "off" state stored as one sentinel (an early-stopping patience of -1 means never): show a switch and
     // a number instead of making the user type the sentinel. What is sent is still the sentinel itself.
     const off = spec.disabledValue
     const isOff = value === off

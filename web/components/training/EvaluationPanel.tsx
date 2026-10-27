@@ -5,10 +5,10 @@
  * model is 87% accurate" back to "here are the items it got wrong" — see
  * server/routes/training.ts's GET /runs/:runId/evaluation(/errors).
  *
- * Axis/class labels always come from `report.idx2str` (Ludwig's own
- * class-index order, read off training_set_metadata.json server-side) —
+ * Axis/class labels always come from `report.idx2str` (the trained model's own
+ * class-index order, read off its saved metadata server-side) —
  * never from the project's label_classes list, which has no idea which
- * index Ludwig assigned to which class. See
+ * index the run assigned to which class. See
  * server/omnitrain/domain/evaluate.py's module docstring.
  */
 

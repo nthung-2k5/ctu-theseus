@@ -6,7 +6,7 @@
  * (opened from the "Base model" field), and the model picked decides the backend and so which settings the
  * right-hand column shows. This is what makes it a no-code trainer: the form is
  * generated from what an installed trainer backend plugin actually supports for this task, not a
- * fixed Ludwig-shaped schema baked into the frontend. Adding a backend, or changing what one
+ * fixed schema baked into the frontend. Adding a backend, or changing what one
  * offers, needs no change here.
  *
  * Two columns: on the left what to train (run name, base model, snapshot), on the right how (the

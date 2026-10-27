@@ -57,25 +57,24 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   from `web/lib/task-meta.ts`, which falls back to a generic one for a task it has not heard of.
 - **Trainer backends are plugins.** One Python package per training framework in
   `server/omnitrain/plugins/backends/` (subclass `TrainerBackend`, set `id`/`label`, a `Hyperparameters`
-  pydantic model, and implement `supports`/`models`/`compile`/`train`/`load`/`convert`). Ludwig is
-  the shipped one (`plugins/backends/ludwig/`); it owns every Ludwig-specific concept (encoders, feature
-  types, `ecd`/`llm` model types) so nothing outside that package should reference them. The
+  pydantic model, and implement `supports`/`models`/`compile`/`train`/`load`/`convert`). Each
+  package owns every concept of its framework, so nothing outside it should reference them. The
   Ultralytics YOLO backend (`plugins/backends/yolo/`: `image_classification` and `object_detection`,
-  AGPL-3.0) is the second. A framework that only reads local files, as YOLO does, can't use `run.dataset_uri` /
-  `run.output_uri` the way Ludwig does through s3fs: it reads the parquet, downloads each image into
+  AGPL-3.0) is one. A framework that only reads local files, as YOLO does, can't use `run.dataset_uri` /
+  `run.output_uri` as paths: it reads the parquet, downloads each image into
   `run.workdir`, trains there, and uploads the results with `storage.upload_dir` (`yolo/data.py`,
   `yolo/train.py`). For classification its class folders are named by zero-padded class *index*,
   never by class name, so Ultralytics' `model.names` can be mapped back exactly (detection writes the
   real names into `data.yaml`, which YAML carries safely). A backend whose framework doesn't squash
   images to a square (YOLO resizes the shorter edge, then centre-crops) says so with
   `inputs[].imageResize.mode = "shorter_edge_center_crop"` in its `preprocessing_manifest`; every
-  generated client implements that mode and, without the key, squashes (Ludwig's behaviour). A client
+  generated client implements that mode and, without the key, squashes (what the built-in image models want). A client
   must refuse a mode it doesn't know rather than fall back to squashing.
   `training_runs.backend` / `sweeps.backend` are free text (a plugin id), like `exports.format`,
   never a Postgres enum. A backend module's own top level must not import its heavy ML
-  dependency (torch, ludwig, sklearn, ...) — listing installed backends has to work without a GPU
+  dependency (torch, sklearn, ...) — listing installed backends has to work without a GPU
   runtime importable — so import it lazily inside the classmethod bodies that need it (see
-  `plugins/backends/ludwig/__init__.py` for the pattern). Two contracts every backend must honor:
+  `plugins/backends/pytorch/__init__.py` for the pattern). Two contracts every backend must honor:
   `LoadedModel.output.labels` (classification class names) must come from the trained model
   artifact itself, never from the `label_classes` Postgres table (Postgres has no idea what index
   order a run assigned each class — see the export bullet below); and `train()` should report a
@@ -89,16 +88,16 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   A model is stored with **skops, never pickle**: a remote worker's file is loaded on the API host, and skops refuses any
   type outside `estimators.TRUSTED` (reviewed: tree node tables and `numpy.dtype`; widen it only with a reason). The class
   order is the fitted `classes_`, written to `names.json`. Its ONNX export (`skl2onnx`, `scikit/artifacts.py`) is shaped to
-  what the generated clients already do for a tabular Ludwig model: one float input per column, one output named by the
+  what the generated clients already do for a tabular model: one float input per column, one output named by the
   label column, **logits** for a classifier (`log(max(p, 1e-9))`, so the client's softmax gives back the probabilities).
   Imputation and scaling live in the graph, so its manifest has no `numberNormalization`. A text model takes a raw string
   and only runs in onnxruntime (it uses the `com.microsoft.Tokenizer` operator); a character-n-gram text model cannot be
   exported. skl2onnx needs `onnx.helper.make_attribute` patched for a tree ensemble with missing values (bools in an int
   list); the patch is scoped to one conversion.
   It is the **default backend for the two tabular tasks** (`default_for`, honoured by `registry.preferred_first`: the
-  create-run list's first entry, and what a run uses when no backend is named). Ludwig stays offered for them.
-- **The PyTorch backend (`plugins/backends/pytorch/`, id `pytorch`) is the code-defined alternative to Ludwig.** It trains
-  image classification (torchvision classifiers with a new head; the catalog keeps Ludwig's image encoder ids:
+  create-run list's first entry, and what a run uses when no backend is named). The PyTorch backend stays offered for them.
+- **The PyTorch backend (`plugins/backends/pytorch/`, id `pytorch`) is the code-defined general-purpose backend.** It trains
+  image classification (torchvision classifiers with a new head; model ids:
   `resnet18`, `resnet50`, `efficientnet_b0`, `mobilenet_v3_small`, `convnext_tiny`, `vit_base`) and tabular
   classification and regression (a perceptron, `mlp_small`/`mlp_medium`/`mlp_large`) and audio classification
   (`audio_resnet18`, ImageNet weights on a one-channel spectrogram, or `audio_cnn`, from scratch), with a plain loop (`loop.py`: the
@@ -116,9 +115,8 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `events/writer.py` compares it across epochs. ONNX is exported straight from the `nn.Module` as logits (a number for a
   regressor), traced with two rows (a batch of 1 pins the batch axis for `convnext_tiny` and `vit_base`), and a table
   takes one tensor per column named by the column. It is the **default for image, audio and text classification**
-  (`default_for`; scikit-learn keeps the two tabular tasks, and a tagger has no other backend). Ludwig is still offered
-  after it, and a run that names `ludwig` still trains: what is lost by default is Ludwig's pretrained text encoders, since
-  the built-in text models train from scratch (a pretrained one is brought, as `hf_text`). A new input
+  (`default_for`; scikit-learn keeps the two tabular tasks, and a tagger has no other backend). The built-in text
+  models train from scratch (a pretrained one is brought, as `hf_text`). A new input
   kind needs a new spec beside the four.
   **Bring-your-own image models** are one kind, `hf_image` (`custom.py`, `hf.py`; image classification only): a Hugging
   Face classifier or bare backbone of ViT, DeiT, BEiT, Swin, Swinv2, ConvNeXt, ConvNeXtV2, ResNet or MobileNetV2. The
@@ -165,7 +163,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   the platform to ~5e-5 in probability (Python, TypeScript, C#, Java, the PWA in Chrome, Dart's front end; the Flutter ONNX
   session itself was never run). A client reads WAV only (8/16/24/32-bit PCM, float; the Python one also anything
   `soundfile` opens, the PWA anything the browser decodes), and a verify script skips a bundled sample it cannot read.
-  `ReadmeVars.kind` is `audio` only when the manifest carries `audioSpectrogram`, so a Ludwig audio model still gets the
+  `ReadmeVars.kind` is `audio` only when the manifest carries `audioSpectrogram`, so an audio model without that recipe still gets the
   old "adapt the client" README and `NotImplementedError`. Change the recipe in `audio.py` and you must change all six.
   **Text is one recipe in `text.py`**, and it is deliberately primitive so that a client in any language can repeat it
   with no Unicode tables: only the ASCII letters A-Z are lower-cased (no normalisation, no other case folding), a token is a
@@ -180,7 +178,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   the whole vocabulary. Every generated client re-implements the split and the lookup (`predict` takes the text itself, never
   a path; Java and Dart call it `predictText`), and they match the platform exactly on the token ids (Python, TypeScript,
   C#, Java, Dart) and to ~5e-5 in probability (the PWA in Chrome too; the Flutter ONNX session was never run). It is `kind`
-  `text` in `ReadmeVars` only when the manifest carries `textTokens`, so a scikit-learn or Ludwig text model keeps its
+  `text` in `ReadmeVars` only when the manifest carries `textTokens`, so a scikit-learn text model keeps its
   old README and `NotImplementedError`. Change the recipe in `text.py` and you must change all six clients.
   The shared number report lives in `domain/regression_report.py`, beside the classification one.
   **Token classification is one more input kind, `words` (`tagging.py`, `WordsSpec`, `TaggerModel`)**, and `task: "tag"` in
@@ -259,13 +257,12 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   stored uncompressed, refused above `MAX_EXPORT_BYTES` because a bundle is assembled in memory), and the one export format
   built from it is `hf_model` (`plugins/export/formats/hf_model.py`, Python only: `model/`, `preprocessing.json`,
   `omnitrain_llm.py`, `example.py`, `verify.py`; templates in `export/templates/python_llm/`). **`ARTIFACT_FILENAMES` names
-  every artifact but a backend lists only what it makes** (Ludwig pins `onnx` and `torch_export`, or it would be offered
+  every artifact but a backend lists only what it makes** (the PyTorch backend lists `onnx` only, or it would be offered
   `hf_model`). Its `preprocessing.json` has no graph input to describe; the `generation` block (recipe
   `causal_lm_prompt_v1`, `manifest.py`) is the prompt layout, the cut and the greedy decoding, which `omnitrain_llm.py`
   repeats and refuses if the recipe is not its own; the golden sample's `text` is what `verify.py` compares. Change
-  `prompt.py`/`data.clip_prompt` and the client template must change with it. Ludwig keeps
-  `default_for` on these four tasks, because `llm` sorts before `ludwig` by id and would otherwise take over; moving the
-  default is changing that one line. Verified only with tiny random Llama and GPT-2 models and a tokenizer trained in
+  `prompt.py`/`data.clip_prompt` and the client template must change with it. It is the only
+  backend for these four tasks. Verified only with tiny random Llama and GPT-2 models and a tokenizer trained in
   `tests/test_llm_backend.py` (the 4/8-bit tests need CUDA and bitsandbytes and ran on a GTX 1650; the bundle's
   `verify.py` and `example.py` are run in a subprocess on CPU); never run on a real model, bfloat16, a remote worker or
   through the web.
@@ -327,9 +324,17 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   URIs), the `_theseus_item_id` snapshot column, the `ctu-theseus-*` Docker volumes and Postgres database, the HKDF info
   string in `services/secrets.py`, and the local test-DB credentials. Don't "finish" the rename on them without a data
   migration.
+- **Ludwig is gone.** Its two leftover names were renamed: the manifest key `ludwigPreprocessing` is now `imageSize`
+  (`{height, width}` in `inputs[0]`, written by the image and video backends, read by all six generated clients) and the
+  snapshot column `_ludwig_split_idx` is `_split_idx` (`SPLIT_INDEX_COLUMN_NAME` in `schema/constants.json`). Nothing reads
+  that column back (backends use `split`), so a snapshot stored earlier keeps the old column name harmlessly. Three tasks
+  lost their only backend: `image_captioning`, `audio_captioning` and `automatic_speech_recognition`. They still exist
+  in the registry (data can be collected and labelled) but nothing trains them, like segmentation; `projects.task`
+  does not need a migration for that. Do not re-add a framework just to make a task trainable without deciding its
+  export contract first.
 - **Class list correctness for exports.** Any code touching model export must source the label
-  index order from the trained model itself — for Ludwig, `training_set_metadata.json`'s
-  `idx2str` (written into `theseus-training/{runId}/results/**/model/`), for YOLO the `names.json`
+  index order from the trained model itself — for the PyTorch and scikit-learn backends the `names.json`
+  they write beside the model (`theseus-training/{runId}/results/`), for YOLO the `names.json`
   that `yolo/train.py` writes from the trained `model.names` — never from the
   `label_classes` Postgres table. Postgres doesn't know what index a training run assigned to
   which class; getting this wrong produces a bundle that runs, returns confident predictions, and
@@ -339,7 +344,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   implement `assemble`). `GET /api/export-formats` lists them and the web's single "Export format"
   combobox renders that list, so adding a format is a new class plus a backend restart: no enum,
   migration or frontend edit. `exports.format` is free text (a plugin id), not a Postgres enum. A
-  format's `artifact` names a converted-model kind (`onnx`, `torch_export`, ...); the actual
+  format's `artifact` names a converted-model kind (`onnx`, `hf_model`, ...); the actual
   conversion is `TrainerBackend.convert`, and a format is only offered for a run whose backend
   actually produces that artifact (`backends.registry.trainable_backends` /
   `export.registry.list_export_formats(task, backend)`).
@@ -401,8 +406,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   public Hub model; never a private/gated one, whose owner's token stays on the server) and its backend sets
   `remote_custom_models = True` (queue `_worker_can_take_model`). Set that flag only for a backend whose TRAINED model
   loads, serves and exports from the run's results alone, because on a worker the base model's files are at a
-  different path; Ludwig's are not (its checkpoint re-reads the model from the config's path), so it keeps its
-  custom-model runs. Bump `PROTOCOL_VERSION`
+  different path. Bump `PROTOCOL_VERSION`
   (`schemas/worker.py`) when the worker API's shape, a run's S3 layout or what `run_core` asks of a backend
   changes.
 - **Job handlers must stay fast and idempotent.** `omnitrain/jobs/dispatcher.py` claims work off the

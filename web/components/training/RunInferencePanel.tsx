@@ -90,7 +90,7 @@ export function RunInferencePanel({ projectId, run }: { projectId: string; run: 
   // File input (vision/audio tasks)
   const [inputFile, setInputFile] = useState<File | null>(null)
   const [inputFileUrl, setInputFileUrl] = useState<string | null>(null)
-  // Text input (text tasks) — one value per Ludwig input field, e.g.
+  // Text input (text tasks) — one value per input field, e.g.
   // question_answering needs both `context` and `question`.
   const [textFields, setTextFields] = useState<Record<string, string>>({})
   // Record input (tabular tasks) — JSON-encoded, one value per feature column

@@ -2,8 +2,8 @@ import { useMemo } from 'react'
 import { useListProjectTrainingBackends } from './api/generated/training/training'
 import { hyperparamLabel } from './format'
 
-/** Until the backends load, assume the two names in use (Ludwig's, and the generic default). */
-const FALLBACK_PARAM_NAMES = ['encoderId', 'modelId']
+/** Until the backends load, assume the one name in use. */
+const FALLBACK_PARAM_NAMES = ['modelId']
 
 /**
  * Turns a hyperparameter key into its display name wherever a run's configuration is listed (the Config tab, a
@@ -24,7 +24,7 @@ export function useHyperparamLabel(projectId: string): (key: string) => string {
 
 /**
  * The hyperparameter keys that carry a run's MODEL choice, as each trainer backend names it
- * (`modelParamName`: Ludwig keeps "encoderId", others use "modelId"). Everything else in a run's
+ * (`modelParamName`: "modelId" unless a backend names it otherwise). Everything else in a run's
  * hyperparameters is a tunable knob, so views that list the knobs leave these keys out and show the
  * model by name instead.
  */
