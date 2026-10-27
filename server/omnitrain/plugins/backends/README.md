@@ -1,8 +1,9 @@
 # Trainer backends
 
 One package per training framework. Ludwig (`ludwig/`), Ultralytics YOLO (`yolo/`), scikit-learn (`scikit/`),
-torchvision video (`video/`) and a code-defined PyTorch backend (`pytorch/`: image, audio and text
-classification, tabular classification and regression, token classification) ship today. A backend decides *how* a task is trained; *what* a task is lives in
+torchvision video (`video/`), a code-defined PyTorch backend (`pytorch/`: image, audio and text
+classification, tabular classification and regression, token classification) and a language-model backend (`llm/`: LoRA
+fine-tuning of a bring-your-own causal LM for the four generative text tasks) ship today. A backend decides *how* a task is trained; *what* a task is lives in
 [`omnitrain/tasks/`](../../tasks/README.md).
 
 Nothing else needs an edit to add one: no enum, no migration, no frontend change. `training_runs.backend` and

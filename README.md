@@ -81,8 +81,8 @@ once). Nobody chooses where a run trains. A new run is held back for up to
 that time, the server trains it itself. A worker holds one run at a time.
 
 A run on a bring-your-own model goes to a worker only when the worker can get the model **by itself, with no
-secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, today `video` and `pytorch`: a fine-tuned
-Hugging Face video or image model is saved as a self-contained folder, so it never needs the base model's files again).
+secret**, and the backend has opted in (`TrainerBackend.remote_custom_models`, today `video`, `pytorch` and `llm`: a fine-tuned
+Hugging Face video, image or language model is saved as a self-contained folder, so it never needs the base model's files again).
 The run spec then carries a `customModel` description; the worker fetches the files with the server's own code
 (`custom_models.ensure_local`: an uploaded bundle from S3 with its checksum re-checked, or a public Hub model at
 its pinned revision, fetched anonymously whatever token the machine has; each `ModelSource` in `omnitrain/plugins/model_sources/` declares which
@@ -249,6 +249,7 @@ format**: one Python class in `server/omnitrain/plugins/export/formats/`. The we
 | Group | Formats (ids) | Contents |
 |---|---|---|
 | Model | `onnx`, `torch_export` | artifact + `preprocessing.json` + `labels.txt` + README (a format is offered only if the run's backend produces its artifact: YOLO produces `onnx`) |
+| Model | `hf_model` | a language model's Hugging Face folder (`model/`) + `preprocessing.json` + a Python client, example and verify script; only for a run trained by the `llm` backend |
 | Devkit | `python_devkit`, `typescript_devkit`, `csharp_devkit`, `java_devkit` | ONNX model + a generated inference client (source only) + example + a `verify` script where supported |
 | App | `pwa_app`, `flutter_app` | a runnable client app (Progressive Web App or Flutter) doing inference on-device/in-browser |
 
@@ -389,10 +390,23 @@ plus `tokenizer.json` and a README that says they do not tokenize. `video` offer
 `token_classification` (one tag per whitespace-separated word, `token_tags` annotations, tagged word by word in the item
 drawer with the project's classes as the tag set) trains on the `pytorch` backend's `tagger_cnn`, from scratch. Its report counts words and, when the tags
 are BIO (`B-PER`, `I-PER`, `O`), whole entities: **Entity F1** is then the run's headline score. The Python devkit tags
-text (`predict` returns `[{token, tag, confidence}]`); the other five generated clients ship the bare model and a README
-that says they do not implement it. A Hugging Face encoder (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, ALBERT, ELECTRA) can
+text (`predict` returns `[{token, tag, confidence}]`), and so do the TypeScript, C#, Java, PWA and Flutter clients (a
+word list the model cannot read past its length gets the `O` tag with no confidence). A Hugging Face encoder (BERT, DistilBERT, RoBERTa, XLM-RoBERTa, ALBERT, ELECTRA) can
 be brought as a token classifier (`hf_token`): its own tokenizer reads the words, which it may cut into pieces, and the
-first piece of a word carries that word's tag. The Python devkit runs it (`pip install tokenizers`).
+first piece of a word carries that word's tag. Only the Python devkit runs it (`pip install tokenizers`); the other five clients
+ship the bare model and a README that says they do not implement it.
+
+The four generative text tasks (`text_generation`, `summarization`, `sequence_to_sequence`, `question_answering`) can also
+train on the `llm` backend: LoRA adapters (`peft`) on a Hugging Face causal language model that you bring (`hf_causal_lm`;
+there are no built-in models). The prompt is the task's input fields under `### name:` headings and the model writes what
+follows, graded on the answer's tokens only; when training ends the adapters are merged into the weights and the whole
+model is saved as a Hugging Face folder, so a trained run serves from its results alone and can train on a remote worker.
+Its report scores generated answers against the written ones (exact match, token F1, ROUGE-1/2/L, loss and perplexity; the
+first 200 rows of the evaluated split) and **ROUGE-L** is the run's headline score. A model that does not fit in memory can be
+trained on a 4-bit or 8-bit base (QLoRA; needs a CUDA GPU and bitsandbytes), with gradient accumulation and gradient
+checkpointing. Its one export is the **Hugging Face model** format: the merged folder with a Python client, example and verify
+script (`pip install torch transformers`); a generative model has no fixed-shape ONNX graph, so the generated devkits and apps
+do not apply. Ludwig stays the default backend for these tasks (`default_for`).
 
 ## Local development
 

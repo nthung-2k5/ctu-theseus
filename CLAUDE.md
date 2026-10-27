@@ -199,10 +199,13 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   `entityPrecision/Recall/F1` (exact span and type, `conlleval`) under `overall`; `EntityF1` (`scoring/metrics.py`, order 5)
   is then the headline, ahead of accuracy, which `O` inflates. ONNX is `tokens` int64 `[batch, maxTokens]` to `logits`
   `[batch, maxTokens, tags]`; the manifest's output is type `tags` and its input carries `tagWords` (recipe
-  `tag_word_ids_v1`, which a client refuses if it does not know). Only the Python devkit implements it (`predict` returns
-  `[{token, tag, confidence}]`, verified against `expected.json`'s `tags`); the other five clients ship the bare model and
-  a README that says so (`TAGS_OTHER_LIMITATION`). Change `tagging.py` and its recipe and the Python client must change
-  with it, and a client in another language needs a table for `str.split()`'s whitespace first. The web tags a text word by word
+  `tag_word_ids_v1`, which a client refuses if it does not know). **All six clients implement it** (Python and TypeScript
+  `predict` return `[{token, tag, confidence}]`; C# `Tag`, Java `tag`, Dart `tag`, the PWA's `predict`; each verify script
+  compares `expected.json`'s `tags` word by word). A language with no `str.split()` reads the recipe's
+  `whitespaceRanges` (`token_tags.WHITESPACE_RANGES`, held to `str.isspace()` by a test; all in the BMP, so UTF-16 code
+  units split a text the same way as code points). Change `tagging.py` or its recipe and all six clients must change
+  with it. Verified: Python in `tests/test_export_tag_clients.py`; TypeScript (bun), C# (dotnet) and Java run against the
+  same ten cases, the PWA in Chrome, Flutter's front end in a Dart test (its ONNX session was never run). The web tags a text word by word
   (`web/components/dataset/items/TagEditor.tsx`, logic in `tagEditing.ts`: pick a tag from the project's classes, click
   the words; `splitWords` must stay the same set of whitespace as Python's `str.split()`, because the server counts tags
   against it; never rendered in a browser, only typechecked and built).
@@ -225,6 +228,46 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   language must count them the same way (UTF-16 in TypeScript, C# and Java would not match for characters beyond the
   BMP). A bare encoder is suggested as `hf_text` (`suggest_kind`), a checkpoint that already is a
   `...ForTokenClassification` as `hf_token`.
+- **The language-model backend (`plugins/backends/llm/`, id `llm`) fine-tunes a brought causal LM with LoRA.** It takes the four
+  generative text tasks (`LlmTextTask`) and has no built-in models (`models()` is empty): a run needs a `hf_causal_lm`
+  custom model (architectures ending in `ForCausalLM`/`LMHeadModel`, safetensors, a tokenizer with an end-of-text token;
+  `custom.validate_custom_model` builds the network on the `meta` device and reads the tokenizer, without reading
+  weights, which `network.load_base` then checks strictly at train time). The prompt is one fixed layout (`prompt.py`: each
+  input field under `### name:`, then the answer's heading), built from the snapshot's column names and stored in
+  `names.json`. A training example is prompt + answer + end-of-text with the loss on the answer only; **training and serving cut
+  a prompt to the same room, `max_length - max_new_tokens` (`data.prompt_room`)**, because serving cannot know the
+  answer's length (an earlier version cut to what the example's own answer left, and a prompt in between was seen whole
+  in training and clipped when served). `network.CausalNet` packs ids and the attention mask as `[batch, 2, length]` and
+  returns the next-token logits, so the generic `pytorch/loop.fit` and `loop.Tagging` (cross entropy ignoring `-100`)
+  drive it unchanged; `fit(keep=...)` copies and restores only the LoRA weights for the best epoch instead of the whole
+  model. When training ends the adapters are merged (`peft` `merge_and_unload`) and the whole model is saved as a Hugging Face
+  folder beside `names.json`, so a trained run loads and serves with no `peft` and no base files and
+  `remote_custom_models = True`; the cost is a full-size upload (adapter-only saving is not built). **Memory knobs**:
+  `gradAccumulation` (`loop.Stepper` adds that many batches' gradients before one step and counts the learning-rate curve in
+  optimiser steps; `flush` takes the step for the batches left at the end of an epoch), `gradientCheckpointing`
+  (`use_reentrant=False` plus `enable_input_require_grads`, since the embeddings are frozen) and `quantization` `4bit`/`8bit`
+  (QLoRA: bitsandbytes NF4 with double quantisation; CUDA only, `network.quantization_unavailable` says why not). A weight
+  held in 4 or 8 bits cannot absorb the adapters, so such a run writes the adapters down and merges them into a
+  full-precision reload of the base (`network.merge_saved`): the saved folder never holds a quantised tensor and loads
+  with no bitsandbytes. bfloat16 is used only where `is_bf16_supported(including_emulation=False)`, because the default
+  counts a Turing card that merely emulates it. Generation is greedy (`do_sample=False`), prompts left-padded; the weights load as bfloat16 on a GPU that
+  has it, else float32. The report has only an `overall` block (`domain`'s confusion matrix does not apply): exact match, token
+  F1, ROUGE-1/2/L (`metrics.py`, whitespace words with punctuation dropped, so not comparable with published ROUGE), loss and
+  perplexity, over the first `EVAL_MAX_ROWS` (200) rows of the evaluated split, with `rowCount`/`totalRows` saying how many;
+  `ROUGE-L` is the headline (`scoring/metrics.py`). Its one artifact is `hf_model` (`artifacts.py`: the folder zipped,
+  stored uncompressed, refused above `MAX_EXPORT_BYTES` because a bundle is assembled in memory), and the one export format
+  built from it is `hf_model` (`plugins/export/formats/hf_model.py`, Python only: `model/`, `preprocessing.json`,
+  `omnitrain_llm.py`, `example.py`, `verify.py`; templates in `export/templates/python_llm/`). **`ARTIFACT_FILENAMES` names
+  every artifact but a backend lists only what it makes** (Ludwig pins `onnx` and `torch_export`, or it would be offered
+  `hf_model`). Its `preprocessing.json` has no graph input to describe; the `generation` block (recipe
+  `causal_lm_prompt_v1`, `manifest.py`) is the prompt layout, the cut and the greedy decoding, which `omnitrain_llm.py`
+  repeats and refuses if the recipe is not its own; the golden sample's `text` is what `verify.py` compares. Change
+  `prompt.py`/`data.clip_prompt` and the client template must change with it. Ludwig keeps
+  `default_for` on these four tasks, because `llm` sorts before `ludwig` by id and would otherwise take over; moving the
+  default is changing that one line. Verified only with tiny random Llama and GPT-2 models and a tokenizer trained in
+  `tests/test_llm_backend.py` (the 4/8-bit tests need CUDA and bitsandbytes and ran on a GTX 1650; the bundle's
+  `verify.py` and `example.py` are run in a subprocess on CPU); never run on a real model, bfloat16, a remote worker or
+  through the web.
 - **A torch ONNX export must be a single file: pass `external_data=False`.** `torch.onnx.export(dynamo=True)` writes the
   weights to a `model.onnx.data` sidecar by default, always, even for a tiny model, and a bundle (and the S3 copy in
   `jobs/export.py`) carries only `model.onnx`, so the shipped graph cannot load. Every backend that calls it sets

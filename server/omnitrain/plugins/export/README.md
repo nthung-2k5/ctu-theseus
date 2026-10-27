@@ -23,7 +23,8 @@ module from being scanned as a plugin.
    - `group`, the combobox section: `"Model"`, `"Devkit"` or `"App"` come first in that order; any other string
      sorts alphabetically after them.
    - `order`, the sort key inside a group.
-   - `artifact`, the converted-model kind the bundle is built from (`"onnx"`, `"torch_export"`; see
+   - `artifact`, the converted-model kind the bundle is built from (`"onnx"`, `"torch_export"`, `"hf_model"`, a
+     zipped Hugging Face folder that `assemble` unpacks; see
      `ARTIFACT_FILENAMES` in `plugins/backends/base.py`). A run is only offered formats whose artifact its trainer
      backend actually produces (`Backend.artifacts`).
    - `needs_golden = True` if the bundle embeds a real sample and its expected prediction for verification.
