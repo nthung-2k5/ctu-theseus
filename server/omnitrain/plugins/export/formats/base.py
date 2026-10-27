@@ -35,7 +35,7 @@ class BundleContext:
 
     @property
     def labels(self) -> list[str] | None:
-        # Class order comes from Ludwig's idx2str, carried in preprocessing.json, never from Postgres.
+        # Class order comes from the trained model itself, carried in preprocessing.json, never from Postgres.
         return next((o["classes"] for o in self.preprocessing["outputs"] if o.get("classes")), None)
 
     @property

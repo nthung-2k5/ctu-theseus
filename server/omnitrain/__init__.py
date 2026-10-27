@@ -1,4 +1,4 @@
-"""CTU OmniTrain backend: FastAPI API plus Ludwig job runner in one process."""
+"""CTU OmniTrain backend: FastAPI API plus the training job runner in one process."""
 
 import tomllib
 from importlib.metadata import PackageNotFoundError, version

@@ -205,7 +205,7 @@ def nudge(lane_name: str) -> None:
 
 
 def build_default_lanes() -> list[Lane]:
-    """The real lanes. Imported lazily because train/export pull in torch and Ludwig."""
+    """The real lanes. Imported lazily because train/export pull in torch."""
     from omnitrain.jobs import export, train, validate_model
 
     return [

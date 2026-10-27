@@ -2,13 +2,13 @@
  * OmniTrain-generated inference client.
  *
  * Wraps the exported ONNX model with the preprocessing/postprocessing
- * Ludwig applied at training time, read from preprocessing.json — Ludwig's
+ * the platform applied at training time, read from preprocessing.json. The
  * exported ONNX graph is the bare model only (no resize/normalize, no
  * tokenization, no class-index decoding), so this client reconstructs that
  * step from the manifest rather than assuming a fixed tensor layout:
  * input/output tensor names are matched against the graph's actual names
  * at runtime, not hardcoded, since ONNX export doesn't guarantee a stable
- * naming convention across Ludwig versions.
+ * naming convention across exporter versions.
  *
  * Implements preprocessing for:
  *   - a single `image` input with a `category`/`number` output (image
@@ -35,10 +35,10 @@
  *     the text itself; `predict()` returns `[{token, tag, confidence}]`, one per word, the
  *     words being what the whitespace ranges in preprocessing.json cut the text into.
  *
- * Every other input type (video, Ludwig's text and audio, a scikit-learn text model) throws
+ * Every other input type (video, a scikit-learn text model) throws
  * with a pointer to preprocessing.json so you can adapt preprocessing yourself — text
  * tokenization in particular depends on the chosen encoder's own
- * vocabulary (Ludwig's built-in tokenizer, or a HuggingFace subword
+ * vocabulary (a scikit-learn TF-IDF vocabulary, or a HuggingFace subword
  * tokenizer for bert/distilbert/roberta), which can't be generically
  * reconstructed from preprocessing.json alone. See README.md.
  */
@@ -100,7 +100,7 @@ interface PreprocessingInput {
   audioSpectrogram?: AudioRecipe
   textTokens?: TextRecipe
   tagWords?: TagRecipe
-  ludwigPreprocessing?: Record<string, unknown>
+  imageSize?: Record<string, unknown>
   /** Absent: squash the whole image to height x width. */
   imageResize?: { mode?: string; size?: [number, number]; padValue?: number }
   imageNormalization?: { mean: [number, number, number]; std: [number, number, number] }
@@ -407,10 +407,8 @@ function softmax(x: Float32Array): Float32Array {
 }
 
 /**
- * Replicates the exact normalization Ludwig fit at train time
- * (ludwig.features.number_feature.numeric_transformation_registry) — the
- * ONNX graph itself has none: NumberInputFeature.forward() goes straight
- * from the raw tensor to its encoder.
+ * Replicates the exact normalization fitted at train time, which the
+ * manifest's `numberNormalization` describes: the ONNX graph itself has none.
  */
 function preprocessNumber(value: number, spec: PreprocessingInput): Float32Array {
   let x = value
@@ -430,8 +428,7 @@ function preprocessNumber(value: number, spec: PreprocessingInput): Float32Array
     // Unrecognized normalization type: passed through unchanged — check
     // preprocessing.json's `numberNormalization` if predictions look off.
   }
-  // 1-D, length 1 — matches Ludwig's own create_sample_input() for a
-  // single-example number feature.
+  // 1-D, length 1: one number per example.
   return new Float32Array([x])
 }
 
@@ -562,7 +559,7 @@ export class OmniTrainClient {
   }
 
   private async preprocessImage(path: string): Promise<Float32Array> {
-    const pp = (this.inputSpec.ludwigPreprocessing ?? {}) as { height?: number; width?: number }
+    const pp = (this.inputSpec.imageSize ?? {}) as { height?: number; width?: number }
     const height = pp.height ?? 224
     const width = pp.width ?? 224
 
@@ -855,7 +852,7 @@ export class OmniTrainClient {
       if (typeof input !== 'string') {
         throw new Error('This model takes an image input — pass a file path.')
       }
-      const pp = (this.inputSpec.ludwigPreprocessing ?? {}) as { height?: number; width?: number }
+      const pp = (this.inputSpec.imageSize ?? {}) as { height?: number; width?: number }
       const height = pp.height ?? 224
       const width = pp.width ?? 224
       const pixels = await this.preprocessImage(input)
@@ -863,7 +860,7 @@ export class OmniTrainClient {
     } else {
       throw new Error(
         `No preprocessing implemented for input type '${this.inputSpec.type}'. ` +
-          "See preprocessing.json's inputs[0].ludwigPreprocessing and adapt this method.",
+          "See preprocessing.json's inputs[0].imageSize and adapt this method.",
       )
     }
 

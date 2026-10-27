@@ -1,9 +1,8 @@
 """What a trained PyTorch model expects as input, written down once.
 
 An `ImageSpec`, `TabularSpec` or `AudioSpec` is the single definition that training, evaluation, serving and the
-export manifest all read, so the four cannot drift apart (the way a Ludwig model's resize and normalisation, which
-Ludwig keeps to itself, can). It is stored in `names.json` beside the class order, and a loaded model rebuilds it from
-there: it never consults the compiled config. Pure data (no torch, no PIL).
+export manifest all read, so the four cannot drift apart. It is stored in `names.json` beside the class order, and a
+loaded model rebuilds it from there: it never consults the compiled config. Pure data (no torch, no PIL).
 """
 
 import math

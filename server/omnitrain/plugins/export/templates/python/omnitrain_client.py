@@ -1,13 +1,13 @@
 """OmniTrain-generated inference client.
 
-Wraps the exported ONNX model with the preprocessing/postprocessing Ludwig
-applied at training time, read from preprocessing.json — Ludwig's exported
+Wraps the exported ONNX model with the preprocessing/postprocessing the platform
+applied at training time, read from preprocessing.json — the platform's exported
 ONNX graph is the bare model only (no resize/normalize, no tokenization, no
 class-index decoding), so this client reconstructs that step from the
 manifest rather than assuming a fixed tensor layout: input/output tensor
 names are matched against the graph's actual names at runtime, not
 hardcoded, since ONNX export doesn't guarantee a stable naming convention
-across Ludwig versions.
+across exporter versions.
 
 Implements preprocessing for:
   - a single `image` input with a `category`/`number` output (image
@@ -38,11 +38,11 @@ Implements preprocessing for:
     Hugging Face token classifier) — the same call and result; the model's own tokenizer reads the
     words, and a word is tagged by the first token that covers it.
 
-Every other input type (Ludwig's text and audio, a scikit-learn text model) raises
+Every other input type (a scikit-learn text model) raises
 NotImplementedError with a pointer to preprocessing.json so you can adapt preprocessing yourself —
-text tokenization in particular depends on the chosen encoder's own vocabulary (Ludwig's built-in
-tokenizer, or a HuggingFace subword tokenizer for bert/distilbert/roberta), which can't be
-generically reconstructed from preprocessing.json alone. See README.md.
+text tokenization in particular depends on the chosen encoder's own vocabulary (a scikit-learn TF-IDF
+vocabulary, or a HuggingFace subword tokenizer for bert/distilbert/roberta), which can't be generically
+reconstructed from preprocessing.json alone. See README.md.
 """
 
 from __future__ import annotations
@@ -340,7 +340,7 @@ class OmniTrainClient:
     def _preprocess_image(self, path: str | Path) -> np.ndarray:
         from PIL import Image
 
-        pp = self.input_spec.get("ludwigPreprocessing") or {}
+        pp = self.input_spec.get("imageSize") or {}
         height = pp.get("height", 224)
         width = pp.get("width", 224)
 
@@ -366,7 +366,7 @@ class OmniTrainClient:
             std = np.array(norm["std"], dtype=np.float32)
             arr = (arr - mean) / std
         # else: no known normalization preset — raw [0,1] pixels are passed
-        # through. Check preprocessing.json's `ludwigPreprocessing` block if
+        # through. Check preprocessing.json's `imageSize` block if
         # predictions look off.
 
         arr = arr.transpose(2, 0, 1)  # HWC -> CHW
@@ -374,10 +374,8 @@ class OmniTrainClient:
 
     @staticmethod
     def _preprocess_number(value: float, spec: dict) -> np.ndarray:
-        """Replicates the exact normalization Ludwig fit at train time
-        (ludwig.features.number_feature.numeric_transformation_registry) —
-        the ONNX graph itself has none: NumberInputFeature.forward() goes
-        straight from the raw tensor to its encoder.
+        """Replicates the exact normalization fitted at train time, which the
+        manifest's `numberNormalization` describes: the ONNX graph itself has none.
         """
         x = float(value)
         norm = spec.get("numberNormalization")
@@ -395,8 +393,7 @@ class OmniTrainClient:
                 x = (x - norm["q2"]) / span if span else x - norm["q2"]
             # Unrecognized normalization type: passed through unchanged —
             # check preprocessing.json's `numberNormalization` if predictions look off.
-        # 1-D, shape [1] — matches Ludwig's own create_sample_input() for a
-        # single-example number feature (torch.rand([batch_size])).
+        # 1-D, shape [1]: one number per example.
         return np.array([x], dtype=np.float32)
 
     def _preprocess_record(self, record: dict[str, float]) -> dict[str, np.ndarray]:
@@ -441,8 +438,8 @@ class OmniTrainClient:
         else:
             raise NotImplementedError(
                 f"No preprocessing implemented for input type '{self.input_spec['type']}'. "
-                "See preprocessing.json's `inputs[0].ludwigPreprocessing` for the "
-                "raw parameters Ludwig used and adapt this method."
+                "See preprocessing.json's `inputs[0].imageSize` for the "
+                "raw parameters the platform used and adapt this method."
             )
 
         raw = self.session.run([self._onnx_output_name], feed)[0]
@@ -554,7 +551,7 @@ class OmniTrainClient:
 
         sampling = self.input_spec["videoSampling"]
         num_frames, stride, clips = sampling["numFrames"], sampling["frameStride"], sampling["clipsPerVideo"]
-        size = self.input_spec["ludwigPreprocessing"]["height"]
+        size = self.input_spec["imageSize"]["height"]
         span = (num_frames - 1) * stride + 1
 
         capture = cv2.VideoCapture(str(path))

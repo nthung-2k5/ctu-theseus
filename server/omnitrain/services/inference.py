@@ -62,7 +62,7 @@ class BatchResult:
 
 
 def _model_cache():
-    """Imported lazily: the model cache pulls in torch and Ludwig, and the API must import without them."""
+    """Imported lazily: the model cache pulls in torch, and the API must import without them."""
     from omnitrain.services.model_cache import get_model_cache
 
     return get_model_cache()

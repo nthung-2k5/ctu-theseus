@@ -64,8 +64,8 @@ class TestRegistration:
         for task in (TABULAR, REGRESSION):
             assert trainable_backends(task)[0] is SklearnBackend
             assert default_backend(task.id) is SklearnBackend
-            # Ludwig is still offered, right after it.
-            assert "ludwig" in [b.id for b in trainable_backends(task)]
+            # The PyTorch backend is still offered, right after it.
+            assert "pytorch" in [b.id for b in trainable_backends(task)]
         # Text belongs to the PyTorch backend; scikit-learn is offered, but not first.
         assert trainable_backends(TEXT)[0].id == "pytorch"
         assert default_backend(TEXT.id).id == "pytorch"

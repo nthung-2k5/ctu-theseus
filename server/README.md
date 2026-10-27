@@ -1,8 +1,8 @@
 # server
 
 The CTU OmniTrain backend: a single FastAPI service that serves the REST API, owns the Postgres
-database, runs the durable job queue, and runs [Ludwig](https://ludwig.ai) for AutoML
-training / export / inference. (It used to be only the Ludwig worker behind a separate Bun
+database, runs the durable job queue, and trains, exports and serves the models (PyTorch,
+scikit-learn, Ultralytics YOLO, LoRA language models). (It used to be a Python worker behind a separate Bun
 gateway, joined by NATS. That gateway and NATS are gone.)
 
 See the repo root `README.md` for the architecture picture (job queue, restart recovery, run
@@ -54,7 +54,7 @@ omnitrain/
     routers/              one module per area (datasets/ is a package, one module per concern); /api/v1
                           is the public API-key surface
   plugins/              drop a class in, restart, it shows up
-    backends/             trainer backend plugins (base.py + registry.py, ludwig/, yolo/, video/); see
+    backends/             trainer backend plugins (base.py + registry.py, pytorch/, sklearn, yolo/, video/, llm/); see
                           "Writing a backend" below
       preprocessing/, augmentation/   snapshot-time ops
     model_sources/        where a bring-your-own model's files come from (hub, upload)
@@ -84,9 +84,9 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
   wrote something).
 - **A trained model's own metadata is the source of truth for label indices**, never the
   `label_classes` Postgres table (it has no idea what index order a run assigned each class). For
-  Ludwig this is `training_set_metadata.json`'s `idx2str` array, written under
-  `theseus-training/{runId}/results/**/model/` and read by `LudwigLoadedModel` (live inference)
-  and `backends/ludwig/manifest.py` (export bundle assembly, via `omnitrain/plugins/export/metadata.py`).
+  the PyTorch backend this is the class order in `names.json`, written under
+  `theseus-training/{runId}/results/` and read by `PytorchLoadedModel` (live inference)
+  and `backends/pytorch/manifest.py` (export bundle assembly, via `omnitrain/plugins/export/metadata.py`).
   Every `TrainerBackend.load()` must honor this the same way.
 - **Only one thing inserts into `run_events`.** `events/writer.py` is the single writer, because a
   `BIGSERIAL` is not commit-ordered. Emitters (the training thread, request handlers, reapers)
@@ -118,7 +118,7 @@ tests/                  pytest; DB tests need Postgres 18 and skip when it is un
 ## Writing a trainer backend
 
 A trainer backend is a package under `omnitrain/plugins/backends/` with one `TrainerBackend` subclass
-(`omnitrain/plugins/backends/base.py`); `backends/ludwig/` is the reference implementation. Restart the
+(`omnitrain/plugins/backends/base.py`); `backends/pytorch/` is the reference implementation. Restart the
 process and it shows up everywhere: `omnitrain.plugins.backends.registry.trainable_backends(task)` (which
 tasks it can train), `GET /api/projects/{id}/training-backends` (its models and hyperparameters,
 for the create-run/sweep UI), and every run trained with it (`training_runs.backend`) flows
@@ -141,7 +141,7 @@ What to implement, roughly in the order a run touches them:
    `best_epoch`. Return the trained model already loaded (see `load` below).
 
    A framework that only reads **local files** (Ultralytics YOLO, `backends/yolo/`) cannot use those
-   s3fs paths the way Ludwig does. It reads the parquet, downloads each image into `run.workdir`
+   s3fs paths directly. It reads the parquet, downloads each image into `run.workdir`
    (`yolo/data.py`), trains there, and uploads the results with `storage.upload_dir` under
    `storage.training_results_prefix(run.run_id)`. Give it its own settings directory and switch off
    anything that phones home or installs packages (`yolo/runtime.py`), and remove the workdir in a
@@ -161,10 +161,10 @@ installed backends (`trainable_backends`, the `training-backends` endpoint, even
 via `scripts/export_schema.py`) must not require your ML framework to be importable — the process
 that only serves the API and the one that trains on a GPU are the same process. Your package's own
 `__init__.py` and any module it imports at top level must therefore be free of `import torch` /
-`import ludwig` / etc.; do those imports inside the classmethod bodies that need them (`train`,
-`load`, `evaluate`, `convert`), the way `backends/ludwig/__init__.py` does. `available()` should
-report a user-facing reason when the framework is missing: Ludwig tries the import, while the YOLO
-backend uses `importlib.util.find_spec`, because importing Ultralytics writes a settings file as a side
+`import transformers` / etc.; do those imports inside the classmethod bodies that need them (`train`,
+`load`, `evaluate`, `convert`), the way `backends/pytorch/__init__.py` does. `available()` should
+report a user-facing reason when the framework is missing; use `importlib.util.find_spec` rather than an import,
+because importing Ultralytics, for one, writes a settings file as a side
 effect (`tests/test_yolo_compile.py` checks that listing the backend imports nothing).
 
 ## Testing
@@ -177,6 +177,6 @@ uv run python scripts/export_schema.py --check     # committed OpenAPI/task-regi
 
 The suite runs against a real Postgres 18 (`TEST_DATABASE_URI`, default
 `postgres://theseus:theseus@127.0.0.1:55432/theseus_test`; the test database is dropped and
-recreated). Use `127.0.0.1`, not `localhost`, on Windows (IPv6 makes asyncpg hang). S3, Ludwig and
+recreated). Use `127.0.0.1`, not `localhost`, on Windows (IPv6 makes asyncpg hang). S3 and
 the GPU are faked, so a real training run, real S3 and CUDA paths remain a manual smoke test via
 `aspire run`.

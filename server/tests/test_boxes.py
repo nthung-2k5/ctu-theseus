@@ -126,7 +126,7 @@ class TestSnapshotColumn:
     def test_the_detection_task_builds_rows_and_a_string_parquet_column(self):
         task = get_task_descriptor("object_detection")
         columns = snap.derive_columns(task, [])
-        assert [c.name for c in columns] == ["image_path", "boxes", "split", "_ludwig_split_idx", "_theseus_item_id"]
+        assert [c.name for c in columns] == ["image_path", "boxes", "split", "_split_idx", "_theseus_item_id"]
 
         rows = snap.build_rows(columns, [self.member(snap.AnnotationView(CAT, "bounding_box", BOX))], NAMES)
         assert rows[0]["image_path"] == "s3://theseus-datasets/pool/a.png"

@@ -33,11 +33,12 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
                 # resize the SHORTER edge to `size` (bilinear, keeping the aspect ratio), then centre-crop a
                 # size x size square. Colour is RGB, scaled to 0..1, and its mean/std are 0/1: no further
                 # normalisation. Every generated client implements this mode; without an `imageResize` they squash
-                # the whole image to height x width, which is what Ludwig does and would distort a non-square image.
+                # the whole image to height x width, which was the original behaviour and would distort a
+                # non-square image.
                 "imageResize": {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"},
                 "imageNormalization": {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]},
                 # The key the generated clients read the target size from (they fall back to 224 without it).
-                "ludwigPreprocessing": {"height": size, "width": size},
+                "imageSize": {"height": size, "width": size},
             }
         ],
         "outputs": [
@@ -75,7 +76,7 @@ def _detection_manifest(run_id: str, meta: dict[str, Any], size: int) -> dict[st
                     "padPosition": "center",
                 },
                 "imageNormalization": {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]},
-                "ludwigPreprocessing": {"height": size, "width": size},
+                "imageSize": {"height": size, "width": size},
             }
         ],
         "outputs": [

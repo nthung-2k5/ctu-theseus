@@ -237,7 +237,7 @@ class EventWriter:
                         set_={"metric_value": value},
                     )
                 )
-            # Ludwig always minimizes loss whatever the task, so lowest validation loss so far is a
+            # Every backend minimizes loss whatever the task, so lowest validation loss so far is a
             # task-agnostic definition of the best epoch.
             if split == "validation" and "loss" in metrics:
                 is_best = True

@@ -60,9 +60,8 @@ class BackendInfo:
     supported_tasks: list[str] = field(default_factory=list)
     models: list[ModelChoice] = field(default_factory=list)
     # The hyperparameters key `models` selects (camelCase on the wire): HyperparamsBase.model_id's
-    # own alias, which a backend may override (Ludwig keeps the pre-existing "encoderId" rather
-    # than the generated "modelId" — see LudwigHyperparameters). A generic create-run/create-sweep
-    # form must read this rather than assume "modelId", since it varies per backend.
+    # own alias, which a backend may override. A generic create-run/create-sweep
+    # form must read this rather than assume "modelId", since a backend may vary it.
     model_param_name: str = "modelId"
     params: list[ParamSpec] = field(default_factory=list)
 

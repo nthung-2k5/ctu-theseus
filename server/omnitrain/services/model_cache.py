@@ -13,7 +13,7 @@ from omnitrain.db.models import TrainingRun
 from omnitrain.plugins.backends.base import LoadedModel
 from omnitrain.plugins.backends.registry import get_backend
 from omnitrain.services.run_models import ensure_run_custom_model
-from omnitrain.services.storage import cleanup_temp, download_model, find_model_dir
+from omnitrain.services.storage import cleanup_temp, download_model
 from omnitrain.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ class ModelCache:
 
     @staticmethod
     def _load_sync(run_id: str, backend_id: str) -> LoadedModel:
-        model_dir = find_model_dir(download_model(run_id))
+        model_dir = download_model(run_id)
         return get_backend(backend_id).load(model_dir)
 
     async def _evict_excess(self) -> None:

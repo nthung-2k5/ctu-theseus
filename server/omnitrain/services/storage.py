@@ -11,8 +11,8 @@ theseus-datasets/
   snapshots/{versionId}/augmented/{hh}/{hash}{ext}   augmented copies built with that snapshot (not pooled)
   thumbnails/{size}/{key of the original object}.jpg   cached JPEG thumbnails, made on first request (see thumbnails.py)
 theseus-training/
-  {runId}/config.yaml                        compiled Ludwig config
-  {runId}/results/                           Ludwig output tree (incl. training_set_metadata.json)
+  {runId}/config.yaml                        compiled training config
+  {runId}/results/                           the backend's output tree (model, names.json, ...)
   {runId}/evaluation/report.json             bounded evaluation report
   {runId}/evaluation/predictions.parquet     full per-row predictions
 theseus-models/
@@ -26,7 +26,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import shutil
 from collections.abc import Callable
 from functools import lru_cache
@@ -163,7 +162,7 @@ def expected_sample_key(run_id: str) -> str:
 
 
 def s3fs_path(bucket: str, key: str) -> str:
-    """A path Ludwig/pandas can open through s3fs."""
+    """A path pandas can open through s3fs."""
     return f"s3://{bucket}/{key}"
 
 
@@ -262,7 +261,7 @@ def upload_to_pool(project_id: str, data: bytes, ext: str, content_type: str | N
     return PoolUpload(key, digest, len(data), existing)
 
 
-# -- Local files and Ludwig model directories ------------------------------------------------
+# -- Local files and model directories ------------------------------------------------
 
 
 def download_file(bucket: str, key: str, local_path: str) -> str:
@@ -321,7 +320,7 @@ _DOWNLOAD_COMPLETE_MARKER = ".download_complete"
 
 
 def download_model(run_id: str) -> str:
-    """Download a run Ludwig output directory to a local cache and return its path.
+    """Download a run's results directory to a local cache and return its path.
 
     Cache validity is a marker file written only after the download finishes, not merely a
     non-empty directory, so a download that died partway is never mistaken for a cache hit.
@@ -334,31 +333,6 @@ def download_model(run_id: str) -> str:
         with open(marker, "w"):
             pass
     return local_dir
-
-
-_RUN_SUFFIX_RE = re.compile(r"_run_(\d+)$")
-
-
-def _run_ordinal(dirpath: str) -> int:
-    """Ludwig results_run_N ordinal for any ancestor of dirpath, else 0 (plain results is the first run)."""
-    best = 0
-    for part in os.path.normpath(dirpath).split(os.sep):
-        match = _RUN_SUFFIX_RE.search(part)
-        if match:
-            best = max(best, int(match.group(1)))
-    return best
-
-
-def find_model_dir(root: str) -> str:
-    """Find the loadable model under a downloaded results tree.
-
-    Ludwig nests it under a run directory it names itself (results_run_N/model/), so walk for
-    the marker file it always writes next to a loadable model. When several exist take the
-    highest-numbered run: Ludwig increments rather than overwrites, and os.walk order would
-    otherwise decide which checkpoint gets served.
-    """
-    candidates = [d for d, _, files in os.walk(root) if "model_hyperparameters.json" in files]
-    return max(candidates, key=_run_ordinal) if candidates else root
 
 
 def cleanup_temp(subdir: str, job_id: str) -> None:

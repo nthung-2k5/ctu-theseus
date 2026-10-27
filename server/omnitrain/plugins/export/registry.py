@@ -25,7 +25,7 @@ def list_export_formats(
 
     With `task`, only formats that support it. With `backend`, additionally only formats built
     from an artifact that backend actually produces (e.g. a run trained by a backend with no
-    torch_export support is never offered a torch_export-based format).
+    ONNX export is never offered an ONNX-based format).
 
     Formats an admin switched off (for this task, when given) are left out unless `include_disabled`.
     Looking a format up by id (`find_export_format`) is deliberately NOT filtered: an export that was

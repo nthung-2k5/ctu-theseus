@@ -187,7 +187,7 @@ def make_run(db):
 
 @pytest.fixture
 def make_worker(db):
-    """Create a remote training worker (online, enabled, able to train ludwig), returning its id.
+    """Create a remote training worker (online, enabled, able to train pytorch), returning its id.
 
     Pass `token="thwk_..."` to be able to authenticate as it; otherwise its token is unguessable."""
     import uuid
@@ -195,7 +195,7 @@ def make_worker(db):
     from omnitrain.auth.worker_tokens import hash_worker_token
     from omnitrain.db.models import TrainingWorker
 
-    async def _make(backends: tuple[str, ...] = ("ludwig",), token: str | None = None, **fields):
+    async def _make(backends: tuple[str, ...] = ("pytorch",), token: str | None = None, **fields):
         fields.setdefault("last_seen_at", sa.func.now())
         async with db() as s:
             worker = TrainingWorker(
@@ -231,3 +231,48 @@ def make_export(db, make_run):
             return e.id, rid
 
     return _make
+
+
+@pytest.fixture
+def fake_bert():
+    """A backend whose `hf_text` kind adds nothing to the generic file checks.
+
+    These tests are about the upload, pin, unpack and recovery machinery, not about whether a model can be trained:
+    the PyTorch backend's own check really builds the network, which a few bytes of fake weights cannot pass."""
+    from omnitrain.plugins.backends.base import CustomModelKind, TrainerBackend
+    from omnitrain.plugins.backends.base import _registry as backend_registry
+
+    class FakeBert(TrainerBackend):
+        id = "fakebert"
+        label = "Fake BERT"
+
+        @classmethod
+        def supports(cls, task):
+            return task.id == "text_classification"
+
+        @classmethod
+        def models(cls, task):
+            return []
+
+        @classmethod
+        def custom_model_kinds(cls, task):
+            return [CustomModelKind(id="hf_text", label="Fake", modality="text", source_kinds=["hub", "upload"])]
+
+        @classmethod
+        def compile(cls, task, ctx, hp, custom=None):
+            return {}
+
+        @classmethod
+        def train(cls, run):
+            raise NotImplementedError
+
+        @classmethod
+        def load(cls, model_dir):
+            raise NotImplementedError
+
+        @classmethod
+        def convert(cls, model, artifact_id, workdir):
+            raise NotImplementedError
+
+    yield FakeBert
+    backend_registry.unregister("fakebert")

@@ -7,7 +7,7 @@ broken — `rows.iloc[[0]].to_frame()` raised AttributeError on every call
 the broad `except Exception` swallowed it into `return None`, so no export ever
 produced the file and every bundle silently lost its Verify section.
 
-These tests pin the row-selection shape without needing a real Ludwig model.
+These tests pin the row-selection shape without needing a real trained model.
 """
 
 import numpy as np
@@ -37,7 +37,7 @@ def test_sample_selection_yields_a_single_row_dataframe():
 
     sample = _select_sample(df)
 
-    # A DataFrame, not a Series — LudwigModel.predict(dataset=...) requires it.
+    # A DataFrame, not a Series — a model's predict takes a frame.
     assert isinstance(sample, pd.DataFrame)
     assert len(sample) == 1
     assert sample.iloc[0]["image_path"] == "s3://b.jpg"

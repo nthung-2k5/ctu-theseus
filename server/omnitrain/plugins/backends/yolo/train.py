@@ -1,12 +1,12 @@
 """The YOLO half of training: materialise the snapshot locally, run `YOLO.train()`, stream progress, upload.
 
-Differences from the Ludwig backend that shape this module:
+What shapes this module:
 
   * Ultralytics reads and writes local files only, so the dataset is downloaded into `run.workdir`
     (`data.py`) and the results are uploaded afterwards. `run.output_uri` is not used for writing.
   * Progress, heartbeats and the abort check are Ultralytics callbacks. They run synchronously in the
     training thread and an exception raised in one propagates out of `YOLO.train()` untouched, so
-    `TrainingAborted` from `run.check_abort()` stops training the same way it does for Ludwig.
+    `TrainingAborted` from `run.check_abort()` stops training the same way it does for every backend.
   * The class order of a trained model is whatever `model.names` says, so `names.json` is written from
     it and never from the snapshot's class list (see CLAUDE.md, "Class list correctness").
 """

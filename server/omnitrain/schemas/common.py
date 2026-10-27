@@ -32,9 +32,9 @@ class ParamSpec(ApiModel):
     max: float | None = None
     step: float | None = None
     choices: list[str] | None = None
-    # For a numeric parameter that has an "off" state encoded as one sentinel value (Ludwig's early stopping
-    # uses -1): the sentinel. The web renders an on/off switch plus a number instead of asking for the sentinel;
-    # what is sent and stored is still the sentinel itself.
+    # For a numeric parameter that has an "off" state encoded as one sentinel value (an early-stopping
+    # patience of -1 for "never", say): the sentinel. The web renders an on/off switch plus a number instead of asking
+    # for the sentinel; what is sent and stored is still the sentinel itself.
     disabled_value: float | None = None
     # Section heading the form files this parameter under (e.g. "Training"); parameters without
     # one are shown together under a generic heading. Order of first appearance is the section order.

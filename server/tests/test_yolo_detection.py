@@ -607,7 +607,7 @@ class TestManifestAndExport:
 
         assert entry["imageResize"]["mode"] == "letterbox" and entry["imageResize"]["padValue"] == 114
         assert entry["imageResize"]["size"] == [640, 640]
-        assert entry["ludwigPreprocessing"] == {"height": 640, "width": 640}
+        assert entry["imageSize"] == {"height": 640, "width": 640}
         assert (output["type"], output["name"], output["column"]) == ("detections", "boxes", "boxes")
         # The class list is what becomes labels.txt in a bundle, in the model's own order.
         assert output["classes"] == CLASSES
@@ -615,7 +615,7 @@ class TestManifestAndExport:
 
     def test_the_plain_onnx_format_and_every_client_are_offered_for_detection(self):
         ids = [f.id for f in list_export_formats(TASK, YoloBackend)]
-        # Every generated client decodes a detector's output; torch_export is not a YOLO artifact.
+        # Every generated client decodes a detector's output; hf_model is not a YOLO artifact.
         assert ids == [
             "onnx",
             "python_devkit",

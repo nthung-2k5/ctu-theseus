@@ -40,8 +40,8 @@ class TrainingBackendOut(ApiModel):
     supported_tasks: list[str]
     # Selectable models/architectures for the task in scope; empty when listed with no task.
     models: list[ModelChoiceOut]
-    # The hyperparameters key a selected model id goes under (varies per backend: Ludwig keeps
-    # "encoderId" rather than the generic "modelId"). A create-run/create-sweep form must read
+    # The hyperparameters key a selected model id goes under (a backend may override
+    # the generic "modelId"). A create-run/create-sweep form must read
     # this rather than assume a fixed key name.
     model_param_name: str
     params: list[ParamSpec]

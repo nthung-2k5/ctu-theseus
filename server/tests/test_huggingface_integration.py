@@ -235,8 +235,8 @@ async def test_a_model_made_for_everyone_is_looked_up_without_any_token(new_user
 def hub_row(**kw) -> CustomModel:
     fields = {
         "id": uuid.uuid4(),
-        "backend": "ludwig",
-        "kind": "hf_transformer",
+        "backend": "fakebert",
+        "kind": "hf_text",
         "name": "x",
         "source_kind": "hub",
         "source_ref": "org/secret",
@@ -246,7 +246,9 @@ def hub_row(**kw) -> CustomModel:
     return CustomModel(**fields)
 
 
-def test_validating_a_private_model_fetches_it_with_the_token_and_records_that_it_is_private(monkeypatch, tmp_path):
+def test_validating_a_private_model_fetches_it_with_the_token_and_records_that_it_is_private(
+    monkeypatch, tmp_path, fake_bert
+):
     monkeypatch.setattr(get_settings(), "temp_dir", tmp_path)
     calls: dict = {}
 

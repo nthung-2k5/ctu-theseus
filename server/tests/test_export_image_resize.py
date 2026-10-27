@@ -35,7 +35,7 @@ def make_client(module, size, **extra):
     client = object.__new__(module.OmniTrainClient)
     client.input_spec = {
         "type": "image",
-        "ludwigPreprocessing": {"height": size, "width": size},
+        "imageSize": {"height": size, "width": size},
         "imageNormalization": NORMALIZATION,
         **extra,
     }
@@ -81,7 +81,7 @@ def test_matches_ultralytics_classify_transforms_pixel_for_pixel(client_module, 
 
 
 def test_without_an_image_resize_the_whole_image_is_still_squashed(client_module, tmp_path):
-    # Ludwig exports carry no imageResize, and their behaviour must not change.
+    # A manifest with no imageResize means squash, and that behaviour must not change.
     path = write_image(tmp_path / "x.png", 100, 60)
     expected = np.asarray(Image.open(path).convert("RGB").resize((32, 32)), dtype=np.float32) / 255.0
 

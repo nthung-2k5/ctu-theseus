@@ -44,7 +44,14 @@ dependencies = [
   'torchcodec',
   'torchvision',
   'torchmetrics',
-  'ludwig',
+  # Imported directly by the backends, so they are named here rather than left to come in transitively.
+  'numpy',
+  'scipy',
+  'transformers',
+  'tokenizers',
+  'huggingface_hub',
+  'safetensors',
+  'opencv-python',
   # YOLO trainer backend (AGPL-3.0)
   'ultralytics',
   'pandas',
@@ -60,6 +67,8 @@ dependencies = [
 
   # Language-model trainer backend: LoRA adapters on a bring-your-own causal LM (Apache-2.0; brings accelerate)
   'peft>=0.21.2',
+  # QLoRA (4 or 8 bit base weights); the backend reports the option unavailable where it is missing
+  'bitsandbytes',
 
   # Telemetry
   "opentelemetry-sdk>=1.44.0",

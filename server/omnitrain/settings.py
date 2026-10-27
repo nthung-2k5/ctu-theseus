@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     job_poll_interval_seconds: float = 3.0
     job_lease_seconds: int = 300
     inference_concurrency: int = 2
-    # A running training run with no heartbeat or event for this long is presumed hung. The Ludwig callback
+    # A running training run with no heartbeat or event for this long is presumed hung. A backend's training callback
     # beats every few seconds while training, so this only needs to exceed the longest stretch without one
     # (dataset preprocessing).
     run_heartbeat_timeout_seconds: int = 900
@@ -129,7 +129,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
-    # s3fs (used by Ludwig for s3:// paths) reads the standard AWS_* variables.
+    # s3fs (pandas reads s3:// paths through it) reads the standard AWS_* variables.
     os.environ.setdefault("AWS_ACCESS_KEY_ID", s.s3_access_key)
     os.environ.setdefault("AWS_SECRET_ACCESS_KEY", s.s3_secret_key)
     os.environ.setdefault("AWS_ENDPOINT_URL", s.s3_endpoint)

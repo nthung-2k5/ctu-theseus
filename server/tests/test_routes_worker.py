@@ -10,7 +10,7 @@ from omnitrain.services import storage
 
 TOKEN = "thwk_test-token"
 OTHER_TOKEN = "thwk_other-token"
-CLAIM = {"backends": ["ludwig"], "protocol": PROTOCOL_VERSION, "version": "1.2.3", "hostname": "box", "gpu": "RTX"}
+CLAIM = {"backends": ["pytorch"], "protocol": PROTOCOL_VERSION, "version": "1.2.3", "hostname": "box", "gpu": "RTX"}
 
 
 def auth(token=TOKEN):
@@ -70,13 +70,13 @@ async def test_worker_routes_are_exempt_from_the_cross_origin_check_because_they
 
 
 async def test_a_claim_hands_out_the_run_and_starts_it(client, db, app, make_run, make_worker):
-    worker, rid = await claimed_run(client, db, make_run, make_worker, backend="ludwig")
+    worker, rid = await claimed_run(client, db, make_run, make_worker, backend="pytorch")
     await get_event_writer().flush()
 
     run = await run_row(db, rid)
     assert (run.status, run.worker_id, run.started_at is not None) == ("running", worker, True)
     info = (await worker_row(db, worker)).info
-    assert info["backends"] == ["ludwig"] and info["gpu"] == "RTX" and info["hostname"] == "box"
+    assert info["backends"] == ["pytorch"] and info["gpu"] == "RTX" and info["hostname"] == "box"
 
 
 async def test_the_spec_carries_what_run_core_needs(client, db, make_run, make_worker):
@@ -86,7 +86,7 @@ async def test_the_spec_carries_what_run_core_needs(client, db, make_run, make_w
     run = await run_row(db, rid)
     assert spec == {
         "id": str(rid),
-        "backend": "ludwig",
+        "backend": "pytorch",
         "config": {"a": 1},
         "datasetVersionId": str(run.dataset_version_id),
         "configKey": "cfg",
@@ -138,7 +138,7 @@ async def test_a_disabled_worker_claims_nothing_but_is_still_heard(client, db, m
     rid = await make_run()
     assert (await client.post("/api/worker/claim", json=CLAIM, headers=auth())).status_code == 204
     assert (await run_row(db, rid)).status == "queued"
-    assert (await worker_row(db, worker)).info["backends"] == ["ludwig"]
+    assert (await worker_row(db, worker)).info["backends"] == ["pytorch"]
 
 
 async def test_a_worker_on_a_different_protocol_is_told_so_and_advertises_no_backends(

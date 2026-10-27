@@ -2,7 +2,7 @@
 
 A sweep is a search space expanded into N trials, each an ordinary training_runs row (sweep_id +
 trial_index) enqueued through queue_training. It has no execution engine of its own (see
-services/sweep.py for why this is not Ludwig hyperopt).
+services/sweep.py for why this is not a hyperparameter-optimisation library).
 """
 
 import sqlalchemy as sa

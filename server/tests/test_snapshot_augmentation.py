@@ -172,7 +172,7 @@ async def test_a_text_snapshot_gets_augmented_train_copies_with_copied_labels_an
 
     table = pq.read_table(io.BytesIO(s3.objects[f"snapshots/{version_id}/dataset.parquet"]))
     assert table.num_rows == 8
-    assert sum(1 for r in table.to_pylist() if r["_ludwig_split_idx"] == 0) == 6  # 2 originals + 4 copies train
+    assert sum(1 for r in table.to_pylist() if r["_split_idx"] == 0) == 6  # 2 originals + 4 copies train
     ctx = await snap.read_snapshot_manifest(version_id)
     assert ctx.class_counts == {"cat": 4, "dog": 4}  # per class: 1 train + 2 copies + 1 real eval item
 

@@ -58,7 +58,7 @@ class TestRegistration:
         assert not PytorchBackend.supports(get_task_descriptor("text_generation"))
         assert PytorchBackend in trainable_backends(TASK)
 
-    def test_it_offers_the_ludwig_image_encoders_by_the_same_ids(self):
+    def test_it_offers_the_image_classifiers_by_these_ids(self):
         ids = [m.id for m in PytorchBackend.models(TASK)]
         assert ids == ["resnet18", "resnet50", "efficientnet_b0", "mobilenet_v3_small", "convnext_tiny", "vit_base"]
         assert all(m.pretrained for m in PytorchBackend.models(TASK))
@@ -80,7 +80,6 @@ class TestRegistration:
         for task_id in PytorchBackend.default_for:
             task = get_task_descriptor(task_id)
             assert trainable_backends(task)[0] is PytorchBackend
-            assert get_backend("ludwig") in trainable_backends(task)
         for task_id in ("tabular_classification", "tabular_regression"):
             assert trainable_backends(get_task_descriptor(task_id))[0] is get_backend("sklearn")
 
@@ -309,7 +308,7 @@ class TestManifest:
         assert image["type"] == "image" and image["column"] == "image_path"
         assert image["imageResize"] == {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"}
         assert image["imageNormalization"] == {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
-        assert image["ludwigPreprocessing"] == {"height": 32, "width": 32}
+        assert image["imageSize"] == {"height": 32, "width": 32}
 
     def test_the_class_list_is_the_models_own_order(self):
         [out] = build_preprocessing_manifest("run-1", {}, _meta())["outputs"]
@@ -854,9 +853,9 @@ class TestCompileText:
         assert [m.id for m in models] == ["text_bag", "text_cnn"]
         assert not any(m.pretrained for m in models)
 
-    def test_it_is_the_default_for_text_and_ludwig_stays_offered(self):
+    def test_it_is_the_default_for_text_and_sklearn_stays_offered(self):
         offered = trainable_backends(TEXT)
-        assert PytorchBackend in offered and get_backend("ludwig") in offered
+        assert PytorchBackend in offered and get_backend("sklearn") in offered
         assert offered[0] is PytorchBackend
 
 

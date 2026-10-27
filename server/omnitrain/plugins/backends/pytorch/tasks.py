@@ -2,7 +2,7 @@
 
 Pure data: no torch or torchvision import, so listing this backend never needs a GPU runtime. Every image model is a
 torchvision classifier (BSD-3-Clause) fine-tuned by swapping in a new classification head. The ids are the ones the
-Ludwig backend's image encoders already use, so a sweep or a stored habit that names `resnet50` keeps meaning the same
+platform's first image backend used, so a sweep or a stored habit that names `resnet50` keeps meaning the same
 architecture. A table is learned by a small multilayer perceptron trained from scratch, and a sound by a
 convolutional network over its log-mel spectrogram.
 """

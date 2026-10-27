@@ -1,6 +1,6 @@
 """Checks that this client's own preprocessing reproduces the platform's
 prediction for the bundled sample. `omnitrain_client.py` re-implements
-Ludwig's preprocessing from preprocessing.json; nothing else in this bundle
+the platform's preprocessing from preprocessing.json; nothing else in this bundle
 proves that reimplementation is correct — this script is that proof.
 
 Exits non-zero (and prints a diff) if the top-1 class or any shared

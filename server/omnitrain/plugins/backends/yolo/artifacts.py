@@ -53,7 +53,7 @@ def strip_final_softmax(path: str) -> None:
     """Make the graph at `path` output logits instead of probabilities, in place.
 
     Ultralytics' classification head ends in a Softmax when exporting. Every generated client applies its own
-    softmax to the model output (the Ludwig graph ends in `::logits`), so left alone the probabilities would be
+    softmax to the model output (the other backends' graphs end in logits), so left alone the probabilities would be
     softmaxed twice: the ranking survives but every confidence is squashed towards uniform and no longer matches
     `expected.json`. Raises rather than guessing if the graph does not end in a Softmax.
     """

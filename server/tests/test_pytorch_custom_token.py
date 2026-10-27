@@ -148,8 +148,10 @@ def write_tokenizer(path: Path, bpe: bool) -> int:
 
 def make_tiny(path: Path, family: str = "bert", *, bare: bool = False):
     """A random few-layer checkpoint of `family` with its tokenizer, as a tagger (5 labels) or a bare backbone."""
+    import torch
     import transformers
 
+    torch.manual_seed(0)  # the weights are random, and an unseeded draw made a test that trains on them order-dependent
     config_name, arguments, backbone_name, tagger_name, bpe = FAMILIES[family]
     path.mkdir(parents=True, exist_ok=True)
     vocab_size = write_tokenizer(path, bpe)

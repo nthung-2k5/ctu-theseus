@@ -59,7 +59,7 @@ class TestResolveColumnValue:
             == "s3://theseus-datasets/pool/abc.png"
         )
 
-    def test_split_index_follows_ludwig_fixed_split_convention(self):
+    def test_split_index_is_zero_one_two_for_train_validation_test(self):
         vals = [
             snap.resolve_column_value(col("i", "split_index"), member(split_type=s), {})
             for s in ("train", "validation", "test")
@@ -87,11 +87,11 @@ class TestColumnsAndParquet:
         task = get_task_descriptor("tabular_classification")
         members = [member(features_json={"age": 1}), member(features_json={"income": 2, "age": 3})]
         names = [c.name for c in snap.derive_columns(task, members)]
-        assert names == ["class", "split", "age", "income", "_ludwig_split_idx", "_theseus_item_id"]
+        assert names == ["class", "split", "age", "income", "_split_idx", "_theseus_item_id"]
 
     def test_non_tabular_tasks_get_only_synthetic_extras(self):
         task = get_task_descriptor("image_classification")
-        assert [c.name for c in snap.derive_columns(task, [member()])][-2:] == ["_ludwig_split_idx", "_theseus_item_id"]
+        assert [c.name for c in snap.derive_columns(task, [member()])][-2:] == ["_split_idx", "_theseus_item_id"]
 
     def test_class_counts_only_for_classification_tasks(self):
         rows = [{"class": "cat"}, {"class": "cat"}, {"class": "dog"}, {"class": None}]
@@ -110,13 +110,13 @@ class TestColumnsAndParquet:
         columns = snap.derive_columns(task, members)
         rows = snap.build_rows(columns, members, {})
         table = pq.read_table(io.BytesIO(snap.to_parquet_bytes(task, columns, rows)))
-        assert table.column_names == ["target", "split", "age", "_ludwig_split_idx", "_theseus_item_id"]
+        assert table.column_names == ["target", "split", "age", "_split_idx", "_theseus_item_id"]
         types = {f.name: str(f.type) for f in table.schema}
         assert types == {
             "target": "double",
             "split": "string",
             "age": "double",
-            "_ludwig_split_idx": "int32",
+            "_split_idx": "int32",
             "_theseus_item_id": "string",
         }
         assert table.to_pylist()[0]["target"] == 2.5
@@ -197,8 +197,8 @@ async def test_build_snapshot_writes_parquet_and_manifest_and_marks_ready(db, fa
     table = pq.read_table(io.BytesIO(fake_s3[f"snapshots/{version_id}/dataset.parquet"]))
     rows = {r["text"]: r for r in table.to_pylist()}
     assert set(rows) == {"meow", "purr", "woof"}
-    assert (rows["meow"]["class"], rows["meow"]["_ludwig_split_idx"]) == ("cat", 0)
-    assert (rows["purr"]["_ludwig_split_idx"], rows["woof"]["_ludwig_split_idx"]) == (1, 2)
+    assert (rows["meow"]["class"], rows["meow"]["_split_idx"]) == ("cat", 0)
+    assert (rows["purr"]["_split_idx"], rows["woof"]["_split_idx"]) == (1, 2)
 
     ctx = await snap.read_snapshot_manifest(version_id)
     assert ctx.class_counts == {"cat": 2, "dog": 1}
@@ -291,7 +291,7 @@ async def test_build_snapshot_for_object_detection_writes_boxes_by_class_name(db
     await snap.build_snapshot(version_id)
 
     table = pq.read_table(io.BytesIO(fake_s3[f"snapshots/{version_id}/dataset.parquet"]))
-    assert table.column_names == ["image_path", "boxes", "split", "_ludwig_split_idx", "_theseus_item_id"]
+    assert table.column_names == ["image_path", "boxes", "split", "_split_idx", "_theseus_item_id"]
     rows = {r["image_path"].rsplit("/", 1)[-1]: r for r in table.to_pylist()}
 
     boxed = json.loads(rows["boxed.png"]["boxes"])

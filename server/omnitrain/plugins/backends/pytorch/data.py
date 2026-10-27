@@ -1,6 +1,6 @@
 """Turn a snapshot's dataset.parquet into local files and a labelled sample list per split.
 
-Ludwig reads every `s3://` file through s3fs. Here the loop reads local files, many times over, one epoch after another,
+The loop reads local files, many times over, one epoch after another,
 so every usable row's file is downloaded into the run's workdir first and checked once to be sure it is readable. What
 "checked" means is up to the caller (`prepare`): an image is decoded and kept as it is; a sound is decoded, resampled
 and cached as a waveform, so no epoch repeats that work. Imports pandas and PIL only: no torch.

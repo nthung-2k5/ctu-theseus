@@ -31,7 +31,7 @@ def test_input_describes_how_to_prepare_an_image_for_this_model():
     assert entry["imageResize"]["mode"] == "shorter_edge_center_crop"
     assert entry["imageNormalization"] == {"mean": [0.0, 0.0, 0.0], "std": [1.0, 1.0, 1.0]}
     # The key the generated clients take the target size from; without it they would fall back to 224.
-    assert entry["ludwigPreprocessing"] == {"height": 320, "width": 320}
+    assert entry["imageSize"] == {"height": 320, "width": 320}
 
 
 def test_missing_metadata_is_an_error():

@@ -60,7 +60,7 @@ async def test_export_formats_are_listed_grouped_and_task_filtered(client, new_u
         c = await new_user()
         run = await succeeded_run(c, db)  # a text classification project
         everything = (await c.get("/api/export-formats")).json()["formats"]
-        assert [f["id"] for f in everything][:2] == ["onnx", "torch_export"]
+        assert [f["id"] for f in everything][:2] == ["onnx", "hf_model"]
         assert {"id", "label", "description", "notice", "group", "artifact"} <= set(everything[0])
         assert {"test_text_only", "test_vision_only"} <= {f["id"] for f in everything}
 
@@ -79,7 +79,7 @@ async def test_export_validation_rules(client, new_user, db):
     run = await succeeded_run(c, db)
     url = f"/api/runs/{run}/exports"
     msg = lambda r: r.json()["error"]["message"]  # noqa: E731
-    assert (await c.post(url, json={"format": "torch_export"})).status_code == 202
+    assert (await c.post(url, json={"format": "python_devkit"})).status_code == 202
     assert (await c.post(url, json={"format": "flutter_app"})).status_code == 202
     bad = await c.post(url, json={"format": "nope"})
     assert bad.status_code == 400 and "Unknown export format 'nope'" in msg(bad)

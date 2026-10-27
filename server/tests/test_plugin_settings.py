@@ -72,9 +72,9 @@ async def test_listing_covers_every_kind(admin):
     plugins = (await admin.get("/api/admin/plugins")).json()["plugins"]
     kinds = {p["kind"] for p in plugins}
     assert kinds == {"backend", "builtin_model", "export_format", "preprocessing", "augmentation", "task"}
-    resnet = next(p for p in plugins if p["id"] == "ludwig:resnet18")
-    assert resnet["kind"] == "builtin_model" and resnet["group"] == "ludwig"
-    assert {t["task"] for t in resnet["tasks"]} == {"image_classification", "image_captioning"}
+    resnet = next(p for p in plugins if p["id"] == "pytorch:resnet18")
+    assert resnet["kind"] == "builtin_model" and resnet["group"] == "pytorch"
+    assert {t["task"] for t in resnet["tasks"]} == {"image_classification"}
     assert all(p["enabled"] for p in plugins)
 
 
@@ -165,32 +165,30 @@ async def test_a_disabled_task_blocks_new_projects_only(admin):
     assert r.status_code == 422 and "disabled" in r.json()["error"]["message"]
     assert (await admin.get(f"/api/projects/{existing['id']}")).status_code == 200  # existing project untouched
 
-    ludwig = next(b for b in (await admin.get("/api/training-backends")).json()["backends"] if b["id"] == "ludwig")
-    assert TASK not in ludwig["supportedTasks"] and "text_classification" in ludwig["supportedTasks"]
+    pytorch = next(b for b in (await admin.get("/api/training-backends")).json()["backends"] if b["id"] == "pytorch")
+    assert TASK not in pytorch["supportedTasks"] and "text_classification" in pytorch["supportedTasks"]
 
 
 async def test_a_disabled_backend_is_not_trainable_for_that_task_only(admin):
-    ludwig = get_backend("ludwig")
-    await put(admin, "backend", "ludwig", False, task=TASK)
-    assert ludwig not in trainable_backends(get_task_descriptor(TASK))
-    assert ludwig in trainable_backends(get_task_descriptor("text_classification"))
-    # PyTorch and YOLO still train this task, so the project can be created; once they are off too, nothing can.
-    assert [b.id for b in trainable_backends(get_task_descriptor(TASK))] == ["pytorch", "yolo"]
-    assert (await create_project(admin)).status_code == 200
+    pytorch = get_backend("pytorch")
     await put(admin, "backend", "pytorch", False, task=TASK)
+    assert pytorch not in trainable_backends(get_task_descriptor(TASK))
+    assert pytorch in trainable_backends(get_task_descriptor("text_classification"))
+    # YOLO still trains this task, so the project can be created; once it is off too, nothing can.
     assert [b.id for b in trainable_backends(get_task_descriptor(TASK))] == ["yolo"]
+    assert (await create_project(admin)).status_code == 200
     await put(admin, "backend", "yolo", False, task=TASK)
     assert (await create_project(admin)).status_code == 422  # nothing can train it now
 
 
 async def test_a_disabled_builtin_model_leaves_the_picker(admin):
-    await put(admin, "builtin_model", "ludwig:resnet18", False)
+    await put(admin, "builtin_model", "pytorch:resnet18", False)
     project = (await create_project(admin)).json()["project"]
     backends = (await admin.get(f"/api/projects/{project['id']}/training-backends")).json()["backends"]
-    ludwig = next(b for b in backends if b["id"] == "ludwig")
-    ids = [m["id"] for m in ludwig["models"]]
+    pytorch = next(b for b in backends if b["id"] == "pytorch")
+    ids = [m["id"] for m in pytorch["models"]]
     assert "resnet18" not in ids and "resnet50" in ids
-    assert "resnet18" in [m.id for m in get_backend("ludwig").models(get_task_descriptor(TASK))]  # still installed
+    assert "resnet18" in [m.id for m in get_backend("pytorch").models(get_task_descriptor(TASK))]  # still installed
 
 
 # -- Enforcement: queueing a run ---------------------------------------------------------------
@@ -202,29 +200,29 @@ class _Sel:
 
 
 def test_default_model_skips_a_disabled_first_choice(monkeypatch):
-    monkeypatch.setattr(ps, "_state", {("builtin_model", "ludwig:resnet18", ""): False})
+    monkeypatch.setattr(ps, "_state", {("builtin_model", "pytorch:resnet18", ""): False})
     sel = _Sel()
-    assert _check_builtin_model(get_backend("ludwig"), TASK, sel) is None
+    assert _check_builtin_model(get_backend("pytorch"), TASK, sel) is None
     assert sel.model_id == "resnet50"  # the next enabled model, named explicitly
 
 
 def test_default_model_is_left_unset_when_the_first_choice_is_enabled():
     sel = _Sel()
-    assert _check_builtin_model(get_backend("ludwig"), TASK, sel) is None
+    assert _check_builtin_model(get_backend("pytorch"), TASK, sel) is None
     assert sel.model_id is None  # nothing changes for an install with no overrides
 
 
 def test_an_explicitly_disabled_model_is_refused(monkeypatch):
-    monkeypatch.setattr(ps, "_state", {("builtin_model", "ludwig:resnet50", ""): False})
-    assert "disabled" in _check_builtin_model(get_backend("ludwig"), TASK, _Sel("resnet50"))
-    assert _check_builtin_model(get_backend("ludwig"), TASK, _Sel("resnet18")) is None
+    monkeypatch.setattr(ps, "_state", {("builtin_model", "pytorch:resnet50", ""): False})
+    assert "disabled" in _check_builtin_model(get_backend("pytorch"), TASK, _Sel("resnet50"))
+    assert _check_builtin_model(get_backend("pytorch"), TASK, _Sel("resnet18")) is None
 
 
 def test_no_model_left_is_an_error(monkeypatch):
-    ludwig = get_backend("ludwig")
-    models = ludwig.models(get_task_descriptor(TASK))
-    monkeypatch.setattr(ps, "_state", {("builtin_model", f"ludwig:{m.id}", ""): False for m in models})
-    assert "Every model" in _check_builtin_model(ludwig, TASK, _Sel())
+    pytorch = get_backend("pytorch")
+    models = pytorch.models(get_task_descriptor(TASK))
+    monkeypatch.setattr(ps, "_state", {("builtin_model", f"pytorch:{m.id}", ""): False for m in models})
+    assert "Every model" in _check_builtin_model(pytorch, TASK, _Sel())
 
 
 async def test_queueing_refuses_a_disabled_backend_and_model(admin, db, monkeypatch):
@@ -236,24 +234,23 @@ async def test_queueing_refuses_a_disabled_backend_and_model(admin, db, monkeypa
         await s.commit()
         version_id = v.id
 
-    await put(admin, "builtin_model", "ludwig:resnet50", False)
+    await put(admin, "builtin_model", "pytorch:resnet50", False)
     async with db() as s:
         err = await queue_training(
-            s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id, backend_id="ludwig",
-            hyperparameters={"encoderId": "resnet50"},
+            s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id, backend_id="pytorch",
+            hyperparameters={"modelId": "resnet50"},
         )  # fmt: skip
         assert isinstance(err, QueueError) and err.code == 400 and "disabled" in err.message
 
-    await put(admin, "backend", "ludwig", False, task=TASK)
-    await put(admin, "backend", "pytorch", False, task=TASK)  # the other backends that train this task
-    await put(admin, "backend", "yolo", False, task=TASK)
+    await put(admin, "backend", "pytorch", False, task=TASK)
+    await put(admin, "backend", "yolo", False, task=TASK)  # the other backend that trains this task
     async with db() as s:
         # Unnamed: the default-backend lookup already skips the disabled backend, so none is left.
         err = await queue_training(s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id)
         assert isinstance(err, QueueError) and "No trainer backend is available" in err.message
         # Named explicitly, it would bypass that lookup, so queue_training checks the switch itself.
         err = await queue_training(
-            s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id, backend_id="ludwig"
+            s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id, backend_id="pytorch"
         )
         assert isinstance(err, QueueError) and "disabled" in err.message
     assert await count(db, TrainingRun) == 0

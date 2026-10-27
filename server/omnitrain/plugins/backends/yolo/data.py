@@ -1,6 +1,6 @@
 """Turn a snapshot's dataset.parquet into the local folder tree Ultralytics trains on.
 
-Ludwig reads the parquet and every `s3://` image straight through s3fs. Ultralytics only reads local
+Ultralytics only reads local
 files, so each image is downloaded first. Imports pandas only: no ultralytics, no torch.
 
 Image classification layout (docs.ultralytics.com/datasets/classify):

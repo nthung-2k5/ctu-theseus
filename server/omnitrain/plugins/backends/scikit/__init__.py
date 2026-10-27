@@ -53,7 +53,7 @@ class SklearnBackend(TrainerBackend):
     artifacts = ARTIFACTS
     metadata_filename = METADATA_FILENAME
     # A tree ensemble on a CPU beats a small network on most tables, trains in seconds, and fits its imputer and scaler
-    # on the train split only (Ludwig's built-in normalisation learns from every row).
+    # on the train split only (a normaliser that learns from every row leaks the validation and test splits).
     default_for = frozenset({"tabular_classification", "tabular_regression"})
 
     @classmethod

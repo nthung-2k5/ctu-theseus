@@ -1,6 +1,6 @@
 """The regression evaluation report, shared by every backend whose model predicts one number per row.
 
-The report has Ludwig's shape for a number output (the web panel and `run_evaluations` read it without knowing which
+The report has a fixed shape for a number output (the web panel and `run_evaluations` read it without knowing which
 backend wrote it): `overall` holds MAE, RMSE and R².
 
 `model` is any `LoadedModel` whose input columns hold what `predict` reads and whose prediction frame has a

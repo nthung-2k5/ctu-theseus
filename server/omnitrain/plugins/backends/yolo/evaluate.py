@@ -1,6 +1,6 @@
 """The evaluation report for a YOLO model.
 
-Classification: in the same shape Ludwig's is (the web panel and `run_evaluations` read it without knowing which
+Classification: in the shared classification shape (the web panel and `run_evaluations` read it without knowing which
 backend wrote it).
 
 Detection: `kind: "detection"`, scored by Ultralytics' own validator (COCO-style mAP, which needs the whole

@@ -1,12 +1,12 @@
 // OmniTrain-generated inference client.
 //
-// Wraps the exported ONNX model with the preprocessing/postprocessing Ludwig
-// applied at training time, read from preprocessing.json — Ludwig's exported
+// Wraps the exported ONNX model with the preprocessing/postprocessing the platform
+// applied at training time, read from preprocessing.json — the platform's exported
 // ONNX graph is the bare model only (no resize/normalize, no class-index
 // decoding), so this client reconstructs that step from the manifest rather
 // than assuming a fixed tensor layout: input/output tensor names are matched
 // against the graph's actual names at runtime, not hardcoded, since ONNX
-// export doesn't guarantee a stable naming convention across Ludwig versions.
+// export doesn't guarantee a stable naming convention across exporter versions.
 //
 // Implements preprocessing for `image` inputs with `category` outputs (image
 // classification) and for a `detections` output (object detection, YOLO): the
@@ -117,7 +117,7 @@ internal sealed class PreprocessingInput
     public AudioRecipe? AudioSpectrogram { get; set; }
     public TextRecipe? TextTokens { get; set; }
     public TagRecipe? TagWords { get; set; }
-    public Dictionary<string, JsonElement>? LudwigPreprocessing { get; set; }
+    public Dictionary<string, JsonElement>? ImageSize { get; set; }
     // Absent: squash the whole image to height x width.
     public Dictionary<string, JsonElement>? ImageResize { get; set; }
     public ImageNormalization? ImageNormalization { get; set; }
@@ -464,7 +464,7 @@ public sealed class OmniTrainClient : IDisposable
     private (int Width, int Height) GetImageDims()
     {
         int width = 224, height = 224;
-        if (_inputSpec.LudwigPreprocessing is { } pp)
+        if (_inputSpec.ImageSize is { } pp)
         {
             if (pp.TryGetValue("width", out var w) && w.ValueKind == JsonValueKind.Number) width = w.GetInt32();
             if (pp.TryGetValue("height", out var h) && h.ValueKind == JsonValueKind.Number) height = h.GetInt32();
@@ -877,7 +877,7 @@ public sealed class OmniTrainClient : IDisposable
         {
             throw new NotSupportedException(
                 $"No preprocessing implemented for input type '{_inputSpec.Type}'. " +
-                "See preprocessing.json's inputs[0].ludwigPreprocessing and adapt this client.");
+                "See preprocessing.json's inputs[0].imageSize and adapt this client.");
         }
 
         var tensor = PreprocessImage(imagePath);

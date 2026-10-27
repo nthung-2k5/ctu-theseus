@@ -1,6 +1,6 @@
 /**
  * OmniTrain-generated inference client (browser). Wraps the exported ONNX
- * model with the preprocessing/postprocessing Ludwig applied at training
+ * model with the preprocessing/postprocessing the platform applied at training
  * time, read from preprocessing.json — see the devkit export's client for
  * the same logic in Python/TypeScript/C#/Java.
  *
@@ -537,7 +537,7 @@ function shorterEdgeGeometry(width, height, size) {
 
 /** Decode an ImageBitmap into a CHW float32 tensor. */
 function preprocessImage(imageBitmap) {
-  const pp = inputSpec.ludwigPreprocessing ?? {}
+  const pp = inputSpec.imageSize ?? {}
   const width = pp.width ?? 224
   const height = pp.height ?? 224
 
@@ -700,7 +700,7 @@ export async function predict(imageSource, topK = 5) {
   if (inputSpec.type !== 'image') {
     throw new Error(
       `No preprocessing implemented for input type '${inputSpec.type}'. ` +
-        'See preprocessing.json inputs[0].ludwigPreprocessing and adapt app.js.',
+        'See preprocessing.json inputs[0].imageSize and adapt app.js.',
     )
   }
 

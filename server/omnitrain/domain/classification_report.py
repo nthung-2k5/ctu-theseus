@@ -1,6 +1,6 @@
 """The classification evaluation report, shared by every backend whose model predicts one class per input.
 
-The report has Ludwig's shape (the web panel and `run_evaluations` read it without knowing which backend wrote it).
+The report's shape is fixed (the web panel and `run_evaluations` read it without knowing which backend wrote it).
 Ultralytics and the video backend report no per-class statistics through their own APIs, so they are computed here
 from the model's predictions on the evaluation split. Every label is a class NAME taken from the model's own
 `OutputSpec.labels`, never an index and never from the `label_classes` table (see domain/evaluate.py).

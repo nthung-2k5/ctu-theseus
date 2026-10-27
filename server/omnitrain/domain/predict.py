@@ -2,7 +2,7 @@
 
 Every backend's `LoadedModel.to_output` must produce one of these. The shaping logic itself (how
 to read a `category`/`number`/`sequence` prediction column, say) is necessarily framework-specific
-and lives with each backend (see `omnitrain/plugins/backends/ludwig/model.py` for Ludwig's).
+and lives with each backend (see `omnitrain/plugins/backends/pytorch/model.py` for the reference one).
 """
 
 from typing import Literal, TypedDict
@@ -75,7 +75,7 @@ InferenceOutput = ClassificationOutput | RegressionOutput | TextOutput | TokensO
 
 def build_batch_result_frame(input_df: pd.DataFrame, predictions: pd.DataFrame) -> pd.DataFrame:
     """Concatenate a batch inference job's original input rows with the backend's own postprocessed
-    prediction columns (Ludwig: `{feature}_predictions`, `{feature}_probability`, ...) — the same
+    prediction columns (`{feature}_predictions`, `{feature}_probability`, ...) — the same
     "input + raw prediction columns" shape as the evaluation predictions.parquet (see
     domain/evaluate.py), so a batch result and an evaluation export read the same way. Both frames
     come from the same `LoadedModel.predict` call and are therefore already row-aligned; the index

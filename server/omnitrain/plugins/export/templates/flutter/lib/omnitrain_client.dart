@@ -1,13 +1,13 @@
 // OmniTrain-generated inference client.
 //
 // Wraps the exported ONNX model with the preprocessing/postprocessing
-// Ludwig applied at training time, read from preprocessing.json — Ludwig's
+// the platform applied at training time, read from preprocessing.json — the platform's
 // exported ONNX graph is the bare model only (no resize/normalize, no
 // class-index decoding), so this client reconstructs that step from the
 // manifest rather than assuming a fixed tensor layout: input/output tensor
 // names are matched against the graph's actual names at runtime, not
 // hardcoded, since ONNX export doesn't guarantee a stable naming convention
-// across Ludwig versions.
+// across exporter versions.
 //
 // Implements preprocessing for `image` inputs with `category` outputs (image
 // classification) and for a `detections` output (object detection, YOLO): the
@@ -311,7 +311,7 @@ class PreprocessingInput {
     this.audio,
     this.text,
     this.tags,
-    this.ludwigPreprocessing,
+    this.imageSize,
     this.imageResizeMode,
     this.letterboxSize,
     this.padValue = 114,
@@ -329,7 +329,7 @@ class PreprocessingInput {
           : AudioRecipe.fromJson(json['audioSpectrogram'] as Map<String, dynamic>),
       text: json['textTokens'] == null ? null : TextRecipe.fromJson(json['textTokens'] as Map<String, dynamic>),
       tags: json['tagWords'] == null ? null : TagRecipe.fromJson(json['tagWords'] as Map<String, dynamic>),
-      ludwigPreprocessing: json['ludwigPreprocessing'] as Map<String, dynamic>?,
+      imageSize: json['imageSize'] as Map<String, dynamic>?,
       imageResizeMode: (json['imageResize'] as Map<String, dynamic>?)?['mode'] as String?,
       letterboxSize: ((json['imageResize'] as Map<String, dynamic>?)?['size'] as List?)
           ?.map((e) => (e as num).toInt())
@@ -348,7 +348,7 @@ class PreprocessingInput {
   final TextRecipe? text;
   /// `tagWords`, for a token classifier.
   final TagRecipe? tags;
-  final Map<String, dynamic>? ludwigPreprocessing;
+  final Map<String, dynamic>? imageSize;
   /// `imageResize.mode`. Null: squash the whole image to width x height.
   final String? imageResizeMode;
   /// `imageResize.size` ([height, width]) and `padValue`, for the `letterbox` mode.
@@ -947,7 +947,7 @@ class OmniTrainClient {
   }
 
   (int width, int height) get _imageDims {
-    final pp = _inputSpec.ludwigPreprocessing ?? const <String, dynamic>{};
+    final pp = _inputSpec.imageSize ?? const <String, dynamic>{};
     final width = (pp['width'] as num?)?.toInt() ?? 224;
     final height = (pp['height'] as num?)?.toInt() ?? 224;
     return (width, height);
@@ -1072,7 +1072,7 @@ class OmniTrainClient {
     if (_inputSpec.type != 'image') {
       throw UnsupportedError(
         "No preprocessing implemented for input type '${_inputSpec.type}'. "
-        'See preprocessing.json inputs[0].ludwigPreprocessing and adapt this client.',
+        'See preprocessing.json inputs[0].imageSize and adapt this client.',
       );
     }
 

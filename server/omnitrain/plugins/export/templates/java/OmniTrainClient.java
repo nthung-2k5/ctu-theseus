@@ -1,13 +1,13 @@
 /**
  * OmniTrain-generated inference client.
  *
- * Wraps the exported ONNX model with the preprocessing/postprocessing Ludwig
- * applied at training time, read from preprocessing.json — Ludwig's exported
+ * Wraps the exported ONNX model with the preprocessing/postprocessing the platform
+ * applied at training time, read from preprocessing.json — the platform's exported
  * ONNX graph is the bare model only (no resize/normalize, no class-index
  * decoding), so this client reconstructs that step from the manifest rather
  * than assuming a fixed tensor layout: input/output tensor names are matched
  * against the graph's actual names at runtime, not hardcoded, since ONNX
- * export doesn't guarantee a stable naming convention across Ludwig versions.
+ * export doesn't guarantee a stable naming convention across exporter versions.
  *
  * Implements preprocessing for {@code image} inputs with {@code category}
  * outputs (image classification) and for a {@code detections} output (object
@@ -774,10 +774,10 @@ public final class OmniTrainClient implements AutoCloseable {
         if (!"image".equals(inputType)) {
             throw new UnsupportedOperationException(
                 "No preprocessing implemented for input type '" + inputType + "'. " +
-                "See preprocessing.json's inputs[0].ludwigPreprocessing and adapt this client.");
+                "See preprocessing.json's inputs[0].imageSize and adapt this client.");
         }
 
-        JsonNode pp = inputSpec.path("ludwigPreprocessing");
+        JsonNode pp = inputSpec.path("imageSize");
         int width = pp.path("width").asInt(224);
         int height = pp.path("height").asInt(224);
 

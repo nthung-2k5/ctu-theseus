@@ -43,10 +43,11 @@ async def test_export_converts_a_missing_artifact_then_assembles(db, export_env,
     assert (await export_row(db, export_id)).status == "assembling"  # build_bundle owns ready / failed
 
 
-async def test_export_converts_the_artifact_its_format_is_built_from(db, export_env, make_export):
-    export_id, run_id = await make_export(status="converting", attempt=1, fmt="torch_export")
+async def test_export_converts_the_artifact_its_format_is_built_from(db, export_env, make_export, make_run):
+    run_id = await make_run(status="succeeded", task="text_generation", backend="llm")
+    export_id, _ = await make_export(status="converting", attempt=1, fmt="hf_model", run_id=run_id)
     await export_job.run_export(export_id)
-    assert [(r, a) for r, a, _ in export_env.converted] == [(str(run_id), "torch_export")]
+    assert [(r, a) for r, a, _ in export_env.converted] == [(str(run_id), "hf_model")]
 
 
 async def test_export_skips_conversion_when_another_format_already_produced_the_artifact(db, export_env, make_export):

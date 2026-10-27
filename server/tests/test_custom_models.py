@@ -1,4 +1,4 @@
-"""Bring-your-own models end to end (except a real Hub, S3 and Ludwig): the user and admin APIs, who can see
+"""Bring-your-own models end to end (except a real Hub and S3): the user and admin APIs, who can see
 which model, training on one, the validation job, and startup recovery."""
 
 import shutil
@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy as sa
 
 from omnitrain.db.models import CustomModel, DatasetVersion, TrainingRun
-from omnitrain.domain.task_registry import SnapshotContext, get_task_descriptor
+from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 from omnitrain.jobs import queue, validate_model
 from omnitrain.jobs.recovery import recover_on_startup
 from omnitrain.plugins.backends.registry import get_backend
@@ -26,8 +26,8 @@ TEXT = "text_classification"
 HUB_BODY = {
     "name": "My BERT",
     "description": "a test model",
-    "backend": "ludwig",
-    "kind": "hf_transformer",
+    "backend": "pytorch",
+    "kind": "hf_text",
     "sourceKind": "hub",
     "sourceRef": "bert-base-uncased",
 }
@@ -70,8 +70,8 @@ def fake_storage(monkeypatch):
 
 async def add_model(db, **kw) -> uuid.UUID:
     fields = {
-        "backend": "ludwig",
-        "kind": "hf_transformer",
+        "backend": "pytorch",
+        "kind": "hf_text",
         "name": "Some model",
         "source_kind": "hub",
         "source_ref": "bert-base-uncased",
@@ -108,7 +108,7 @@ async def project(c, task=TEXT):
 async def picker(c, project_id) -> list[dict]:
     """The models the create-run picker offers this project."""
     backends = (await c.get(f"/api/projects/{project_id}/training-backends")).json()["backends"]
-    return next(b for b in backends if b["id"] == "ludwig")["models"]
+    return next(b for b in backends if b["id"] == "pytorch")["models"]
 
 
 def hf_bundle(path: Path, *, extra: dict[str, bytes] | None = None, causal: bool = False) -> Path:
@@ -129,8 +129,8 @@ def upload_row(**kw) -> CustomModel:
     """An unsaved row shaped like a model whose bundle has been uploaded."""
     fields = {
         "id": uuid.uuid4(),
-        "backend": "ludwig",
-        "kind": "hf_transformer",
+        "backend": "pytorch",
+        "kind": "hf_text",
         "name": "x",
         "source_kind": "upload",
         "spec": {"materialize": True},
@@ -147,9 +147,9 @@ async def test_kinds_list_what_can_be_added_per_task(new_user):
     user = await new_user()
     kinds = (await user.get("/api/models/kinds")).json()["kinds"]
     by_id = {k["id"]: k for k in kinds}
-    assert by_id["hf_transformer"]["tasks"] == [TEXT] and by_id["hf_transformer"]["sourceKinds"] == ["hub", "upload"]
+    assert by_id["hf_text"]["tasks"] == [TEXT] and by_id["hf_text"]["sourceKinds"] == ["hub", "upload"]
     assert "text_generation" in by_id["hf_causal_lm"]["tasks"]
-    assert by_id["timm_image"]["sourceKinds"] == ["hub"] and by_id["timm_image"]["status"] == "experimental"
+    assert by_id["hf_image"]["sourceKinds"] == ["hub", "upload"] and by_id["hf_image"]["status"] == "experimental"
 
 
 # -- Creating ----------------------------------------------------------------------------------
@@ -191,7 +191,7 @@ async def test_creation_is_validated(new_user, patch, message):
 
 async def test_a_model_is_offered_for_every_task_its_kind_serves(new_user):
     user = await new_user()
-    causal = {**HUB_BODY, "kind": "hf_causal_lm", "sourceRef": "org/llama"}
+    causal = {**HUB_BODY, "backend": "llm", "kind": "hf_causal_lm", "sourceRef": "org/llama"}
     m = (await user.post("/api/models", json=causal)).json()["model"]
     assert set(m["tasks"]) == {"text_generation", "summarization", "sequence_to_sequence", "question_answering"}
     assert (await user.post("/api/models", json=HUB_BODY)).json()["model"]["tasks"] == [TEXT]
@@ -387,13 +387,13 @@ async def test_the_picker_lists_builtins_then_the_custom_models_the_owner_may_us
 
     models = await picker(owner, p["id"])
     ids = [m["id"] for m in models]
-    assert ids[:4] == ["bert", "distilbert", "roberta", "stacked_cnn"]  # built-ins keep their place
-    assert ids[4:] == [f"custom:{global_id}", f"custom:{mine}"]
+    assert ids[:2] == ["text_bag", "text_cnn"]  # built-ins keep their place
+    assert ids[2:] == [f"custom:{global_id}", f"custom:{mine}"]
     assert f"custom:{theirs}" not in ids
     custom = {m["id"]: m for m in models if m["id"].startswith("custom:")}
     assert custom[f"custom:{global_id}"]["source"] == "global" and custom[f"custom:{mine}"]["source"] == "private"
-    assert custom[f"custom:{mine}"]["kind"] == "hf_transformer" and custom[f"custom:{mine}"]["pretrained"] is True
-    assert all(m["source"] == "builtin" and m["kind"] is None for m in models if m["id"] in ids[:4])
+    assert custom[f"custom:{mine}"]["kind"] == "hf_text" and custom[f"custom:{mine}"]["pretrained"] is True
+    assert all(m["source"] == "builtin" and m["kind"] is None for m in models if m["id"] in ids[:2])
 
 
 @pytest.mark.parametrize(
@@ -420,7 +420,8 @@ async def test_other_tasks_do_not_see_the_model(new_user, db):
     await add_model(db)
     other_task = await project(user, "tabular_classification")
     backends = (await user.get(f"/api/projects/{other_task['id']}/training-backends")).json()["backends"]
-    assert next(b for b in backends if b["id"] == "ludwig")["models"] == []
+    models = next(b for b in backends if b["id"] == "pytorch")["models"]
+    assert [m for m in models if m["id"].startswith("custom:")] == []
 
 
 # -- Training on a custom model ----------------------------------------------------------------
@@ -429,7 +430,10 @@ async def test_other_tasks_do_not_see_the_model(new_user, db):
 @pytest.fixture
 def training_env(monkeypatch, fake_storage, temp_dir):
     async def manifest(_version_id):
-        return SnapshotContext(label_class_names=["a", "b"])
+        return SnapshotContext(
+            columns=[ColumnSpec(name="text", kind="inline_text"), ColumnSpec(name="class", kind="label")],
+            label_class_names=["a", "b"],
+        )
 
     monkeypatch.setattr(training_service, "read_snapshot_manifest", manifest)
 
@@ -446,7 +450,7 @@ async def queue_run(db, project_id, version_id, **hp):
     async with db() as s:
         return await queue_training(
             s, project_id=uuid.UUID(project_id), name="r", task=TEXT, dataset_version_id=version_id,
-            backend_id="ludwig", hyperparameters=hp,
+            backend_id="pytorch", hyperparameters=hp,
         )  # fmt: skip
 
 
@@ -454,20 +458,19 @@ async def test_a_run_on_a_custom_model_records_it_and_compiles_its_path(new_user
     user = await new_user()
     model_id = await add_model(db, owner_user_id=uuid.UUID(user.user_id))
     p = await project(user)
-    run = await queue_run(db, p["id"], await ready_version(db, p["id"]), encoderId=f"custom:{model_id}")
+    run = await queue_run(db, p["id"], await ready_version(db, p["id"]), modelId=f"custom:{model_id}")
 
     assert isinstance(run, TrainingRun), run
     assert run.custom_model_id == model_id
-    assert run.hyperparameters["encoderId"] == f"custom:{model_id}"
-    encoder = run.config["input_features"][0]["encoder"]
-    assert encoder["type"] == "auto_transformer"
-    assert encoder["pretrained_model_name_or_path"] == str(cm.local_dir_for(await get_model(db, model_id)))
+    assert run.hyperparameters["modelId"] == f"custom:{model_id}"
+    assert run.config["custom"]["kind"] == "hf_text"
+    assert run.config["custom"]["path"] == str(cm.local_dir_for(await get_model(db, model_id)))
 
 
 async def test_a_run_on_a_builtin_model_records_no_custom_model(new_user, db, training_env):
     user = await new_user()
     p = await project(user)
-    run = await queue_run(db, p["id"], await ready_version(db, p["id"]), encoderId="bert")
+    run = await queue_run(db, p["id"], await ready_version(db, p["id"]), modelId="text_bag")
     assert isinstance(run, TrainingRun) and run.custom_model_id is None
 
 
@@ -476,7 +479,7 @@ async def test_training_refuses_a_custom_model_that_is_no_longer_usable(new_user
     user = await new_user()
     model_id = await add_model(db, owner_user_id=uuid.UUID(user.user_id), **change)
     p = await project(user)
-    result = await queue_run(db, p["id"], await ready_version(db, p["id"]), encoderId=f"custom:{model_id}")
+    result = await queue_run(db, p["id"], await ready_version(db, p["id"]), modelId=f"custom:{model_id}")
     assert isinstance(result, QueueError) and result.code == 400 and "not available" in result.message
 
 
@@ -486,7 +489,7 @@ async def test_training_cannot_use_someone_elses_private_model_or_a_made_up_id(n
     p = await project(user)
     version = await ready_version(db, p["id"])
     for bad in (f"custom:{theirs}", f"custom:{uuid.uuid4()}", "custom:not-a-uuid"):
-        result = await queue_run(db, p["id"], version, encoderId=bad)
+        result = await queue_run(db, p["id"], version, modelId=bad)
         assert isinstance(result, QueueError) and result.code == 400, bad
     async with db() as s:
         assert (await s.execute(sa.select(sa.func.count()).select_from(TrainingRun))).scalar_one() == 0
@@ -496,17 +499,19 @@ async def test_a_global_model_is_usable_by_anyone(new_user, db, training_env):
     user = await new_user()
     model_id = await add_model(db)  # no owner
     p = await project(user)
-    run = await queue_run(db, p["id"], await ready_version(db, p["id"]), encoderId=f"custom:{model_id}")
+    run = await queue_run(db, p["id"], await ready_version(db, p["id"]), modelId=f"custom:{model_id}")
     assert isinstance(run, TrainingRun) and run.custom_model_id == model_id
 
 
 async def test_a_causal_lm_is_the_base_model_of_an_llm_task(new_user, db, monkeypatch, fake_storage, temp_dir):
     async def manifest(_):
-        return SnapshotContext()
+        return SnapshotContext(
+            columns=[ColumnSpec(name="prompt", kind="inline_text"), ColumnSpec(name="completion", kind="inline_text")]
+        )
 
     monkeypatch.setattr(training_service, "read_snapshot_manifest", manifest)
     user = await new_user()
-    model_id = await add_model(db, kind="hf_causal_lm", source_ref="org/llama")
+    model_id = await add_model(db, backend="llm", kind="hf_causal_lm", source_ref="org/llama")
     p = await project(user, "text_generation")
     async with db() as s:
         v = DatasetVersion(dataset_id=uuid.UUID(p["id"]), version_tag="v1", status="ready")
@@ -514,11 +519,11 @@ async def test_a_causal_lm_is_the_base_model_of_an_llm_task(new_user, db, monkey
         await s.commit()
         run = await queue_training(
             s, project_id=uuid.UUID(p["id"]), name="r", task="text_generation", dataset_version_id=v.id,
-            hyperparameters={"encoderId": f"custom:{model_id}"},
+            hyperparameters={"modelId": f"custom:{model_id}"},
         )  # fmt: skip
     assert isinstance(run, TrainingRun), run
-    assert run.config["model_type"] == "llm"
-    assert run.config["base_model"] == str(cm.local_dir_for(await get_model(db, model_id)))
+    assert run.backend == "llm" and run.config["custom"]["kind"] == "hf_causal_lm"
+    assert run.config["custom"]["path"] == str(cm.local_dir_for(await get_model(db, model_id)))
 
 
 # -- The validation job ------------------------------------------------------------------------
@@ -538,9 +543,11 @@ def bundle_download(monkeypatch, tmp_path):
     return served
 
 
-def test_validating_an_upload_pins_its_hash_and_unpacks_it_where_ensure_local_finds_it(temp_dir, bundle_download):
+def test_validating_an_upload_pins_its_hash_and_unpacks_it_where_ensure_local_finds_it(
+    temp_dir, bundle_download, fake_bert
+):
     bundle_download["file"] = hf_bundle(temp_dir / "b.zip")
-    row = upload_row()
+    row = upload_row(backend="fakebert")
     result = validate_model.validate_sync(row)
 
     assert result.sha256 == cm.sha256_file(temp_dir / "b.zip") and result.revision is None
@@ -570,13 +577,13 @@ def pth_bundle(path: Path, payload) -> Path:
     return path
 
 
-def test_a_pth_in_a_bundle_is_converted_to_safetensors(temp_dir, bundle_download):
+def test_a_pth_in_a_bundle_is_converted_to_safetensors(temp_dir, bundle_download, fake_bert):
     import torch
     from safetensors.torch import load_file
 
     weights = {"layer.weight": torch.arange(6, dtype=torch.float32).reshape(2, 3)}
     bundle_download["file"] = pth_bundle(temp_dir / "b.zip", {"state_dict": weights})
-    row = upload_row()
+    row = upload_row(backend="fakebert")
     validate_model.validate_sync(row)
 
     path = cm.local_dir_for(row)
@@ -603,7 +610,7 @@ def test_a_pth_beside_safetensors_weights_is_ambiguous(temp_dir, bundle_download
 
 def test_the_backends_own_check_runs_for_the_models_kind(temp_dir, bundle_download):
     bundle_download["file"] = hf_bundle(temp_dir / "b.zip")  # a BertModel, not a causal LM
-    row = upload_row(kind="hf_causal_lm")
+    row = upload_row(backend="llm", kind="hf_causal_lm")
     with pytest.raises(Exception, match="Not a causal language model"):
         validate_model.validate_sync(row)
 
@@ -617,8 +624,8 @@ def test_a_kind_the_backend_does_not_offer_is_refused(temp_dir):
 def hub_row(**kw) -> CustomModel:
     fields = {
         "id": uuid.uuid4(),
-        "backend": "ludwig",
-        "kind": "hf_transformer",
+        "backend": "pytorch",
+        "kind": "hf_text",
         "name": "x",
         "source_kind": "hub",
         "source_ref": "org/bert",
@@ -643,9 +650,9 @@ def fake_hub(monkeypatch, *, sha="c0ffee", size=100):
     monkeypatch.setattr(cm, "_fetch_hub", fetch)
 
 
-def test_validating_a_hub_model_pins_the_commit_and_fetches_at_that_revision(temp_dir, monkeypatch):
+def test_validating_a_hub_model_pins_the_commit_and_fetches_at_that_revision(temp_dir, monkeypatch, fake_bert):
     fake_hub(monkeypatch)
-    row = hub_row()
+    row = hub_row(backend="fakebert")
     result = validate_model.validate_sync(row)
     assert (
         result.revision == "c0ffee"
@@ -663,9 +670,9 @@ def test_a_hub_model_over_the_size_limit_is_refused_before_downloading(temp_dir,
     assert not (temp_dir / "custom_models").exists()
 
 
-def test_a_stored_bundle_that_changed_is_caught_when_it_is_put_back(temp_dir, bundle_download):
+def test_a_stored_bundle_that_changed_is_caught_when_it_is_put_back(temp_dir, bundle_download, fake_bert):
     bundle_download["file"] = hf_bundle(temp_dir / "b.zip")
-    row = upload_row()
+    row = upload_row(backend="fakebert")
     validate_model.validate_sync(row)
     shutil.rmtree(cm.local_dir_for(row))  # a restart wiped the temp directory
 
@@ -675,7 +682,7 @@ def test_a_stored_bundle_that_changed_is_caught_when_it_is_put_back(temp_dir, bu
 
 
 def test_a_kind_that_fetches_its_own_weights_has_nothing_to_materialise(temp_dir):
-    row = hub_row(kind="timm_image", source_ref="resnet50", revision=None)
+    row = hub_row(source_ref="resnet50", revision=None)
     row.spec = {"materialize": False}
     assert cm.ensure_local(row) == cm.local_dir_for(row) and not cm.local_dir_for(row).exists()
 
@@ -686,10 +693,10 @@ async def claim(db, model_id) -> None:
     assert claimed == model_id
 
 
-async def test_the_job_marks_a_good_upload_ready(db, temp_dir, bundle_download):
+async def test_the_job_marks_a_good_upload_ready(db, temp_dir, bundle_download, fake_bert):
     bundle_download["file"] = hf_bundle(temp_dir / "b.zip")
     model_id = await add_model(
-        db, status="uploaded", source_kind="upload", source_ref=None, revision=None,
+        db, backend="fakebert", status="uploaded", source_kind="upload", source_ref=None, revision=None,
         storage_key="custom/x/bundle.zip",
     )  # fmt: skip
     await claim(db, model_id)
@@ -776,7 +783,7 @@ async def test_the_backend_contract_defaults_offer_no_custom_models():
     from omnitrain.plugins.backends.base import TrainerBackend
 
     assert TrainerBackend.custom_model_kinds.__func__(TrainerBackend, get_task_descriptor(TEXT)) == []
-    assert get_backend("ludwig").custom_model_kinds(get_task_descriptor("tabular_classification")) == []
+    assert get_backend("pytorch").custom_model_kinds(get_task_descriptor("tabular_classification")) == []
 
 
 # -- Naming the model a run used ---------------------------------------------------------------
@@ -798,8 +805,8 @@ async def test_run_detail_names_the_model_it_used(new_user, db, make_run):
             )  # fmt: skip
 
         custom, builtin, unnamed = (
-            run(hyperparameters={"encoderId": f"custom:{model_id}"}, custom_model_id=model_id),
-            run(hyperparameters={"encoderId": "distilbert"}),
+            run(hyperparameters={"modelId": f"custom:{model_id}"}, custom_model_id=model_id),
+            run(hyperparameters={"modelId": "text_bag"}),
             run(),
         )
         s.add_all([custom, builtin, unnamed])
@@ -810,8 +817,8 @@ async def test_run_detail_names_the_model_it_used(new_user, db, make_run):
         return (await user.get(f"/api/runs/{run_id}")).json()["run"]
 
     got = await detail(ids[0])
-    assert got["modelLabel"] == "Legal BERT" and got["customModelId"] == str(model_id) and got["backend"] == "ludwig"
-    assert (await detail(ids[1]))["modelLabel"] == "DistilBERT"
+    assert got["modelLabel"] == "Legal BERT" and got["customModelId"] == str(model_id) and got["backend"] == "pytorch"
+    assert (await detail(ids[1]))["modelLabel"] == get_backend("pytorch").models(get_task_descriptor(TEXT))[0].label
     assert (await detail(ids[2]))["modelLabel"] is None
 
     # Archiving the model (it is in use, so deleting archives it) does not lose the name a run shows.
@@ -847,7 +854,7 @@ async def test_inspecting_a_hub_model_reads_the_task_from_its_config(new_user, m
     fake_inspection(monkeypatch, {"model_type": "bert", "architectures": ["BertForSequenceClassification"]})
     out = await inspect(await new_user())
     assert out["errors"] == [] and out["warnings"] == [] and out["revision"] == "c0ffee"
-    assert out["suggestedBackend"] == "ludwig" and out["suggestedKind"] == "hf_transformer"
+    assert out["suggestedBackend"] == "pytorch" and out["suggestedKind"] == "hf_text"
 
 
 async def test_a_config_that_does_not_name_the_task_is_only_a_warning(new_user, monkeypatch):
@@ -892,7 +899,7 @@ async def test_a_config_read_from_an_upload_is_described_without_the_hub(new_use
     body = {"config": {"model_type": "bert", "architectures": ["BertForSequenceClassification"]}}
     out = (await user.post("/api/models/inspect", json=body)).json()
     assert out["sourceRef"] is None and out["revision"] is None and out["errors"] == []
-    assert out["suggestedKind"] == "hf_transformer" and out["architectures"] == ["BertForSequenceClassification"]
+    assert out["suggestedKind"] == "hf_text" and out["architectures"] == ["BertForSequenceClassification"]
     out = (await user.post("/api/models/inspect", json={"config": {"auto_map": {}}})).json()
     assert any("auto_map" in e for e in out["errors"]) and out["suggestedKind"] is None
 

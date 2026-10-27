@@ -1,6 +1,6 @@
 """Model artifacts: the conversions `SklearnBackend.convert` builds export bundles from. Only ONNX is offered.
 
-The graph is shaped to what the generated clients already expect of a Ludwig model, so a scikit-learn run needs no
+The graph is shaped to what the generated clients already expect of a tabular model, so a scikit-learn run needs no
 client of its own:
 
   * A tabular model takes one float input per column, named by the column, of shape `[batch]`, as raw values:

@@ -12,7 +12,7 @@ import pytest
 import sqlalchemy as sa
 
 from omnitrain.api.routers.datasets import upload as datasets_router
-from omnitrain.db.models import Annotation, DatasetItem, DatasetVersion, TextFeatures, VisionFeatures
+from omnitrain.db.models import Annotation, DatasetItem, DatasetVersion, Project, TextFeatures, VisionFeatures
 from omnitrain.services import storage
 
 
@@ -563,7 +563,11 @@ async def test_delete_reports_not_found_for_ids_outside_the_project_and_the_sing
 
 async def test_a_class_cannot_be_attached_to_uploads_of_a_task_without_label_classes(client, new_user, db):
     c = await new_user()
-    p = await project(c, "image_captioning")  # captions, not classes
+    p = await project(c, "image_classification")
+    # Nothing trains captioning now, so the API would refuse to create it: switch the project's task directly.
+    async with db() as s:
+        await s.execute(sa.update(Project).where(Project.id == uuid.UUID(p["id"])).values(task="image_captioning"))
+        await s.commit()
     stray = await make_class(c, p["id"])  # nothing stops a class from existing; it must not reach the items
     upload = f"/api/projects/{p['id']}/upload"
     files = [("files", ("cat.png", png(8, 8), "image/png"))]

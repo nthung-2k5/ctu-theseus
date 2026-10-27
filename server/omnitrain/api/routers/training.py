@@ -314,8 +314,8 @@ async def get_run_evaluation_errors(
 
     errors = list((evaluation.report or {}).get("topErrors") or [])
     if class_id is not None:
-        # topErrors stores Ludwig own idx2str-derived label STRINGS, never a Postgres class id
-        # (label_classes has no idea which index Ludwig assigned to which class), so resolve the
+        # topErrors stores the model's own label STRINGS, never a Postgres class id
+        # (label_classes has no idea which index a run assigned to which class), so resolve the
         # class to its name first.
         cls = await session.get(LabelClass, class_id)
         if cls is None:

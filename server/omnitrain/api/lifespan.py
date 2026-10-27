@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # 2. Settle whatever a previous process left in flight, BEFORE anything new is claimed.
     await recover_on_startup()
 
-    # 3. Job lanes and housekeeping. Imported here because train/export pull in torch and Ludwig,
+    # 3. Job lanes and housekeeping. Imported here because train/export pull in torch,
     #    and importing the app (for the OpenAPI export) must stay cheap.
     from omnitrain.jobs.dispatcher import Dispatcher, build_default_lanes, set_dispatcher
 

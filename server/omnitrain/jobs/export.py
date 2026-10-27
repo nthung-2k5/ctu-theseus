@@ -1,7 +1,7 @@
 """Run one export job: convert the model artifact if needed, then assemble the bundle.
 
 Framework-neutral since trainer backends became a plugin system: the actual model conversion and
-golden-sample prediction go through the run's own `TrainerBackend`, not Ludwig directly.
+golden-sample prediction go through the run's own `TrainerBackend`.
 
 Replaces server/tasks/export.py plus the gateway two-phase dance (converting -> event ->
 assembling -> in-memory queue). One job now walks the whole status flow on a single row:
@@ -121,7 +121,7 @@ def _convert(
 ) -> None:
     """Sync: download the trained model, export it, upload the artifact and the golden sample."""
     with _conversion_lock:
-        model_dir = storage.find_model_dir(storage.download_model(run_id))
+        model_dir = storage.download_model(run_id)
         workdir = os.path.join(str(get_settings().temp_dir), "exports", export_id)
         os.makedirs(workdir, exist_ok=True)
 

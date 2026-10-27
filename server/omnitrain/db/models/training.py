@@ -38,7 +38,7 @@ class Sweep(Base):
     name: Mapped[str] = mapped_column(sa.String(255))
     # A trainer backend plugin id (omnitrain/plugins/backends/), free text like exports.format, never a
     # Postgres enum: adding a backend is a Python class, not a migration.
-    backend: Mapped[str] = mapped_column(sa.String(64), default="ludwig", server_default="ludwig")
+    backend: Mapped[str] = mapped_column(sa.String(64), default="pytorch", server_default="pytorch")
     # Maps each trainer knob to its candidate values, see services/sweep.py.
     search_space: Mapped[Any] = mapped_column(JSONB)
     # A sweep strategy plugin id (omnitrain/sweep_strategies/), free text like `backend`, never a Postgres enum.
@@ -82,7 +82,7 @@ class TrainingRun(JobColumns, Base):
     sweep_id: Mapped[uuid.UUID | None] = mapped_column(sa.ForeignKey("sweeps.id", ondelete="CASCADE"), index=True)
     trial_index: Mapped[int | None] = mapped_column(sa.Integer)
     # A trainer backend plugin id (omnitrain/plugins/backends/), free text like exports.format.
-    backend: Mapped[str] = mapped_column(sa.String(64), default="ludwig", server_default="ludwig")
+    backend: Mapped[str] = mapped_column(sa.String(64), default="pytorch", server_default="pytorch")
     hyperparameters: Mapped[Any] = mapped_column(JSONB)
     # Set when the run trained on a bring-your-own model. RESTRICT, so a model any run used can only be
     # archived (see routers/models.py), never removed out from under that run.

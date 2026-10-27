@@ -2,10 +2,10 @@
 config, to the run's backend to build the preprocessing.json.
 
 training_runs.config (Postgres) is the exact compiled config; the second input, when a backend
-declares one (`TrainerBackend.metadata_filename`, e.g. Ludwig's training_set_metadata.json), is an
+declares one (`TrainerBackend.metadata_filename`, e.g. the `names.json` the PyTorch backend writes), is an
 S3 object under the run's results prefix. Which parts of that combination matter, and how (e.g.
-idx2str MUST come from the metadata file, never from the label_classes table), is entirely up to
-the backend — see backends/ludwig/manifest.py for the reference implementation.
+the class order MUST come from the metadata file, never from the label_classes table), is entirely up to
+the backend — see backends/pytorch/manifest.py for the reference implementation.
 """
 
 import asyncio

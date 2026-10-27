@@ -99,7 +99,7 @@ class TestHyperparameters:
     def test_wire_names_are_camel_case_and_unknown_keys_are_rejected(self):
         hp = YoloHyperparameters.model_validate({"modelId": "yolo11m-cls", "imageSize": 320, "freezeLayers": 2})
         assert (hp.model_id, hp.image_size, hp.freeze_layers) == ("yolo11m-cls", 320, 2)
-        # Ludwig-only knobs must not be accepted: the web form would otherwise send them to this backend.
+        # Knobs of another backend must not be accepted: the web form would otherwise send them to this backend.
         with pytest.raises(ValidationError):
             YoloHyperparameters.model_validate({"freezeBackbone": False})
 

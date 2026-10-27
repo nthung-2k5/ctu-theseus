@@ -21,7 +21,7 @@ def no_s3(monkeypatch):
     monkeypatch.setattr(storage, "ensure_buckets", lambda: None)
     monkeypatch.setattr(
         storage, "file_exists", lambda bucket, key: False
-    )  # so a training run fails fast, not on Ludwig
+    )  # so a training run fails fast, not on a model download
     monkeypatch.setattr(storage, "upload_file", lambda *a, **k: None)
 
 

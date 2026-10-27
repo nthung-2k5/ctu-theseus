@@ -45,7 +45,7 @@ class ExportFormatOut(ApiModel):
     description: str
     notice: str
     group: str
-    # Which converted model this format is built from (e.g. onnx, torch_export).
+    # Which converted model this format is built from (e.g. onnx, hf_model).
     artifact: str
 
 

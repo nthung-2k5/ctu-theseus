@@ -2,7 +2,7 @@
 
 Ported from server/lib/snapshot.ts (hyparquet-writer replaced by pyarrow). The parquet holds S3
 URIs and label/scalar values, not raw bytes: files stay in the content-addressed pool and
-Ludwig reads them through s3fs, so a snapshot is metadata-sized and cheap to build inline.
+a backend reads them through s3fs or downloads them, so a snapshot is metadata-sized and cheap to build inline.
 """
 
 import asyncio
@@ -40,9 +40,8 @@ from omnitrain.services.preprocessing import materialize_preprocessing
 
 logger = logging.getLogger(__name__)
 
-# Ludwig fixed split preprocessing needs an integer column: its splitter does
-# column.astype(np.int8) and partitions on the literal values 0/1/2 (train/validation/test), so
-# the human-readable `split` string column cannot double as it. This one is synthetic.
+# The `_split_idx` column holds the split as 0/1/2 (train/validation/test). Nothing reads it back (backends use the
+# `split` column); snapshots stored before it was renamed carry it under its old name, which is harmless.
 SPLIT_INDEX = {"train": 0, "validation": 1, "test": 2}
 
 
@@ -366,7 +365,7 @@ async def _discard_partial_derivations(
 
 
 async def read_snapshot_manifest(version_id: uuid.UUID | str) -> SnapshotContext:
-    """Rebuild the SnapshotContext for the Ludwig compiler from a stored manifest."""
+    """Rebuild the SnapshotContext for a backend's compiler from a stored manifest."""
     raw = await asyncio.get_running_loop().run_in_executor(
         None, storage.download_bytes, C.BUCKET_DATASETS, storage.snapshot_manifest_key(str(version_id))
     )

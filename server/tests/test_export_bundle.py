@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 from omnitrain.db.models import LabelClass, ModelExport, TrainingRun
 from omnitrain.jobs import export as export_job
-from omnitrain.plugins.backends.ludwig.manifest import build_preprocessing_manifest as build_manifest
+from omnitrain.plugins.backends.pytorch.spec import ImageSpec
 from omnitrain.plugins.export import bundle as B
 from omnitrain.plugins.export.formats.base import ExportFormat, _registry
 from omnitrain.plugins.export.formats.csharp_devkit import CSharpDevkit
@@ -22,7 +22,7 @@ from omnitrain.plugins.export.readme import ReadmeVars, app_readme, devkit_readm
 from omnitrain.plugins.export.registry import get_export_format, list_export_formats
 from omnitrain.services import storage
 
-CLASSES = ["dog", "cat"]  # Ludwig order: deliberately NOT alphabetical
+CLASSES = ["dog", "cat"]  # the model's order: deliberately NOT alphabetical
 PRE = {
     "schemaVersion": 1,
     "runId": "r1",
@@ -91,10 +91,9 @@ def test_golden_expected_json_is_rewritten_to_bundle_local_paths():
 
 def test_model_formats_are_just_the_artifact_metadata_labels_and_readme():
     assert set(files("onnx")) == {"model.onnx", "preprocessing.json", "labels.txt", "README.md"}
-    assert set(files("torch_export")) == {"model.pt2", "preprocessing.json", "labels.txt", "README.md"}
 
 
-def test_labels_txt_is_written_in_ludwig_index_order_and_only_for_classification():
+def test_labels_txt_is_written_in_the_models_index_order_and_only_for_classification():
     assert files("onnx")["labels.txt"].data == b"dog\ncat"
     regression = {**PRE, "outputs": [{"name": "target", "type": "number", "column": "target"}]}
     assert "labels.txt" not in files("onnx", pre=regression)
@@ -184,7 +183,7 @@ def test_readme_reflects_the_format_and_whether_a_verify_path_exists():
 def test_the_shipped_formats_are_discovered_grouped_and_ordered():
     listed = [(f.group, f.id) for f in list_export_formats()]
     assert listed == [
-        ("Model", "onnx"), ("Model", "torch_export"), ("Model", "hf_model"),
+        ("Model", "onnx"), ("Model", "hf_model"),
         ("Devkit", "python_devkit"), ("Devkit", "typescript_devkit"), ("Devkit", "csharp_devkit"),
         ("Devkit", "java_devkit"),
         ("App", "pwa_app"), ("App", "flutter_app"),
@@ -254,59 +253,16 @@ def test_zip_stores_the_model_deflates_the_rest_and_is_byte_for_byte_reproducibl
 # -- Preprocessing decompilation -------------------------------------------------------------
 
 
-def test_manifest_takes_class_order_from_ludwig_metadata_and_passes_preprocessing_through():
-    cfg = {
-        "input_features": [{"name": "image_path", "type": "image", "column": "image_path"}],
-        "output_features": [{"name": "class", "type": "category", "column": "class"}],
-    }
-    meta = {
-        "image_path": {"preprocessing": {"height": 224, "width": 224, "standardize_image": "imagenet1k"}},
-        "class": {"idx2str": ["dog", "cat"], "str2idx": {"dog": 0, "cat": 1}},
-    }
-    m = build_manifest("r1", cfg, meta)
-    assert m["outputs"][0]["classes"] == ["dog", "cat"]  # Ludwig order, never alphabetical
-    inp = m["inputs"][0]
-    assert inp["ludwigPreprocessing"]["height"] == 224
-    assert inp["imageNormalization"] == {"mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225]}
-
-
-def test_unknown_image_presets_and_missing_metadata_are_not_guessed_at():
-    cfg = {"input_features": [{"name": "i", "type": "image", "column": "i"}], "output_features": []}
-    m = build_manifest("r", cfg, {"i": {"preprocessing": {"standardize_image": "some_new_preset"}}})
-    assert "imageNormalization" not in m["inputs"][0]
-    assert m["inputs"][0]["ludwigPreprocessing"]["standardize_image"] == "some_new_preset"  # kept raw
-    bare = build_manifest("r", cfg, None)
-    assert bare["inputs"][0] == {"name": "i", "type": "image", "column": "i"} and bare["outputs"] == []
-
-
-def test_number_inputs_carry_their_fitted_normalization_stats_from_the_metadata_siblings():
-    cfg = {
-        "input_features": [
-            {"name": "age", "type": "number", "column": "age"},
-            {"name": "raw", "type": "number", "column": "raw"},
-            {"name": "img", "type": "image", "column": "img"},
-        ],
-        "output_features": [{"name": "target", "type": "number", "column": "target"}],
-    }
-    meta = {
-        "age": {"preprocessing": {"normalization": "zscore"}, "mean": 40.5, "std": 12.0},
-        "raw": {"preprocessing": {"normalization": None}},
-        "img": {"preprocessing": {"normalization": "zscore"}, "mean": 1},
-    }
-    m = build_manifest("r", cfg, meta)
-    assert m["inputs"][0]["numberNormalization"] == {"type": "zscore", "mean": 40.5, "std": 12.0}
-    assert "numberNormalization" not in m["inputs"][1]  # normalization disabled
-    assert "numberNormalization" not in m["inputs"][2]  # only number inputs
-    assert "classes" not in m["outputs"][0]  # regression has no class list
-
-
-def test_a_run_with_no_compiled_config_cannot_be_exported():
-    with pytest.raises(ValueError, match="no compiled Ludwig config"):
-        build_manifest("r", {}, None)
+def names_json(classes=CLASSES):
+    """What the PyTorch backend writes beside a trained image model: the spec and the class order."""
+    return {
+        **ImageSpec(size=8, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)).to_meta(),
+        "task": "classify", "imageColumn": "image_path", "outputName": "class", "names": list(classes),
+    }  # fmt: skip
 
 
 async def test_extract_preprocessing_ignores_the_label_classes_table_entirely(db, make_run, monkeypatch):
-    """The wrong-order trap: Postgres sorted the classes alphabetically, Ludwig did not."""
+    """The wrong-order trap: Postgres sorted the classes alphabetically, the model did not."""
     rid = await make_run(status="succeeded")
     async with db() as s:
         run = (await s.execute(sa.select(TrainingRun).where(TrainingRun.id == rid))).scalar_one()
@@ -318,8 +274,8 @@ async def test_extract_preprocessing_ignores_the_label_classes_table_entirely(db
             [LabelClass(dataset_id=run.project_id, name="cat"), LabelClass(dataset_id=run.project_id, name="dog")]
         )
         await s.commit()
-    meta = {"class": {"idx2str": ["dog", "cat"]}}
-    monkeypatch.setattr(storage, "list_keys", lambda b, p: [f"{rid}/results/results_run_0/training_set_metadata.json"])
+    meta = names_json()
+    monkeypatch.setattr(storage, "list_keys", lambda b, p: [f"{rid}/results/names.json"])
     monkeypatch.setattr(storage, "download_bytes", lambda b, k: json.dumps(meta).encode())
     async with db() as s:
         manifest = await extract_preprocessing(s, rid)
@@ -339,21 +295,15 @@ def s3(monkeypatch):
     return store
 
 
-async def prepared_export(db, make_export, s3, *, fmt="python_devkit", golden=True, config=True):
+async def prepared_export(db, make_export, s3, *, fmt="python_devkit", golden=True, metadata=True):
     export_id, run_id = await make_export(status="assembling", attempt=1, fmt=fmt)
     async with db() as s:
         run = (await s.execute(sa.select(TrainingRun).where(TrainingRun.id == run_id))).scalar_one()
         run.name = "Cats vs Dogs"
-        if config:
-            run.config = {
-                "input_features": [{"name": "image_path", "type": "image", "column": "image_path"}],
-                "output_features": [{"name": "class", "type": "category", "column": "class"}],
-            }
         await s.commit()
     s3[("theseus-models", f"{run_id}/model.onnx")] = b"ONNX-BYTES"
-    s3[("theseus-training", f"{run_id}/results/results_run_0/training_set_metadata.json")] = json.dumps(
-        {"class": {"idx2str": CLASSES}, "image_path": {"preprocessing": {"height": 8}}}
-    ).encode()
+    if metadata:
+        s3[("theseus-training", f"{run_id}/results/names.json")] = json.dumps(names_json()).encode()
     if golden:
         s3[("theseus-datasets", "pool/p/ab/x.png")] = b"the-real-sample"
         s3[("theseus-models", f"{run_id}/expected.json")] = json.dumps(
@@ -385,10 +335,11 @@ async def test_build_bundle_produces_a_verified_devkit_zip_and_marks_the_export_
             "omnitrain_client.py", "example.py", "verify.py", "README.md",
         }  # fmt: skip
         assert zf.read("model.onnx") == b"ONNX-BYTES" and zf.read("sample/input.png") == b"the-real-sample"
-        assert zf.read("labels.txt") == b"dog\ncat"  # Ludwig index order, from the metadata file
+        assert zf.read("labels.txt") == b"dog\ncat"  # the model's index order, from the metadata file
         expected = json.loads(zf.read("expected.json"))
         assert expected["sampleFile"] == "sample/input.png" and expected["predictions"] == {"dog": 0.7, "cat": 0.3}
-        assert json.loads(zf.read("preprocessing.json"))["inputs"][0]["ludwigPreprocessing"] == {"height": 8}
+        resize = json.loads(zf.read("preprocessing.json"))["inputs"][0]["imageSize"]
+        assert resize == {"height": 8, "width": 8}
         assert "Cats vs Dogs" in zf.read("README.md").decode()
 
 
@@ -425,9 +376,9 @@ async def test_build_bundle_records_a_failure_instead_of_raising(db, make_export
     e = await row(db, export_id)
     assert e.status == "failed" and e.failed_message and e.bundle_key is None
 
-    no_config, _ = await prepared_export(db, make_export, s3, config=False)
-    await B.build_bundle(no_config)
-    assert "no compiled Ludwig config" in (await row(db, no_config)).failed_message
+    no_meta, _ = await prepared_export(db, make_export, s3, metadata=False)
+    await B.build_bundle(no_meta)
+    assert "names.json" in (await row(db, no_meta)).failed_message
 
 
 async def test_a_stale_assembly_result_never_overwrites_a_row_that_moved_on(db, make_export, s3):

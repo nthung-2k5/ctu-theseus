@@ -95,7 +95,7 @@ def execute(spec: RunSpec, sink: ProgressSink) -> dict[str, Any] | None:
 
     backend = get_backend(spec.backend)
 
-    # Ludwig increments results_run_N instead of overwriting. Start from a clean output prefix
+    # A retried run must not find the files of its earlier attempt. Start from a clean output prefix
     # so there is exactly one candidate for export and inference to serve, whatever backend
     # wrote it.
     output_prefix = storage.training_results_prefix(rid)

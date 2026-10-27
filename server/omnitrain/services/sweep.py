@@ -1,13 +1,13 @@
 """Hyperparameter sweep search-space validation and expansion.
 
-Deliberately not Ludwig's own hyperopt (Ray Tune-backed): that would contend with training for
+Deliberately not a hyperparameter-optimisation library (Ray Tune, say): that would contend with training for
 the single GPU, its progress is opaque to the run/metric/log event pipeline, and it reuses none
 of the cancel and recovery machinery an ordinary run already gets. Instead a sweep is just N
 ordinary training runs: a sweep strategy plugin (`omnitrain/sweep_strategies/`) turns a search space into that
 list of N selections, which the sweeps router then enqueues one after another through the normal training path.
 
 Keys are the camelCase names of the chosen trainer backend's Hyperparameters model (learningRate,
-batchSize, encoderId, ...), exactly as they arrive in the API and are stored in sweeps.search_space.
+batchSize, modelId, ...), exactly as they arrive in the API and are stored in sweeps.search_space.
 """
 
 import random

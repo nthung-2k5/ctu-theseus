@@ -1,7 +1,7 @@
 """Search-space helpers shared by the strategies (underscore-prefixed, so not loaded as a strategy module).
 
 Keys are the camelCase names of the chosen trainer backend's Hyperparameters model (learningRate, batchSize,
-encoderId, ...), exactly as they arrive in the API and are stored in sweeps.search_space.
+modelId, ...), exactly as they arrive in the API and are stored in sweeps.search_space.
 """
 
 import itertools

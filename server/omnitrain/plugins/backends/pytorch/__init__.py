@@ -1,11 +1,11 @@
 """The PyTorch trainer backend (`id = "pytorch"`): code-defined models, trained by a plain PyTorch loop.
 
-Where Ludwig is configured (a YAML of feature types and encoders that Ludwig turns into a network), this backend is
-written: the network is a torchvision model with a new head (images), a small perceptron (tables), a convolutional
-network over a spectrogram (sounds) or a word-level network (texts), the loop is ours, and what a model expects as
-input is one spec (`ImageSpec`, `TabularSpec`, `AudioSpec`, `TextSpec`) that training, evaluation, serving and the
-export manifest all read. That is what makes a client's prediction agree with the platform's, and it removes Ludwig's
-hidden preprocessing from the picture. A table's imputation and scaling are fitted on the train split only and live
+This backend is written, not configured: the network is a torchvision model with a new head (images), a small
+perceptron (tables), a convolutional network over a spectrogram (sounds) or a word-level network (texts), the loop is
+ours, and what a model expects as input is one spec (`ImageSpec`, `TabularSpec`, `AudioSpec`, `TextSpec`) that
+training, evaluation, serving and the export manifest all read. That is what makes a client's prediction agree with
+the platform's, with no hidden
+preprocessing in the picture. A table's imputation and scaling are fitted on the train split only and live
 inside the exported graph.
 
 Submodules:
@@ -90,8 +90,8 @@ class PytorchBackend(TrainerBackend):
     # A bring-your-own model is saved as a self-contained Hugging Face folder (hf.py), so a trained model loads, serves
     # and exports from the run's results alone, wherever its base model's files were.
     remote_custom_models = True
-    # The first choice for the three classification tasks Ludwig also trains. Ludwig stays offered after it, so a run
-    # (or an old one's setup, reused) can still name it. Tables belong to scikit-learn, and a tagger has no other backend.
+    # The first choice for image, audio and text classification. Tables belong to scikit-learn, a tagger has no other
+    # backend, and the generative text tasks belong to `llm`.
     default_for = frozenset({"image_classification", "audio_classification", "text_classification"})
 
     @classmethod

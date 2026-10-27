@@ -55,4 +55,4 @@ class Extremes(SweepStrategy):
   after another. An adaptive strategy (Bayesian, successive halving) would first need something that enqueues more
   trials as runs finish; that does not exist yet.
 - **Do not assume a key's type.** Values can be numbers, strings or booleans, and the model-choice key varies per
-  backend (`encoderId` for Ludwig, `modelId` for the rest).
+  backend (`modelId` unless a backend overrides it).

@@ -1,7 +1,7 @@
 """Run one training job on this server: claim bookkeeping, live progress, cancel, evaluation row.
 
 Framework-neutral since trainer backends became a plugin system: everything here is common to any
-backend (Ludwig or otherwise) — the run lifecycle and abort registration. Training and evaluation themselves are
+backend — the run lifecycle and abort registration. Training and evaluation themselves are
 `run_core.execute`, which knows nothing about Postgres or the event writer, so a remote worker can run the same
 code; this module is the local half that wires it to both. What changed relative to the pre-plugin worker
 still applies:

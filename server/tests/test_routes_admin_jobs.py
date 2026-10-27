@@ -37,7 +37,7 @@ async def test_runs_of_every_user_are_listed_with_their_owner_and_filterable(adm
     everything = (await admin.get("/api/admin/runs")).json()
     assert everything["total"] == 2 and {r["id"] for r in everything["runs"]} == {str(queued), str(succeeded)}
     row = next(r for r in everything["runs"] if r["id"] == str(queued))
-    assert row["ownerEmail"].endswith("@x.co") and row["projectName"] == "p" and row["backend"] == "ludwig"
+    assert row["ownerEmail"].endswith("@x.co") and row["projectName"] == "p" and row["backend"] == "pytorch"
     assert row["task"] == "image_classification" and row["status"] == "queued"
 
     only = (await admin.get("/api/admin/runs", params={"status": "succeeded"})).json()
@@ -121,14 +121,14 @@ async def test_system_overview_counts_and_reports_queue_depths(admin, new_user, 
         s.add_all(
             [
                 CustomModel(
-                    backend="ludwig",
+                    backend="pytorch",
                     kind="hf_transformer",
                     name="a",
                     source_kind="hub",
                     status="uploaded",
                 ),
                 CustomModel(
-                    backend="ludwig",
+                    backend="pytorch",
                     kind="hf_transformer",
                     name="b",
                     source_kind="hub",
@@ -136,7 +136,7 @@ async def test_system_overview_counts_and_reports_queue_depths(admin, new_user, 
                     size_bytes=500,
                 ),
                 CustomModel(
-                    backend="ludwig",
+                    backend="pytorch",
                     kind="hf_transformer",
                     name="c",
                     source_kind="hub",
@@ -162,7 +162,7 @@ async def test_system_overview_counts_and_reports_queue_depths(admin, new_user, 
     assert lanes["train"]["running"] is None and lanes["train"]["capacity"] is None  # no dispatcher in this test
 
     backends = {b["id"]: b for b in body["backends"]}
-    assert backends["ludwig"]["available"] is True and backends["ludwig"]["unavailableReason"] is None
+    assert backends["pytorch"]["available"] is True and backends["pytorch"]["unavailableReason"] is None
 
 
 async def test_system_overview_reports_lane_load_when_a_dispatcher_runs(admin):

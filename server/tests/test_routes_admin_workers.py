@@ -12,7 +12,7 @@ from omnitrain.schemas.worker import PROTOCOL_VERSION
 from omnitrain.settings import get_settings
 
 ADMIN_EMAIL = "boss@example.com"
-CLAIM = {"backends": ["ludwig"], "protocol": PROTOCOL_VERSION, "version": "1.2.3", "hostname": "box", "gpu": "RTX"}
+CLAIM = {"backends": ["pytorch"], "protocol": PROTOCOL_VERSION, "version": "1.2.3", "hostname": "box", "gpu": "RTX"}
 
 
 @pytest.fixture
@@ -66,7 +66,7 @@ async def test_a_worker_shows_what_it_reported_and_is_online_only_while_recent(a
         "box",
         "RTX",
         "1.2.3",
-        ["ludwig"],
+        ["pytorch"],
     )
 
     async with db() as s:

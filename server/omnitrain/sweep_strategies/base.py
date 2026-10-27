@@ -1,7 +1,7 @@
 """The sweep strategy plugin base class: how a search space becomes the list of trials to train.
 
-A sweep is just N ordinary training runs (see `services/sweep.py` for why it is not Ludwig hyperopt), so a
-strategy has one job: given the candidate values per hyperparameter and the trial budget, say which
+A sweep is just N ordinary training runs (see `services/sweep.py` for why it is not a hyperparameter-optimisation
+library), so a strategy has one job: given the candidate values per hyperparameter and the trial budget, say which
 combinations to try. To add one, create a module in this package with a subclass that sets `id`, `label` and
 `description` and implements `trials`. Restart the backend; `GET /api/sweep-strategies` lists it and the web's
 strategy selector renders that list, with no enum, migration or frontend edit (`sweeps.strategy` is free text).

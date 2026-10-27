@@ -47,7 +47,7 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
                 "imageResize": {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"},
                 # Scaled to 0..1 first, then (x - mean) / std per channel.
                 "imageNormalization": {"mean": list(meta["mean"]), "std": list(meta["std"])},
-                "ludwigPreprocessing": {"height": size, "width": size},
+                "imageSize": {"height": size, "width": size},
             }
         ],
         "outputs": [

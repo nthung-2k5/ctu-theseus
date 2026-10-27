@@ -1,9 +1,8 @@
 """The generic training job engine: run lifecycle, progress, abort, evaluation —
 everything in jobs/train.py that has nothing to do with which backend is training.
 
-Exercised against a FAKE trainer backend (registered for this module only) rather than Ludwig, so
-these tests fail only when the generic engine breaks. Ludwig's own glue (the progress callback,
-_extract_metrics, LudwigLoadedModel construction) is tested in test_ludwig_train.py.
+Exercised against a FAKE trainer backend (registered for this module only) rather than a real framework, so
+these tests fail only when the generic engine breaks. Each backend's own glue is tested in that backend's test module.
 """
 
 import asyncio
@@ -43,7 +42,7 @@ class FakeBackend(TrainerBackend):
     """Registers itself at import time like any real backend (see the module-scoped unregister
     fixture below). Its `train()` runs a real epoch loop through the real TrainContext
     (report/check_abort/heartbeat), on the training thread, mirroring what a real backend's
-    train() does without needing torch or Ludwig."""
+    train() does without needing torch."""
 
     id = "fake"
     label = "Fake"

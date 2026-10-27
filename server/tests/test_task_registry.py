@@ -98,13 +98,20 @@ class TestInferenceOutputKind:
 def test_descriptors_are_immutable_data_no_backend_can_corrupt():
     # Compiling deep-copies feature dicts, so the shared registry must be unchanged afterwards.
     before = get_task_descriptor("image_classification").model_dump()
-    from omnitrain.domain.task_registry import SnapshotContext
-    from omnitrain.plugins.backends.ludwig.compile import LudwigHyperparameters, compile_ludwig_config
+    from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext
+    from omnitrain.plugins.backends.pytorch.compile import PytorchHyperparameters, compile_pytorch_config
 
-    compile_ludwig_config(
+    compile_pytorch_config(
         get_task_descriptor("image_classification"),
-        SnapshotContext(),
-        LudwigHyperparameters(image_size=64),
+        SnapshotContext(
+            columns=[
+                ColumnSpec(name="image_path", kind="storage_uri"),
+                ColumnSpec(name="class", kind="label"),
+                ColumnSpec(name="split", kind="split"),
+            ],
+            label_class_names=["a", "b"],
+        ),
+        PytorchHyperparameters(image_size=64),
     )
     assert get_task_descriptor("image_classification").model_dump() == before
 

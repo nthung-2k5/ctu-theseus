@@ -52,7 +52,7 @@ async def age_run(db, run_id, seconds=3600):
 
 
 async def make_custom_model(db, **fields) -> uuid.UUID:
-    values = {"backend": "ludwig", "kind": "hf_transformer", "name": "m", "source_kind": "hub", "source_ref": "a/b"}
+    values = {"backend": "pytorch", "kind": "hf_text", "name": "m", "source_kind": "hub", "source_ref": "a/b"}
     async with db() as s:
         row = CustomModel(**{**values, **fields})
         s.add(row)
@@ -67,7 +67,7 @@ async def test_a_worker_claims_a_run_and_the_run_records_where_it_trains(db, mak
     worker = await make_worker()
     rid = await make_run()
 
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) == rid
+    assert await queue.claim_for_worker(worker, ["pytorch"], 300) == rid
 
     run = await run_row(db, rid)
     assert (run.status, run.attempt, run.worker_id) == ("running", 1, worker)
@@ -75,13 +75,15 @@ async def test_a_worker_claims_a_run_and_the_run_records_where_it_trains(db, mak
 
 
 async def test_a_worker_only_takes_runs_for_backends_it_offers_and_never_a_custom_model_run(db, make_run, make_worker):
-    worker = await make_worker(("ludwig",))
-    other_backend = await make_run(backend="yolo")
-    custom = await make_run(custom_model_id=await make_custom_model(db))
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) is None
+    offered = ["pytorch", "yolo"]
+    worker = await make_worker(tuple(offered))
+    other_backend = await make_run(backend="sklearn")
+    # YOLO has not opted in to custom models on a worker, so a run that brings one stays on the server.
+    custom = await make_run(backend="yolo", custom_model_id=await make_custom_model(db))
+    assert await queue.claim_for_worker(worker, offered, 300) is None
 
     plain = await make_run()  # younger than the other two, but the only one it may take
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) == plain
+    assert await queue.claim_for_worker(worker, offered, 300) == plain
     assert (await run_row(db, other_backend)).status == "queued"
     assert (await run_row(db, custom)).status == "queued"
 
@@ -91,14 +93,14 @@ async def test_a_worker_trains_one_run_at_a_time(db, make_run, make_worker):
     first = await make_run()
     second = await make_run()
 
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) == first
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) is None
+    assert await queue.claim_for_worker(worker, ["pytorch"], 300) == first
+    assert await queue.claim_for_worker(worker, ["pytorch"], 300) is None
     assert (await run_row(db, second)).status == "queued"
 
     async with db() as s:  # it finished: now the next one
         await s.execute(sa.update(TrainingRun).where(TrainingRun.id == first).values(status="succeeded"))
         await s.commit()
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) == second
+    assert await queue.claim_for_worker(worker, ["pytorch"], 300) == second
 
 
 async def test_one_worker_polling_twice_at_once_still_gets_a_single_run(db, make_run, make_worker):
@@ -106,7 +108,7 @@ async def test_one_worker_polling_twice_at_once_still_gets_a_single_run(db, make
     for _ in range(3):
         await make_run()
 
-    results = await asyncio.gather(*(queue.claim_for_worker(worker, ["ludwig"], 300) for _ in range(6)))
+    results = await asyncio.gather(*(queue.claim_for_worker(worker, ["pytorch"], 300) for _ in range(6)))
 
     assert len([r for r in results if r is not None]) == 1
 
@@ -117,13 +119,13 @@ async def test_a_disabled_or_revoked_worker_claims_nothing(db, make_run, make_wo
     rid = await make_run()
     await update_worker(db, worker, **change)
 
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300) is None
+    assert await queue.claim_for_worker(worker, ["pytorch"], 300) is None
     assert (await run_row(db, rid)).status == "queued"
 
 
 async def test_an_unknown_worker_claims_nothing(db, make_run):
     await make_run()
-    assert await queue.claim_for_worker(uuid.uuid4(), ["ludwig"], 300) is None
+    assert await queue.claim_for_worker(uuid.uuid4(), ["pytorch"], 300) is None
 
 
 # -- Bring-your-own models ---------------------------------------------------------------------
@@ -154,15 +156,16 @@ async def test_a_worker_takes_a_custom_model_run_only_if_it_can_fetch_the_model_
 
 
 async def test_a_backend_that_did_not_opt_in_keeps_its_custom_model_runs_on_the_server(db, make_run, make_worker):
-    worker = await make_worker(("ludwig",))
-    rid = await make_run(custom_model_id=await make_custom_model(db, source_kind="upload", sha256="a" * 64))
+    worker = await make_worker(("yolo",))
+    model = await make_custom_model(db, backend="yolo", source_kind="upload", sha256="a" * 64)
+    rid = await make_run(backend="yolo", custom_model_id=model)
 
-    assert await queue.claim_for_worker(worker, ["ludwig"], 300, custom_backends=["video"]) is None
+    assert await queue.claim_for_worker(worker, ["yolo"], 300, custom_backends=["video"]) is None
     assert (await run_row(db, rid)).status == "queued"
 
 
 def test_the_installed_backends_decide_who_opted_in_and_only_video_pytorch_and_llm_did():
-    # Ludwig's checkpoint re-reads its model from the path in its config, so it stays on the server.
+    # YOLO and scikit-learn did not: a model of theirs is not guaranteed to load from the run's results alone.
     assert sorted(queue.remote_custom_backends()) == ["llm", "pytorch", "video"]
 
 
@@ -199,7 +202,8 @@ async def test_the_server_holds_a_fresh_run_back_for_an_idle_online_worker_then_
     ["offline", "disabled", "revoked", "other_backend", "busy", "custom_model"],
 )
 async def test_the_server_does_not_wait_when_no_worker_could_take_the_run(db, make_run, make_worker, why):
-    worker_backends = ("yolo",) if why == "other_backend" else ("ludwig",)
+    # A custom-model run on a backend that never opted in (YOLO) is the one the worker could not take.
+    worker_backends = ("yolo",) if why in ("other_backend", "custom_model") else ("pytorch",)
     worker = await make_worker(worker_backends)
     fields = {}
     if why == "offline":
@@ -211,7 +215,8 @@ async def test_the_server_does_not_wait_when_no_worker_could_take_the_run(db, ma
     elif why == "busy":
         await make_run(status="running", worker_id=worker)
     elif why == "custom_model":
-        fields["custom_model_id"] = await make_custom_model(db)
+        fields["backend"] = "yolo"
+        fields["custom_model_id"] = await make_custom_model(db, backend="yolo")
     rid = await make_run(**fields)
 
     assert await queue.claim_one(queue.TRAIN, "host:1", 300) == rid
@@ -229,7 +234,7 @@ async def test_the_server_and_a_worker_racing_for_one_run_produce_one_winner(db,
     await age_run(db, rid)  # both are now allowed to take it
 
     server, remote = await asyncio.gather(
-        queue.claim_one(queue.TRAIN, "host:1", 300), queue.claim_for_worker(worker, ["ludwig"], 300)
+        queue.claim_one(queue.TRAIN, "host:1", 300), queue.claim_for_worker(worker, ["pytorch"], 300)
     )
 
     assert [server, remote].count(rid) == 1 and [server, remote].count(None) == 1

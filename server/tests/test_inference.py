@@ -1,7 +1,7 @@
 """Inference over HTTP: predictions run inside the request and nothing is stored.
 
 Covers both surfaces (session cookie /api/inference and API key /api/v1/predict) with a fake model
-standing in for the trained one; the prediction shaping itself is tested in test_ludwig_model.py.
+standing in for the trained one; the prediction shaping itself is tested with each backend.
 """
 
 import asyncio

@@ -47,28 +47,27 @@ async def ready_version(db, fake_s3, project_id, task="image_classification", st
 # -- Training backends -------------------------------------------------------------------------
 
 
-async def test_all_training_backends_lists_ludwig_available_with_its_supported_tasks(client, new_user):
+async def test_all_training_backends_lists_pytorch_available_with_its_supported_tasks(client, new_user):
     c = await new_user()
     backends = (await c.get("/api/training-backends")).json()["backends"]
-    ludwig = next(b for b in backends if b["id"] == "ludwig")
-    assert ludwig["available"] is True and ludwig["unavailableReason"] is None
-    assert "image_classification" in ludwig["supportedTasks"]
-    assert "object_detection" not in ludwig["supportedTasks"]  # Ludwig has no box detector; YOLO does
-    assert "image_segmentation" not in ludwig["supportedTasks"]  # planned: no backend supports it
-    assert ludwig["models"] == [] and ludwig["params"] == []  # no task in scope, nothing to derive them from
+    pytorch = next(b for b in backends if b["id"] == "pytorch")
+    assert pytorch["available"] is True and pytorch["unavailableReason"] is None
+    assert "image_classification" in pytorch["supportedTasks"]
+    assert "object_detection" not in pytorch["supportedTasks"]  # PyTorch has no box detector; YOLO does
+    assert "image_segmentation" not in pytorch["supportedTasks"]  # planned: no backend supports it
+    assert pytorch["models"] == [] and pytorch["params"] == []  # no task in scope, nothing to derive them from
 
 
-async def test_project_training_backends_gives_ludwig_its_task_specific_models_and_params(client, new_user):
+async def test_project_training_backends_gives_pytorch_its_task_specific_models_and_params(client, new_user):
     c = await new_user()
     p = await project(c, "image_classification")
     backends = (await c.get(f"/api/projects/{p['id']}/training-backends")).json()["backends"]
-    # PyTorch is the default for images, so it comes first; the others follow in id order.
-    assert [b["id"] for b in backends] == ["pytorch", "ludwig", "yolo"]
-    ludwig = next(b for b in backends if b["id"] == "ludwig")
-    assert ludwig["models"][0]["id"] == "resnet18"
-    assert ludwig["modelParamName"] == "encoderId"
-    param_names = {p["name"] for p in ludwig["params"]}
-    assert {"epochs", "batchSize", "learningRate", "imageSize", "useClassWeights"} <= param_names
+    assert [b["id"] for b in backends] == ["pytorch", "yolo"]
+    pytorch = backends[0]
+    assert pytorch["models"][0]["id"] == "resnet18"
+    assert pytorch["modelParamName"] == "modelId"
+    param_names = {p["name"] for p in pytorch["params"]}
+    assert {"epochs", "batchSize", "learningRate", "imageSize", "freezeBackbone", "mixedPrecision"} <= param_names
 
 
 async def test_project_training_backends_gives_yolo_its_own_models_and_params(client, new_user):
@@ -80,7 +79,7 @@ async def test_project_training_backends_gives_yolo_its_own_models_and_params(cl
     assert yolo["modelParamName"] == "modelId"
     param_names = {p["name"] for p in yolo["params"]}
     assert {"epochs", "batchSize", "learningRate", "imageSize", "optimizer", "pretrained"} <= param_names
-    # Ludwig-only knobs must not appear: the form would send them and the backend would reject them.
+    # Knobs of another backend must not appear: the form would send them and this backend would reject them.
     assert not {"freezeBackbone", "headLayers", "useClassWeights"} & param_names
 
 
@@ -101,24 +100,23 @@ async def test_starting_a_run_compiles_uploads_the_config_and_queues_it(client, 
     r = await c.post(
         f"/api/projects/{p['id']}/train",
         json={
-            "name": "first", "datasetVersionId": vid, "backend": "ludwig",
-            "hyperparameters": {"epochs": 7, "encoderId": "resnet50"},
+            "name": "first", "datasetVersionId": vid,
+            "hyperparameters": {"epochs": 7, "modelId": "resnet50"},
         },
     )  # fmt: skip
     assert r.status_code == 200, r.text
     run = r.json()["run"]
     assert (run["status"], run["name"], run["datasetVersionId"]) == ("queued", "first", vid)
-    assert run["hyperparameters"] == {"epochs": 7, "encoderId": "resnet50"}  # stored exactly as chosen (camelCase)
+    assert run["hyperparameters"] == {"epochs": 7, "modelId": "resnet50"}  # stored exactly as chosen (camelCase)
 
     config = yaml.safe_load(fake_s3[("theseus-training", f"{run['id']}/config.yaml")])
-    assert config["trainer"]["epochs"] == 7 and config["input_features"][0]["encoder"]["model_variant"] == 50
-    assert config["preprocessing"]["split"]["column"] == "_ludwig_split_idx"
+    assert config["train"]["epochs"] == 7 and config["model"] == "resnet50"
 
     await get_event_writer().flush()
     async with db() as s:
         row = (await s.execute(sa.select(TrainingRun))).scalar_one()
         events = (await s.execute(sa.select(RunEvent.payload))).scalars().all()
-    assert row.config_key == f"{run['id']}/config.yaml" and row.config["model_type"] == "ecd"
+    assert row.config_key == f"{run['id']}/config.yaml" and row.config["backend"] == "pytorch"
     assert [e["status"] for e in events] == ["queued"]  # the browser is told immediately over SSE
 
 
@@ -144,9 +142,9 @@ async def test_a_config_that_cannot_compile_is_a_400_and_creates_no_run(client, 
     vid = await ready_version(db, fake_s3, p["id"])
     r = await c.post(
         f"/api/projects/{p['id']}/train",
-        json={"name": "x", "datasetVersionId": vid, "backend": "ludwig", "hyperparameters": {"encoderId": "nope"}},
+        json={"name": "x", "datasetVersionId": vid, "hyperparameters": {"modelId": "nope"}},
     )
-    assert r.status_code == 400 and "Failed to compile Ludwig config" in r.json()["error"]["message"]
+    assert r.status_code == 400 and "Failed to compile PyTorch" in r.json()["error"]["message"]
     r = await c.post(
         f"/api/projects/{p['id']}/train",
         json={"name": "x", "datasetVersionId": vid, "hyperparameters": {"epochs": "many"}},
@@ -450,11 +448,11 @@ async def test_a_trial_that_cannot_compile_is_kept_as_a_failed_trial_not_silentl
     vid = await ready_version(db, fake_s3, p["id"])
     body = (await c.post(
         f"/api/projects/{p['id']}/sweeps",
-        json={"name": "enc", "datasetVersionId": vid, "backend": "ludwig", "strategy": "grid", "maxTrials": 5, "searchSpace": {"encoderId": ["nope", "resnet18"]}},  # noqa: E501
+        json={"name": "enc", "datasetVersionId": vid, "strategy": "grid", "maxTrials": 5, "searchSpace": {"modelId": ["nope", "resnet18"]}},  # noqa: E501
     )).json()  # fmt: skip
     statuses = {t["trialIndex"]: t["status"] for t in body["trials"]}
     assert statuses == {0: "failed", 1: "queued"}
-    assert "Unknown encoder" in body["trials"][0]["failedMessage"]
+    assert "is not an image model" in body["trials"][0]["failedMessage"]
 
 
 async def test_sweep_detail_reconciles_to_completed_once_every_trial_finished(client, new_user, db, fake_s3):

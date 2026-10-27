@@ -11,7 +11,7 @@ Someone else's private model is indistinguishable from one that does not exist: 
 the same way, so an id cannot be used to probe for other people's models.
 
 Custom models are addressed as "custom:{uuid}" in the hyperparameter the backend names for its model
-choice (`encoderId` for Ludwig), which is why a built-in and a custom model share one picker.
+choice (`modelId` unless it overrides it), which is why a built-in and a custom model share one picker.
 """
 
 import uuid

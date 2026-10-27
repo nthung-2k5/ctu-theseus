@@ -72,12 +72,12 @@ def build_preprocessing_manifest(run_id: str, config: dict[str, Any], meta: dict
         "column": meta["imageColumn"],
         # `images.preprocess`: RGB, resize the SHORTER edge to `size` (bilinear, keeping the aspect ratio), then
         # centre-crop a size x size square. Every generated client implements this mode; without an `imageResize`
-        # they squash the whole image to height x width, which is what Ludwig does.
+        # they squash the whole image to height x width, which was the original behaviour.
         "imageResize": {"mode": "shorter_edge_center_crop", "interpolation": "bilinear"},
         # Scaled to 0..1 first, then (x - mean) / std per channel.
         "imageNormalization": {"mean": list(spec.mean), "std": list(spec.std)},
         # The key the generated clients read the target size from (they fall back to 224 without it).
-        "ludwigPreprocessing": {"height": spec.size, "width": spec.size},
+        "imageSize": {"height": spec.size, "width": spec.size},
     }
     return {"schemaVersion": 1, "runId": run_id, "inputs": [image], "outputs": [output]}
 

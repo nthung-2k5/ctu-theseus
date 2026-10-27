@@ -6,17 +6,17 @@ Restart the backend; `GET /api/training-backends` returns it and the web renders
 hyperparameters, with no enum, migration or frontend change (beyond installing the plugin's own
 optional dependency).
 
-Heavy ML dependencies (torch, ludwig, sklearn, ...) MUST NOT be imported at module level here or
+Heavy ML dependencies (torch, ultralytics, sklearn, ...) MUST NOT be imported at module level here or
 in a subclass's own top-level module: listing installed backends (`backends.registry.list_backends()`)
 imports every plugin package just to read `id`/`label`/`available()`, and the API process must be
 importable without a GPU runtime present. Import heavy dependencies inside the classmethod bodies
-that need them (see `omnitrain/plugins/backends/ludwig/__init__.py` for the pattern).
+that need them (see `omnitrain/plugins/backends/pytorch/__init__.py` for the pattern).
 
 A backend may also accept bring-your-own models: declare the kinds it understands in
 `custom_model_kinds(task)`, check an uploaded/referenced one in `validate_custom_model`, and honour the
 `custom` argument of `compile`. A backend that does none of this simply offers no custom models.
 
-Two invariants every backend must honor, carried over from the Ludwig-only code this replaces:
+Two invariants every backend must honor, carried over from the first version of this platform:
 
   * `OutputSpec.labels` (classification class names, in the model's OWN index order) must come
     from the trained model artifact, never from the `label_classes` Postgres table: Postgres has
@@ -222,7 +222,7 @@ class Artifact:
 # than duplicated per backend.
 # `hf_model` is the one artifact that is a whole folder (a Hugging Face model, tokenizer and all), stored as an
 # uncompressed zip of it: a language model has no single fixed-shape graph to write.
-ARTIFACT_FILENAMES: dict[str, str] = {"onnx": "model.onnx", "torch_export": "model.pt2", "hf_model": "model.zip"}
+ARTIFACT_FILENAMES: dict[str, str] = {"onnx": "model.onnx", "hf_model": "model.zip"}
 
 
 OutputKind = Literal["classification", "regression", "text", "tokens", "detections"]
@@ -279,7 +279,7 @@ class TrainContext:
 
     Wraps the event-writer and abort machinery so a backend module never has to import
     `omnitrain.events` or `omnitrain.jobs.abort` itself. `heartbeat`/`check_abort` are safe to call
-    from the training thread (as a Ludwig `Callback` does); `report` is too.
+    from the training thread (as a training-framework callback does); `report` is too.
     """
 
     run_id: str
@@ -311,12 +311,12 @@ class TrainerBackend(ABC):
     # Exportable artifacts this backend can convert a trained model into, keyed by Artifact.id.
     artifacts: ClassVar[dict[str, Artifact]] = {}
     # Suffix of an S3 object under the run's results prefix that `preprocessing_manifest` needs
-    # beyond the compiled config, if any (e.g. Ludwig's "training_set_metadata.json").
+    # beyond the compiled config, if any (e.g. a file of class names the model wrote beside itself).
     metadata_filename: ClassVar[str | None] = None
     # Whether a run on a bring-your-own model may train on a remote worker. A worker keeps the model's files at its
     # own path, so this is only sound for a backend whose TRAINED model does not point back at them: the saved result
-    # must load, serve and export from the run's results alone. Ludwig fails that (its checkpoint re-reads the model
-    # from the path in its config), so its custom-model runs stay on the server.
+    # must load, serve and export from the run's results alone. A framework whose checkpoint re-reads the model from
+    # the path in its config fails that, and keeps its custom-model runs on the server.
     remote_custom_models: ClassVar[bool] = False
     # Task ids this backend is the first choice for: it comes first in the create-run list and is what a run
     # uses when the caller names no backend. Every other backend keeps its place after it, in id order.
@@ -350,8 +350,8 @@ class TrainerBackend(ABC):
         Default: introspect `Hyperparameters` (see `omnitrain.domain.params.param_specs`), leniently — a
         field with no generic representation (a mixed type like `int | Literal["auto"]`) is
         skipped rather than raising, and `modelId` is always skipped since it's exposed via
-        `models(task)` instead. Override this when defaults or bounds vary by task (Ludwig's
-        epoch/batch-size defaults differ for an `ecd` vs an `llm` task) or when a field deserves a
+        `models(task)` instead. Override this when defaults or bounds vary by task (epoch and
+        batch-size defaults that differ between a classifier and a language model, say) or when a field deserves a
         richer spec than generic introspection can produce.
         """
         return [p for p in param_specs(cls.Hyperparameters, strict=False) if p.name != "modelId"]

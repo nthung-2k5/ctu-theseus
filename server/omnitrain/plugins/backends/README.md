@@ -1,6 +1,6 @@
 # Trainer backends
 
-One package per training framework. Ludwig (`ludwig/`), Ultralytics YOLO (`yolo/`), scikit-learn (`scikit/`),
+One package per training framework. Ultralytics YOLO (`yolo/`), scikit-learn (`scikit/`),
 torchvision video (`video/`), a code-defined PyTorch backend (`pytorch/`: image, audio and text
 classification, tabular classification and regression, token classification) and a language-model backend (`llm/`: LoRA
 fine-tuning of a bring-your-own causal LM for the four generative text tasks) ship today. A backend decides *how* a task is trained; *what* a task is lives in
@@ -129,11 +129,11 @@ Copy the shape from `yolo/model.py`, the smallest complete example.
 ## Rules that are easy to break
 
 - **No heavy import at module level.** `list_backends()` imports every backend just to read `id`, `label` and
-  `available()`, and the API must start on a machine with no GPU runtime. Import torch, ludwig, ultralytics and so on
+  `available()`, and the API must start on a machine with no GPU runtime. Import torch, ultralytics and so on
   inside the classmethods that need them. Keep a catalog module (like `yolo/tasks.py`) pure data.
 - **Class labels come from the trained model**, never from the `label_classes` table. Postgres does not know which
   index a run gave each class, and a wrong order silently mislabels every prediction. `OutputSpec.labels` and any
-  export manifest must be read from the model's own artifact (Ludwig's `idx2str`, YOLO's `names.json`).
+  export manifest must be read from the model's own artifact (the PyTorch backend's `names.json`, YOLO's `model.names`).
 - **Report a `validation` `loss`** from `train()` when you can. `events/writer.py` uses the lowest validation loss
   to pick a run's best epoch. If you have none, `best_epoch` stays null.
 - **`train()` and `evaluate()` may have to run on a remote worker** that has only S3 and an HTTP link to the API

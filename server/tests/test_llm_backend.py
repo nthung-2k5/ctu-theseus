@@ -396,9 +396,9 @@ class TestRegistration:
         assert backend.available() is None and backend.supports(TASK)
         assert not backend.supports(get_task_descriptor("image_classification"))
 
-    def test_ludwig_stays_the_default_for_the_generative_tasks(self):
+    def test_it_is_the_only_backend_for_the_generative_tasks(self):
         for task in tasks.LLM_TASKS:
-            assert [b.id for b in trainable_backends(get_task_descriptor(task))] == ["ludwig", "llm"]
+            assert [b.id for b in trainable_backends(get_task_descriptor(task))] == ["llm"]
 
     def test_listing_the_backend_does_not_import_torch(self):
         code = (
@@ -701,7 +701,7 @@ class TestExport:
 
         assert [f.id for f in list_export_formats(TASK, LlmBackend)] == ["hf_model"]
         # A backend with no folder to bundle is not offered it.
-        assert "hf_model" not in [f.id for f in list_export_formats(TASK, get_backend("ludwig"))]
+        assert "hf_model" not in [f.id for f in list_export_formats(TASK, get_backend("pytorch"))]
         assert [f.id for f in list_export_formats(get_task_descriptor("image_classification"), LlmBackend)] == []
 
     def test_the_artifact_is_the_saved_folder_stored_uncompressed(self, bundle, trained):
