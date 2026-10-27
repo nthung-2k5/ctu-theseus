@@ -16,7 +16,7 @@ from omnitrain.plugins.backends.base import ARTIFACT_FILENAMES, Artifact
 # supports happen to double as their own Ludwig format string.
 _LUDWIG_FORMAT: dict[str, str] = {"onnx": "onnx", "torch_export": "torch_export"}
 
-ARTIFACTS: dict[str, Artifact] = {aid: Artifact(aid, filename) for aid, filename in ARTIFACT_FILENAMES.items()}
+ARTIFACTS: dict[str, Artifact] = {aid: Artifact(aid, ARTIFACT_FILENAMES[aid]) for aid in _LUDWIG_FORMAT}
 
 
 def convert(model: Any, artifact_id: str, workdir: str) -> str:

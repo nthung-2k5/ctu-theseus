@@ -41,3 +41,11 @@ class MeanAbsoluteError(HeadlineScore):
     label = "MAE"
     higher_is_better = False
     order = 50
+
+
+class RougeL(HeadlineScore):
+    """Written text: the longest run of words the generated and the written answer share, in the same order."""
+
+    id = "rougeL"
+    label = "ROUGE-L"
+    order = 60

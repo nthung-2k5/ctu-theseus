@@ -45,6 +45,9 @@ class LudwigBackend(TrainerBackend):
     Hyperparameters = LudwigHyperparameters
     artifacts = ARTIFACTS
     metadata_filename = METADATA_FILENAME
+    # The language-model backend (`llm`) sorts before this one by id, so without this it would quietly become the
+    # first choice for the generative tasks. Switching their default is a decision, made by changing this line.
+    default_for = frozenset({"text_generation", "summarization", "sequence_to_sequence", "question_answering"})
 
     @classmethod
     def available(cls) -> str | None:

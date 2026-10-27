@@ -98,6 +98,9 @@ def _build_golden_sample(backend: type[TrainerBackend], model_dir: str, dataset_
         if output["kind"] == "tokens":
             # `predictions` is empty (no distribution over classes); the tag of each word is what a client must match.
             golden["tags"] = [t["tag"] for t in output["tokens"]]
+        if output["kind"] == "text":
+            # Likewise empty: the text the model wrote is what a client must match.
+            golden["text"] = output["text"]
         return golden
     except (AttributeError, TypeError, KeyError, IndexError, NameError):
         # A bug in this function, not a data problem: surface it. These are exactly the failures

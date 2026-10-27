@@ -161,7 +161,8 @@ def test_an_unknown_format_is_a_clear_error():
 def test_every_shipped_template_exists_and_is_valid_utf8():
     for path in sorted(p for p in B.TEMPLATES.rglob("*") if p.is_file()):
         assert path.read_text(encoding="utf-8")  # non-empty, decodable
-    assert len(list(B.TEMPLATES.rglob("*.py"))) == 3 and (B.TEMPLATES / "flutter/lib/omnitrain_client.dart").exists()
+    # The Python devkit's three files and the language-model kit's three.
+    assert len(list(B.TEMPLATES.rglob("*.py"))) == 6 and (B.TEMPLATES / "flutter/lib/omnitrain_client.dart").exists()
 
 
 def test_readme_reflects_the_format_and_whether_a_verify_path_exists():
@@ -183,7 +184,7 @@ def test_readme_reflects_the_format_and_whether_a_verify_path_exists():
 def test_the_shipped_formats_are_discovered_grouped_and_ordered():
     listed = [(f.group, f.id) for f in list_export_formats()]
     assert listed == [
-        ("Model", "onnx"), ("Model", "torch_export"),
+        ("Model", "onnx"), ("Model", "torch_export"), ("Model", "hf_model"),
         ("Devkit", "python_devkit"), ("Devkit", "typescript_devkit"), ("Devkit", "csharp_devkit"),
         ("Devkit", "java_devkit"),
         ("App", "pwa_app"), ("App", "flutter_app"),

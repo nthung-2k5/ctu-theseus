@@ -220,7 +220,9 @@ class Artifact:
 # `ExportFormat.assemble` (export/bundle.py) lays out a bundle by artifact filename alone and never
 # needs to know which backend produced the model inside it, so the convention lives here rather
 # than duplicated per backend.
-ARTIFACT_FILENAMES: dict[str, str] = {"onnx": "model.onnx", "torch_export": "model.pt2"}
+# `hf_model` is the one artifact that is a whole folder (a Hugging Face model, tokenizer and all), stored as an
+# uncompressed zip of it: a language model has no single fixed-shape graph to write.
+ARTIFACT_FILENAMES: dict[str, str] = {"onnx": "model.onnx", "torch_export": "model.pt2", "hf_model": "model.zip"}
 
 
 OutputKind = Literal["classification", "regression", "text", "tokens", "detections"]

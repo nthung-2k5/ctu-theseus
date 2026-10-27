@@ -55,6 +55,13 @@ const METRIC_LABELS: Record<string, string> = {
   rmse: 'RMSE',
   r2: 'R²',
   loss: 'Loss',
+  // Written text (the language-model backend): how close the generated answers are to the written ones.
+  exactMatch: 'Exact match',
+  tokenF1: 'Token F1',
+  rouge1: 'ROUGE-1',
+  rouge2: 'ROUGE-2',
+  rougeL: 'ROUGE-L',
+  perplexity: 'Perplexity',
 }
 
 function ConfusionMatrix({ report }: { report: EvaluationReport }) {
