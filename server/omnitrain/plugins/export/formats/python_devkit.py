@@ -2,6 +2,7 @@ from omnitrain.plugins.export.formats._kits import AUDIO, DETECTION, STANDARD, V
 from omnitrain.plugins.export.readme import (
     AUDIO_LIMITATION,
     DETECTION_LIMITATION,
+    HF_TAGS_LIMITATION,
     HF_TEXT_LIMITATION,
     LIMITATION_FULL,
     TAGS_LIMITATION,
@@ -52,6 +53,12 @@ class PythonDevkit(DevkitFormat):
                 "dependencies": "pip install onnxruntime numpy",
                 "run_cmd": 'python example.py "<the text to tag>"   # one line per word: word, tag, confidence',
                 "limitation": TAGS_LIMITATION,
+            },
+            "hf_tags": {
+                "dependencies": "pip install onnxruntime numpy tokenizers",
+                "run_cmd": 'python example.py "<the text to tag>"   # one line per word: word, tag, confidence',
+                "files": "`omnitrain_client.py`, `example.py`, `tokenizer.json`",
+                "limitation": HF_TAGS_LIMITATION,
             },
             "video": {
                 "dependencies": "pip install onnxruntime numpy pillow opencv-python-headless",

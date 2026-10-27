@@ -208,7 +208,7 @@ class TestCompile:
         with pytest.raises(ConfigError, match="not a token classification model"):
             compile_pytorch_config(TASK, SNAPSHOT, PytorchHyperparameters(model_id="text_bag"))
 
-    def test_a_bring_your_own_model_is_not_offered_yet(self):
+    def test_only_the_token_kind_of_bring_your_own_model_is_accepted(self):
         ref = CustomModelRef(id="u1", kind="hf_text", local_path="/x", source_kind="upload")
         with pytest.raises(ConfigError, match="cannot be used"):
             compile_pytorch_config(TASK, SNAPSHOT, PytorchHyperparameters(), custom=ref)

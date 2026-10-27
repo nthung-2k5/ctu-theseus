@@ -82,6 +82,24 @@ TAGS_LIMITATION = (
     "The vocabulary was built from the training texts only. Only a model trained by the PyTorch backend carries that "
     "recipe."
 )
+HF_TAGS_LIMITATION = (
+    "Token classification with a fine-tuned Hugging Face transformer: the model gives one tag per word. `predict` is "
+    "given the text itself (a string, not a file), splits it into words at whitespace, joins them with single spaces "
+    "and runs the model's own tokenizer on that (`tokenizer.json`, named by `inputs[0].hfTokenizer.tokenizerFile`) with "
+    "the Hugging Face `tokenizers` package, cutting at `maxTokens` and padding with `padId`. The model scores every "
+    "token; a word takes the tag of the first token that covers it (`inputs[0].hfTokenizer.tags` says how the "
+    "tokenizer's offsets find it), and returns `[{token, tag, confidence}]`, one per word. A word that no token covers "
+    "was not read and gets `hfTokenizer.fallbackTag`. The tokenizer is the one the model was published with, so its "
+    "normalisation and vocabulary are not this platform's. Only a model trained by the PyTorch backend carries that "
+    "recipe."
+)
+HF_TAGS_OTHER_LIMITATION = (
+    "This model is a fine-tuned Hugging Face transformer that tags every word of a text, which this client does not "
+    "implement. `preprocessing.json` has the whole recipe (`inputs[0].hfTokenizer`, recipe `hf_word_tokens_v1`: split "
+    "at whitespace, join with single spaces, run the tokenizer in `tokenizer.json` with the offsets enabled, and give "
+    "each word the tag of the first token that covers it; the graph returns `[batch, maxTokens, tags]` logits, the "
+    "tags being `outputs[0].classes`). The client raises a clear error rather than guessing."
+)
 TAGS_OTHER_LIMITATION = (
     "This model tags every word of a text, which this client does not implement. `preprocessing.json` has the whole "
     "recipe (`inputs[0].tagWords`: split at whitespace, look each word up, pad to `maxTokens`; the graph returns "

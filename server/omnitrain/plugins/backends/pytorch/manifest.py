@@ -138,8 +138,10 @@ TAG_WORDS_IDS = (
 def _words_input(meta: dict[str, Any]) -> dict[str, Any]:
     """What turns a text into a tagger's input: a word per id (`tagging.py` is the reference implementation). Every
     generated client that follows it refuses a `recipe` it does not know."""
-    spec = WordsSpec.from_meta(meta)
     names = list(meta["names"])
+    if "hfTokenizer" in meta:
+        return _hf_words_input(meta, OUTSIDE if OUTSIDE in names else names[0])
+    spec = WordsSpec.from_meta(meta)
     return {
         "name": "tokens",
         "type": "text",
@@ -184,6 +186,43 @@ def _hf_text_input(meta: dict[str, Any]) -> dict[str, Any]:
             "maxTokens": spec.max_tokens,
             "padId": spec.pad_id,
             "padToken": spec.pad_token,
+            "tokenizer": spec.tokenizer,
+        },
+    }
+
+
+HF_WORD_TOKENS_RUN = (
+    "Split the text into words with str.split() (runs of whitespace separate them) and join them with single spaces. "
+    "Load tokenizer with the Hugging Face tokenizers library (Tokenizer.from_str, or tokenizer.json in a bundle), call "
+    "enable_truncation(maxTokens) and enable_padding(length=maxTokens, pad_id=padId, pad_token=padToken), and encode "
+    "the joined text; the ids are the model input and the encoding's offsets are character spans of the joined text "
+    "(special tokens and padding have the span (0, 0))."
+)
+HF_WORD_TOKENS_TAGS = (
+    "The model returns a row of tag logits for every position. The tag of a word is the highest of the row of the "
+    "first position whose span holds a non-space character of the word. A word no position covers (the text was "
+    "cut before it, or the tokenizer removed all of its characters) was not read and gets fallbackTag."
+)
+
+
+def _hf_words_input(meta: dict[str, Any], fallback_tag: str) -> dict[str, Any]:
+    """A bring-your-own transformer's input when it tags words: the same tokenizer data as `_hf_text_input`, a recipe of
+    its own (the words are joined and the offsets say which token speaks for which word) and the tag a word that was not
+    read falls back to."""
+    spec = HFTextSpec.from_meta(meta)
+    return {
+        "name": "input_ids",
+        "type": "text",
+        "column": meta["textColumn"],
+        "layout": "[batch, maxTokens] int64",
+        "hfTokenizer": {
+            "recipe": "hf_word_tokens_v1",
+            "run": HF_WORD_TOKENS_RUN,
+            "tags": HF_WORD_TOKENS_TAGS,
+            "maxTokens": spec.max_tokens,
+            "padId": spec.pad_id,
+            "padToken": spec.pad_token,
+            "fallbackTag": fallback_tag,
             "tokenizer": spec.tokenizer,
         },
     }

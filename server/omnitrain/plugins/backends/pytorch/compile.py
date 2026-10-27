@@ -27,7 +27,7 @@ from omnitrain.plugins.backends.base import (
     weight_decay_spec,
 )
 from omnitrain.plugins.backends.pytorch import tasks
-from omnitrain.plugins.backends.pytorch.custom import HF_IMAGE, HF_TEXT
+from omnitrain.plugins.backends.pytorch.custom import HF_IMAGE, HF_TEXT, HF_TOKEN
 from omnitrain.plugins.backends.pytorch.spec import AudioSpec, ImageSpec, TextSpec
 from omnitrain.schemas.common import ParamSpec
 
@@ -80,7 +80,7 @@ class PytorchHyperparameters(HyperparamsBase):
 
 
 # The one bring-your-own kind each input kind takes.
-_CUSTOM_KIND = {"image": HF_IMAGE, "text": HF_TEXT}
+_CUSTOM_KIND = {"image": HF_IMAGE, "text": HF_TEXT, "words": HF_TOKEN}
 
 
 def _input_kind(task: TaskDescriptor) -> str:
@@ -88,6 +88,8 @@ def _input_kind(task: TaskDescriptor) -> str:
         return "image"
     if task.id in tasks.TEXT_TASKS:
         return "text"
+    if task.id in tasks.TOKEN_TASKS:
+        return "words"
     return "other"
 
 
@@ -110,7 +112,7 @@ def compile_pytorch_config(
         raise ConfigError(f'A "{custom.kind}" custom model cannot be used for task "{task.id}"')
     if task.id in tasks.TOKEN_TASKS:
         _refuse(hp, task, *_IMAGE_ONLY, *_AUDIO_ONLY)
-        return _compile_tagger(task, ctx, hp)
+        return _compile_tagger(task, ctx, hp, custom)
     if task.id in tasks.IMAGE_TASKS:
         _refuse(hp, task, *_TABULAR_ONLY, *_AUDIO_ONLY, *_TEXT_ONLY)
         return _compile_image(task, ctx, hp, custom)
@@ -281,9 +283,14 @@ def _compile_text(
     }
 
 
-def _compile_tagger(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters) -> dict[str, Any]:
-    """Token classification with the built-in tagger. The tag set is not known here (a snapshot of tags has no class
-    list): `train.py` reads it off the usable rows and writes it, in the model's own order, to names.json."""
+def _compile_tagger(
+    task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef | None
+) -> dict[str, Any]:
+    """Token classification with the built-in tagger, or a bring-your-own transformer. The tag set is not known here
+    (a snapshot of tags has no class list): `train.py` reads it off the usable rows and writes it, in the model's own
+    order, to names.json."""
+    if custom is not None:
+        return _compile_hf_tagger(ctx, hp, custom)
     model_id = hp.model_id or tasks.TAGGER_MODELS[0].id
     if model_id not in tasks.TAGGER_MODELS_BY_ID:
         raise ConfigError(f'"{model_id}" is not a token classification model for the task "{task.id}"')
@@ -307,6 +314,35 @@ def _compile_tagger(task: TaskDescriptor, ctx: SnapshotContext, hp: PytorchHyper
         "network": {"dropout": d["dropout"] if hp.dropout is None else hp.dropout},
         "train": {
             **_train_block(hp, d, epochs=hp.epochs or d["epochs"]),
+            "useClassWeights": bool(hp.use_class_weights),
+        },
+    }
+
+
+def _compile_hf_tagger(ctx: SnapshotContext, hp: PytorchHyperparameters, custom: CustomModelRef) -> dict[str, Any]:
+    """A bring-your-own transformer as a tagger: like `_compile_hf_text`, it brings its tokenizer (so vocabulary
+    settings and dropout are ignored), is fine-tuned (a small learning rate) and `maxTokens` counts its tokens, not
+    words, checked against its files by `train.py`."""
+    if hp.pretrained is False:
+        raise ConfigError(
+            "A bring-your-own model always starts from its own weights, so it cannot be trained from scratch"
+        )
+    d = {**tasks.TEXT_DEFAULTS, "learning_rate": tasks.HF_TEXT_LEARNING_RATE}
+    return {
+        "backend": "pytorch",
+        "inputKind": "words",
+        "task": "tag",
+        "model": hp.model_id or f"custom:{custom.id}",
+        "pretrained": True,
+        # Where the bring-your-own model's files are, for train.py.
+        "custom": {"kind": custom.kind, "path": custom.local_path},
+        "textColumn": _column(ctx, "inline_text"),
+        "labelColumn": _column(ctx, "label"),
+        "classNames": [],
+        "text": {"maxTokens": hp.max_tokens or d["max_tokens"]},
+        "train": {
+            **_train_block(hp, d, epochs=hp.epochs or d["epochs"]),
+            "freezeBackbone": bool(hp.freeze_backbone),
             "useClassWeights": bool(hp.use_class_weights),
         },
     }

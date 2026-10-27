@@ -1,4 +1,4 @@
-"""Hugging Face classifiers (images and texts) as a network the rest of the backend can train, serve and export.
+"""Hugging Face classifiers (images, texts and tokens) as a network the rest of the backend can train, serve and export.
 
 Imports torch (and transformers inside functions): only loaded where a model is really built. Nothing here ever trusts
 remote code or unpickles weights: local files only, safetensors only.
@@ -9,13 +9,20 @@ answers with a `ModelOutput`. `HFImageNet` and `HFTextNet` are that one translat
 (the training loop, ONNX export, serving) treats a Hugging Face model like any other network. A text network takes ONLY
 the ids and derives its attention mask from the padding id, so the exported graph has one input and a client has one
 thing to make.
+
+A token classifier is the same network with a head that scores every position (`[N, max_tokens, tags]`). Its tags are
+per WORD but its positions are per token, and a tokenizer cuts a word into pieces, so `encode_words` also says which
+token speaks for each word: the first one (`word_positions`). That is the one extra thing a client must do.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import torch
 from torch import nn
+
+from omnitrain.domain.token_tags import words
 
 # The classification head of every supported family: a `Linear`, a `Flatten` then a `Linear` (ResNet), or a small
 # module that ends in an `out_proj` `Linear` (RoBERTa, ELECTRA).
@@ -59,7 +66,22 @@ def _outside_head(keys: Any, *, text: bool) -> list[str]:
     return sorted(str(k) for k in keys if not _is_head(k, text=text))
 
 
-def _load_checkpoint(path: str, *, text: bool) -> nn.Module:
+def _classifier_class(task: str) -> Any:
+    """The transformers class that puts the right head on a checkpoint: `task` is `image`, `text` or `token`."""
+    from transformers import (
+        AutoModelForImageClassification,
+        AutoModelForSequenceClassification,
+        AutoModelForTokenClassification,
+    )
+
+    return {
+        "image": AutoModelForImageClassification,
+        "text": AutoModelForSequenceClassification,
+        "token": AutoModelForTokenClassification,
+    }[task]
+
+
+def _load_checkpoint(path: str, *, task: str) -> nn.Module:
     """The checkpoint at `path` as a classifier, with every weight outside the head taken from the files.
 
     A trained classifier loads as it is. A bare backbone (the usual way a base model is published) gets a new head,
@@ -68,10 +90,10 @@ def _load_checkpoint(path: str, *, text: bool) -> nn.Module:
     always connect a bare backbone's keys to the classifier's. So the backbone is loaded on its own, strictly, and
     copied in, and any tensor still unaccounted for is an error: the alternative is a model that trains from random
     weights while claiming to be pretrained."""
-    from transformers import AutoModel, AutoModelForImageClassification, AutoModelForSequenceClassification
+    from transformers import AutoModel
 
-    classifier_class = AutoModelForSequenceClassification if text else AutoModelForImageClassification
-    model, info = classifier_class.from_pretrained(path, output_loading_info=True, **_options())
+    text = task != "image"
+    model, info = _classifier_class(task).from_pretrained(path, output_loading_info=True, **_options())
     if info.get("mismatched_keys"):
         raise ValueError(f"the weights do not match the config ({sorted(info['mismatched_keys'])[0]})")
     if not _outside_head(info.get("missing_keys", ()), text=text):
@@ -117,15 +139,16 @@ def _name_the_classes(model: nn.Module, names: list[str]) -> None:
 
 def build(path: str, names: list[str]) -> HFImageNet:
     """The image checkpoint at `path` with a fresh `len(names)`-way classification head."""
-    model = _load_checkpoint(path, text=False)
+    model = _load_checkpoint(path, task="image")
     _replace_head(model, len(names))
     _name_the_classes(model, names)
     return HFImageNet(model)
 
 
-def build_text(path: str, names: list[str], pad_id: int) -> HFTextNet:
-    """The text checkpoint at `path` with a fresh `len(names)`-way classification head. Texts pad with `pad_id`."""
-    model = _load_checkpoint(path, text=True)
+def build_text(path: str, names: list[str], pad_id: int, *, task: str = "text") -> HFTextNet:
+    """The text checkpoint at `path` with a fresh `len(names)`-way classification head. Texts pad with `pad_id`.
+    `task` is `text` (one row of scores per text) or `token` (one per position, for token classification)."""
+    model = _load_checkpoint(path, task=task)
     own = getattr(model.config, "pad_token_id", None)
     if own is not None and own != pad_id:
         # RoBERTa numbers positions from the padding id it was built with, so a tokenizer that pads with another id
@@ -134,6 +157,12 @@ def build_text(path: str, names: list[str], pad_id: int) -> HFTextNet:
     _replace_head(model, len(names))
     _name_the_classes(model, names)
     return HFTextNet(model, pad_id)
+
+
+def build_tokens(path: str, names: list[str], pad_id: int) -> HFTextNet:
+    """The checkpoint at `path` as a tagger with a fresh `len(names)`-tag head: `[N, max_tokens] ids -> [N, max_tokens,
+    tags]` logits, one row per token (`word_positions` says which token speaks for a word)."""
+    return build_text(path, names, pad_id, task="token")
 
 
 def freeze_backbone(net: nn.Module) -> None:
@@ -149,11 +178,8 @@ def save(net: nn.Module, dest: str) -> None:
     net.model.save_pretrained(dest, safe_serialization=True)
 
 
-def _load_trained(path: str, *, text: bool) -> nn.Module:
-    from transformers import AutoModelForImageClassification, AutoModelForSequenceClassification
-
-    classifier_class = AutoModelForSequenceClassification if text else AutoModelForImageClassification
-    model, info = classifier_class.from_pretrained(path, output_loading_info=True, **_options())
+def _load_trained(path: str, *, task: str) -> nn.Module:
+    model, info = _classifier_class(task).from_pretrained(path, output_loading_info=True, **_options())
     if info.get("missing_keys") or info.get("mismatched_keys"):
         raise ValueError("the trained model's files are incomplete")
     return model
@@ -162,12 +188,12 @@ def _load_trained(path: str, *, text: bool) -> nn.Module:
 def load(path: str) -> HFImageNet:
     """A trained image model written by `save`. Every tensor must be in the file: a trained model has no head to
     make up."""
-    return HFImageNet(_load_trained(path, text=False))
+    return HFImageNet(_load_trained(path, task="image"))
 
 
-def load_text(path: str, pad_id: int) -> HFTextNet:
-    """A trained text model written by `save`."""
-    return HFTextNet(_load_trained(path, text=True), pad_id)
+def load_text(path: str, pad_id: int, *, task: str = "text") -> HFTextNet:
+    """A trained text model (`task` `text`) or token classifier (`task` `token`) written by `save`."""
+    return HFTextNet(_load_trained(path, task=task), pad_id)
 
 
 def smoke_test(path: str) -> None:
@@ -220,6 +246,60 @@ def encode_texts(tokenizer: Any, texts: list[str]) -> torch.Tensor:
     if not texts:
         return torch.zeros((0, 0), dtype=torch.long)
     return torch.tensor([e.ids for e in tokenizer.encode_batch(texts)], dtype=torch.long)
+
+
+def word_positions(offsets: Sequence[tuple[int, int]], split: Sequence[str]) -> list[int]:
+    """For each word, the position of the first token that covers it, or -1 for a word no token covers.
+
+    `offsets` are the character spans, in the text the words were joined into with single spaces, of the tokens of one
+    encoding (special tokens and padding have the empty span (0, 0)). A token belongs to the word its first
+    non-space character is in, so a punctuation mark split off a word, or a word's later pieces, belong to that word
+    and leave its first token as the one that speaks for it. A word is uncovered when the text was cut before it, or
+    when the tokenizer's normaliser removed all of its characters."""
+    owner: list[int] = []
+    for i, word in enumerate(split):
+        if i:
+            owner.append(-1)
+        owner.extend([i] * len(word))
+    first = [-1] * len(split)
+    for position, (start, end) in enumerate(offsets):
+        for char in range(start, min(end, len(owner))):
+            if owner[char] >= 0:
+                if first[owner[char]] < 0:
+                    first[owner[char]] = position
+                break
+    return first
+
+
+def encode_words(tokenizer: Any, texts: list[str]) -> tuple[torch.Tensor, list[list[int]]]:
+    """`[rows, max_tokens]` int64 ids and, for each text, `word_positions` of its words (`str.split()`). The text the
+    tokenizer reads is the words joined by single spaces, so the same words give the same tokens whatever whitespace
+    separated them, and a client has nothing to decide but the split."""
+    split = [words(value) for value in texts]
+    if not split:
+        return torch.zeros((0, 0), dtype=torch.long), []
+    encodings = tokenizer.encode_batch([" ".join(found) for found in split])
+    ids = torch.tensor([e.ids for e in encodings], dtype=torch.long)
+    return ids, [word_positions(e.offsets, found) for e, found in zip(encodings, split, strict=True)]
+
+
+def smoke_test_tokens(path: str) -> None:
+    """Read the tokenizer, build the model with a two-tag head and tag one short text. Raises if anything is wrong."""
+    from omnitrain.plugins.backends.pytorch.custom import text_token_limit
+    from omnitrain.plugins.backends.pytorch.spec import HFTextSpec
+
+    tokenizer_json, pad_id, pad_token = read_tokenizer(path)
+    spec = HFTextSpec(
+        max_tokens=min(16, text_token_limit(path)), pad_id=pad_id, pad_token=pad_token, tokenizer=tokenizer_json
+    )
+    ids, positions = encode_words(make_tokenizer(spec), ["a short text to tag"])
+    if not any(p >= 0 for p in positions[0]):
+        raise ValueError("its tokenizer gives no token offsets, which tagging needs to find each word")
+    net = build_tokens(path, ["a", "b"], pad_id).eval()
+    with torch.no_grad():
+        logits = net(ids)
+    if tuple(logits.shape) != (1, spec.max_tokens, 2):
+        raise ValueError(f"expected one score per tag at each position, got shape {tuple(logits.shape)}")
 
 
 def smoke_test_text(path: str) -> None:

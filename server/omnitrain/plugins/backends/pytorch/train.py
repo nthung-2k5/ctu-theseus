@@ -454,11 +454,8 @@ def _text_setup(run: TrainContext, df: pd.DataFrame, class_names: list[str]) -> 
     )
 
 
-def _tagger_setup(run: TrainContext, df: pd.DataFrame) -> Setup:
-    """Token classification: each text becomes one id per word, each word has one tag, and the loss is over words."""
+def _tag_splits(run: TrainContext, df: pd.DataFrame) -> tuple[dict[str, tagging.TagSplit], list[str]]:
     cfg = run.config
-    hp: dict[str, Any] = cfg["train"]
-    settings: dict[str, Any] = cfg["text"]
     splits, tag_names = tagging.prepare(
         df, text_column=cfg["textColumn"], tags_column=cfg["labelColumn"], split_column=C.SPLIT_COLUMN_NAME
     )
@@ -470,6 +467,70 @@ def _tagger_setup(run: TrainContext, df: pd.DataFrame) -> Setup:
             )
     if len(tag_names) < 2:
         raise ConfigError("The snapshot uses only one tag, so there is nothing to tell apart")
+    return splits, tag_names
+
+
+def _hf_tagger_setup(run: TrainContext, df: pd.DataFrame) -> Setup:
+    """A bring-your-own transformer as a tagger. Its tokenizer reads each text's words joined by single spaces; the tag
+    of a word is the label of its first token (`hf.word_positions`), and every other position is ignored by the loss."""
+    cfg = run.config
+    hp: dict[str, Any] = cfg["train"]
+    path: str = cfg["custom"]["path"]
+    splits, tag_names = _tag_splits(run, df)
+
+    max_tokens = int(cfg["text"]["maxTokens"])
+    limit = custom.text_token_limit(path)
+    if max_tokens > limit:
+        raise ConfigError(
+            f"This model reads at most {limit} tokens of a text, but the run asks for {max_tokens}. Lower the number "
+            "of words read per text."
+        )
+    tokenizer_json, pad_id, pad_token = hf.read_tokenizer(path)
+    spec = HFTextSpec(max_tokens=max_tokens, pad_id=pad_id, pad_token=pad_token, tokenizer=tokenizer_json)
+    meta = {
+        "schemaVersion": 1,
+        "task": cfg["task"],
+        "model": cfg["model"],
+        # True: the trained network is a Hugging Face folder (config.json + model.safetensors), not model.pt.
+        "hf": True,
+        **{**spec.to_meta(), "inputKind": "words"},
+        "textColumn": cfg["textColumn"],
+        "outputName": cfg["labelColumn"],
+        # The model's tag order: index i is tag_names[i], because that is how the labels were encoded below.
+        "names": tag_names,
+    }
+    net = hf.build_tokens(path, tag_names, pad_id)
+    if hp["freezeBackbone"]:
+        hf.freeze_backbone(net)
+
+    index = {tag: i for i, tag in enumerate(tag_names)}
+    tokenizer = hf.make_tokenizer(spec)
+    inputs: dict[str, torch.Tensor] = {}
+    labels: dict[str, np.ndarray] = {}
+    for name, part in splits.items():
+        ids, positions = hf.encode_words(tokenizer, part.texts)
+        inputs[name] = ids
+        labels[name] = tagging.token_labels(positions, part.tags, index, max_tokens)
+    weights = None
+    if hp.get("useClassWeights"):
+        seen = labels["train"][labels["train"] >= 0]
+        weights = torch.from_numpy(tabular.balanced_class_weights(seen, len(tag_names)))
+    batch_size = int(hp["batchSize"])
+
+    def loader(split: str, *, shuffle: bool) -> DataLoader:
+        return DataLoader(
+            TensorDataset(inputs[split], torch.from_numpy(labels[split])), batch_size=batch_size, shuffle=shuffle
+        )
+
+    return Setup(net, loader("train", shuffle=True), loader("validation", shuffle=False), loop.Tagging(weights), meta)
+
+
+def _tagger_setup(run: TrainContext, df: pd.DataFrame) -> Setup:
+    """Token classification: each text becomes one id per word, each word has one tag, and the loss is over words."""
+    cfg = run.config
+    hp: dict[str, Any] = cfg["train"]
+    settings: dict[str, Any] = cfg["text"]
+    splits, tag_names = _tag_splits(run, df)
 
     # Built from the train texts alone, so nothing about validation or test leaks into what the model knows.
     vocabulary = tagging.fit_vocabulary(
@@ -525,7 +586,7 @@ def train(run: TrainContext) -> PytorchLoadedModel:
         if cfg["inputKind"] == "tabular":
             setup = _tabular_setup(run, df, class_names)
         elif cfg["inputKind"] == "words":
-            setup = _tagger_setup(run, df)
+            setup = (_hf_tagger_setup if cfg.get("custom") else _tagger_setup)(run, df)
         elif cfg["inputKind"] == "text":
             setup = (_hf_text_setup if cfg.get("custom") else _text_setup)(run, df, class_names)
         elif cfg["inputKind"] == "audio":

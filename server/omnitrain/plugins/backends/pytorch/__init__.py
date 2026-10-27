@@ -26,18 +26,19 @@ Submodules:
   evaluate.py   the evaluation report (the shared classification and regression reports)
   artifacts.py  ONNX conversion, straight from the module
   manifest.py   preprocessing.json for a bare model export
-  custom.py     bring-your-own Hugging Face models (image and text): kinds, file checks, the image size and
+  custom.py     bring-your-own Hugging Face models (image, text and token): kinds, file checks, the image size and
                 normalisation, or the token limit, a model dictates (JSON only, no torch)
   hf.py         builds, freezes, saves and loads such a model as a plain `[N, 3, H, W] -> logits` or
-                `[N, max_tokens] ids -> logits` module, and runs its tokenizer (torch)
+                `[N, max_tokens] ids -> logits` module, runs its tokenizer and, for a tagger, finds the token that
+                speaks for each word (torch)
 
 Only tasks.py, spec.py, compile.py, runtime.py, manifest.py, artifacts.py and custom.py are imported at module level
 here, and none of them imports torch at module level, so listing this backend never needs a GPU runtime. The others
 import torch, so they are imported lazily, inside the classmethods that need them.
 
 Licence: torchvision and its pretrained ImageNet weights are BSD-3-Clause. Not offered yet: built-in pretrained text
-models (a Hugging Face encoder is brought, not bundled), a bring-your-own token classifier, bring-your-own models other than
-Hugging Face image and text classifiers, categorical table columns.
+models (a Hugging Face encoder is brought, not bundled), bring-your-own models other than Hugging Face image, text and
+token classifiers, categorical table columns.
 """
 
 import importlib.util

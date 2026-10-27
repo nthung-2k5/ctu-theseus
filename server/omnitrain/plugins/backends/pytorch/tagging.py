@@ -58,6 +58,20 @@ def label_ids(tag_rows: Sequence[Sequence[str]], tag_index: dict[str, int], max_
     return out
 
 
+def token_labels(
+    positions: Sequence[Sequence[int]], tag_rows: Sequence[Sequence[str]], tag_index: dict[str, int], length: int
+) -> np.ndarray:
+    """`[rows, length]` int64 tag ids for a tokenizer that cuts words into pieces: a word's tag is put at the position
+    of the token that speaks for it (`positions[row][word]`, `hf.word_positions`); every other position, and a word
+    no token covers, is `IGNORE`."""
+    out = np.full((len(tag_rows), length), IGNORE, dtype=np.int64)
+    for i, (spoken, row) in enumerate(zip(positions, tag_rows, strict=True)):
+        for position, tag in zip(spoken, row, strict=True):
+            if position >= 0:
+                out[i, position] = tag_index[tag]
+    return out
+
+
 def clean(values: pd.Series) -> list[str]:
     """A frame column as strings: a missing text is the empty string, which has no words."""
     return values.fillna("").astype(str).tolist()

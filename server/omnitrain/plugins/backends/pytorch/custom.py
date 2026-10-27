@@ -1,5 +1,5 @@
-"""Bring-your-own models: Hugging Face `transformers` image classifiers (ViT, Swin, ConvNeXt, ResNet, ...) and text
-classifiers (BERT and its relatives).
+"""Bring-your-own models: Hugging Face `transformers` image classifiers (ViT, Swin, ConvNeXt, ResNet, ...), text
+classifiers and token classifiers (BERT and its relatives).
 
 This module only reads JSON, so listing the kinds and validating a model's files never needs torch. Building and
 running the network is `hf.py`, imported only where a model is really loaded.
@@ -28,6 +28,9 @@ from omnitrain.plugins.backends.pytorch import tasks
 
 HF_IMAGE = "hf_image"
 HF_TEXT = "hf_text"
+HF_TOKEN = "hf_token"
+# The kinds that read a text with the model's own tokenizer.
+HF_TEXT_KINDS = (HF_TEXT, HF_TOKEN)
 # Families whose classifier loads, trains and exports to ONNX (`tests/test_pytorch_custom.py` runs each through all
 # three on a tiny random model). Another family is one more entry here and one more row in that test.
 SUPPORTED_MODEL_TYPES = ("vit", "deit", "beit", "swin", "swinv2", "convnext", "convnextv2", "resnet", "mobilenet_v2")
@@ -39,6 +42,8 @@ _TEXT_ARCHITECTURE = re.compile(
     r"^(Bert|DistilBert|Roberta|XLMRoberta|Albert|Electra)"
     r"(ForSequenceClassification|ForMaskedLM|ForPreTraining|Model)$"
 )
+# A checkpoint that is already a tagger (or a bare encoder, matched above) can be fine-tuned into one.
+_TOKEN_ARCHITECTURE = re.compile(r"^(Bert|DistilBert|Roberta|XLMRoberta|Albert|Electra)ForTokenClassification$")
 # The `architectures` entry of a checkpoint that can be fine-tuned into an image classifier: an already-trained
 # classifier or the bare backbone (the usual way a base model is published). `DeiTForImageClassificationWithTeacher`,
 # whose two heads are averaged, is deliberately not matched.
@@ -89,17 +94,36 @@ def custom_kinds_for(task_id: str) -> list[CustomModelKind]:
                 unavailable_reason=_transformers_unavailable(),
             )
         ]
+    if task_id in tasks.TOKEN_TASKS:
+        return [
+            CustomModelKind(
+                id=HF_TOKEN,
+                label="Hugging Face token classification model",
+                description="A BERT, DistilBERT, RoBERTa, XLM-RoBERTa, ALBERT or ELECTRA encoder (config.json, "
+                ".safetensors weights and the tokenizer files, in a form the fast tokenizer reads). It is fine-tuned "
+                "with its own tokenizer, which may cut a word into several pieces: the first piece of a word carries "
+                "that word's tag. The vocabulary settings are ignored and the learning rate defaults to 0.00002.",
+                modality="text",
+                source_kinds=["hub", "upload"],
+                status="experimental",
+                unavailable_reason=_transformers_unavailable(),
+            )
+        ]
     return []
 
 
 def suggest_kind(config: dict[str, Any]) -> str | None:
+    """The kind a checkpoint's config points at. A text encoder is one family for two tasks (the same BERT is a text
+    classifier or a tagger once it has a head), so a bare encoder is suggested as a text classifier, the commoner use,
+    and a checkpoint that already is a tagger is suggested as one."""
     architectures = [a for a in config.get("architectures") or [] if isinstance(a, str)]
     if config.get("model_type") in SUPPORTED_MODEL_TYPES and any(_ARCHITECTURE.match(a) for a in architectures):
         return HF_IMAGE
-    if config.get("model_type") in SUPPORTED_TEXT_MODEL_TYPES and any(
-        _TEXT_ARCHITECTURE.match(a) for a in architectures
-    ):
-        return HF_TEXT
+    if config.get("model_type") in SUPPORTED_TEXT_MODEL_TYPES:
+        if any(_TOKEN_ARCHITECTURE.match(a) for a in architectures):
+            return HF_TOKEN
+        if any(_TEXT_ARCHITECTURE.match(a) for a in architectures):
+            return HF_TEXT
     return None
 
 
@@ -197,7 +221,7 @@ def validate_custom_model(task: TaskDescriptor, ref: CustomModelRef) -> None:
         # auto_map makes transformers import and run Python from the model repo. Never do that with a file a
         # user (or a Hub author) supplied.
         raise ConfigError("Models that need custom code (auto_map / trust_remote_code) are not supported")
-    text = ref.kind == HF_TEXT
+    text = ref.kind in HF_TEXT_KINDS
     families = SUPPORTED_TEXT_MODEL_TYPES if text else SUPPORTED_MODEL_TYPES
     if config.get("model_type") not in families:
         listed = ", ".join(families)
@@ -217,14 +241,14 @@ def validate_custom_model(task: TaskDescriptor, ref: CustomModelRef) -> None:
     # cannot be read.
     from omnitrain.plugins.backends.pytorch import hf
 
+    noun = {HF_TEXT: "a text classifier", HF_TOKEN: "a token classifier"}.get(ref.kind, "an image classifier")
     try:
-        if text:
+        if ref.kind == HF_TOKEN:
+            hf.smoke_test_tokens(str(root))
+        elif text:
             hf.smoke_test_text(str(root))
         else:
             hf.smoke_test(str(root))
     except Exception as e:  # noqa: BLE001  any failure here means the model cannot be fine-tuned as a classifier
         reason = str(e).strip() or type(e).__name__
-        raise ConfigError(
-            f"This model cannot be loaded as {'a text' if text else 'an image'} classifier: "
-            f"{reason.splitlines()[0][:300]}"
-        ) from None
+        raise ConfigError(f"This model cannot be loaded as {noun}: {reason.splitlines()[0][:300]}") from None

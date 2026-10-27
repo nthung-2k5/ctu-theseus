@@ -149,7 +149,7 @@ class TestKindAndValidation:
             ({"model_type": "bert", "architectures": ["BertForMaskedLM"]}, custom.HF_TEXT),
             ({"model_type": "roberta", "architectures": ["RobertaModel"]}, custom.HF_TEXT),
             ({"model_type": "xlm-roberta", "architectures": ["XLMRobertaForSequenceClassification"]}, custom.HF_TEXT),
-            ({"model_type": "bert", "architectures": ["BertForTokenClassification"]}, None),
+            ({"model_type": "bert", "architectures": ["BertForTokenClassification"]}, custom.HF_TOKEN),
             ({"model_type": "gpt2", "architectures": ["GPT2LMHeadModel"]}, None),
             ({"model_type": "vit", "architectures": ["ViTModel"]}, custom.HF_IMAGE),
         ],

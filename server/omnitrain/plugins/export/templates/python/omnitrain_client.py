@@ -34,6 +34,9 @@ Implements preprocessing for:
     `tokenizer.json` (or inside preprocessing.json) and is run by the `tokenizers` package.
   - a `text` input with a `tagWords` recipe and a `tags` output (token classification) — pass the
     text itself; `predict()` returns one `{token, tag, confidence}` per whitespace-separated word.
+  - a `text` input with an `hfTokenizer` recipe `hf_word_tokens_v1` and a `tags` output (a fine-tuned
+    Hugging Face token classifier) — the same call and result; the model's own tokenizer reads the
+    words, and a word is tagged by the first token that covers it.
 
 Every other input type (Ludwig's text and audio, a scikit-learn text model) raises
 NotImplementedError with a pointer to preprocessing.json so you can adapt preprocessing yourself —
@@ -54,6 +57,25 @@ import numpy as np
 import onnxruntime as ort
 
 _HERE = Path(__file__).parent
+
+
+def _first_tokens(offsets: list[tuple[int, int]], words: list[str]) -> list[int]:
+    """For each word, the position of the first token that covers it, or -1. `offsets` are the character spans of the
+    tokens in the words joined by single spaces (special tokens and padding have the span (0, 0)); a token belongs to
+    the word its first non-space character is in."""
+    owner: list[int] = []
+    for i, word in enumerate(words):
+        if i:
+            owner.append(-1)
+        owner.extend([i] * len(word))
+    first = [-1] * len(words)
+    for position, (start, end) in enumerate(offsets):
+        for char in range(start, min(end, len(owner))):
+            if owner[char] >= 0:
+                if first[owner[char]] < 0:
+                    first[owner[char]] = position
+                break
+    return first
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:
@@ -270,6 +292,15 @@ class OmniTrainClient:
             self._tag_lower = {code: code + lower["add"] for code in range(lower["from"], lower["to"] + 1)}
             first = self._tag_recipe["firstWordId"]
             self._tag_ids = {word: first + i for i, word in enumerate(self._tag_recipe["vocabulary"])}
+        elif self.output_spec["type"] == "tags" and "hfTokenizer" in self.input_spec:
+            self._kind = "tags"
+            self._tag_recipe = self.input_spec["hfTokenizer"]
+            if self._tag_recipe.get("recipe") != "hf_word_tokens_v1":
+                raise NotImplementedError(
+                    f"Unknown tagging recipe {self._tag_recipe.get('recipe')!r}. "
+                    "See preprocessing.json's `inputs[0].hfTokenizer` and adapt this client."
+                )
+            self._hf_tokenizer = self._load_hf_tokenizer(self._tag_recipe, Path(preprocessing_path).parent)
         elif self.input_spec["type"] == "text" and "textTokens" in self.input_spec:
             self._kind = "text"
             self._text_recipe = self.input_spec["textTokens"]
@@ -648,14 +679,24 @@ class OmniTrainClient:
         words = text.split()
         if not words:
             return []
-        feed = {self._onnx_input_names[self.input_spec["name"]]: self._word_ids(words)}
+        if "tagWords" in self.input_spec:
+            ids = self._word_ids(words)
+            # The word's own row of logits: one word per position, the ones past maxTokens never read.
+            row_of_word = [i if i < recipe["maxTokens"] else -1 for i in range(len(words))]
+        else:
+            # A Hugging Face tokenizer reads the words joined by single spaces; its offsets say which token is
+            # the first of each word, and that token's row of logits is the word's.
+            encoding = self._hf_tokenizer.encode(" ".join(words))
+            ids = np.array([encoding.ids], dtype=np.int64)
+            row_of_word = _first_tokens(encoding.offsets, words)
+        feed = {self._onnx_input_names[self.input_spec["name"]]: ids}
         raw = np.asarray(self.session.run([self._onnx_output_name], feed)[0])
         rows = raw.reshape(raw.shape[-2], raw.shape[-1])
         classes = self.output_spec["classes"]
         out = []
-        for i, word in enumerate(words):
-            if i < min(len(words), recipe["maxTokens"]):
-                probs = _softmax(rows[i])
+        for word, row in zip(words, row_of_word):
+            if row >= 0:
+                probs = _softmax(rows[row])
                 best = int(np.argmax(probs))
                 out.append({"token": word, "tag": classes[best], "confidence": round(float(probs[best]), 4)})
             else:

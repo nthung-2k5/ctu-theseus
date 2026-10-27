@@ -235,41 +235,58 @@ class TaggerModel(PytorchLoadedModel):
 
     def __init__(self, net: torch.nn.Module, meta: dict[str, Any]) -> None:
         super().__init__(net, meta)
-        self._spec = WordsSpec.from_meta(meta)
+        self._spec = self._read_spec(meta)
         self.input_columns = [meta["textColumn"]]
 
+    @staticmethod
+    def _read_spec(meta: dict[str, Any]) -> WordsSpec | HFTextSpec:
+        return WordsSpec.from_meta(meta)
+
     @property
-    def spec(self) -> WordsSpec:
+    def spec(self) -> WordsSpec | HFTextSpec:
         return self._spec
 
     @property
     def predict_batch(self) -> int:
         return TEXT_PREDICT_BATCH
 
-    def outputs(self, frame: pd.DataFrame) -> np.ndarray:
-        ids = tagging.encode(tagging.clean(frame[self.input_columns[0]]), self._spec)
-        out = [
-            self._forward(torch.from_numpy(ids[start : start + TEXT_PREDICT_BATCH]))
-            for start in range(0, len(ids), TEXT_PREDICT_BATCH)
-        ]
+    def _encode(self, texts: list[str]) -> tuple[torch.Tensor, list[list[int]]]:
+        """The network's input for `texts` and, for each text, the row of the output that speaks for each of its words
+        (-1 for a word the model did not read)."""
+        assert isinstance(self._spec, WordsSpec)
+        ids = torch.from_numpy(tagging.encode(texts, self._spec))
+        limit = self._spec.max_tokens
+        return ids, [[i if i < limit else -1 for i in range(len(words(value)))] for value in texts]
+
+    def _run(self, frame: pd.DataFrame) -> tuple[np.ndarray, list[list[int]], list[str]]:
+        """(logits `[rows, positions, tags]`, the output row of each word of each text, the texts)."""
+        texts = tagging.clean(frame[self.input_columns[0]])
+        batch = self.predict_batch
+        logits: list[np.ndarray] = []
+        positions: list[list[int]] = []
+        for start in range(0, len(texts), batch):
+            ids, found = self._encode(texts[start : start + batch])
+            logits.append(self._forward(ids))
+            positions.extend(found)
         shape = (0, self._spec.max_tokens, len(self.output.labels or []))
-        return np.concatenate(out) if out else np.zeros(shape, dtype=np.float32)
+        return (np.concatenate(logits) if logits else np.zeros(shape, dtype=np.float32)), positions, texts
+
+    def outputs(self, frame: pd.DataFrame) -> np.ndarray:
+        return self._run(frame)[0]
 
     def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
         labels = self.output.labels or []
         fallback = labels.index(OUTSIDE) if OUTSIDE in labels else 0
-        texts = tagging.clean(frame[self.input_columns[0]])
-        logits = torch.from_numpy(self.outputs(frame))
-        probabilities = torch.softmax(logits, dim=-1)
+        logits, positions, texts = self._run(frame)
+        probabilities = torch.softmax(torch.from_numpy(logits), dim=-1)
         top_probability, top = probabilities.max(dim=-1)
         rows: dict[str, list[Any]] = {"predictions": [], "words": [], "word_probabilities": [], "probability": []}
         for i, value in enumerate(texts):
-            found = words(value)
-            read = min(len(found), self._spec.max_tokens)
-            tags = [labels[j] for j in top[i, :read].tolist()] + [labels[fallback]] * (len(found) - read)
-            confidences = [float(p) for p in top_probability[i, :read].tolist()] + [0.0] * (len(found) - read)
+            # A word with no row was never read (cut off, or removed by the tokenizer): it gets the fallback tag.
+            tags = [labels[int(top[i, p])] if p >= 0 else labels[fallback] for p in positions[i]]
+            confidences = [float(top_probability[i, p]) if p >= 0 else 0.0 for p in positions[i]]
             rows["predictions"].append(" ".join(tags))
-            rows["words"].append(found)
+            rows["words"].append(words(value))
             rows["word_probabilities"].append(confidences)
             rows["probability"].append(min(confidences) if confidences else 1.0)
         return pd.DataFrame({f"{self._name}_{key}": value for key, value in rows.items()})
@@ -291,6 +308,32 @@ class TaggerModel(PytorchLoadedModel):
 
     def tags(self, predictions: pd.DataFrame) -> list[str]:
         return cell_tags(predictions[f"{self._name}_predictions"].iloc[0])
+
+
+class HFTaggerModel(TaggerModel):
+    """A bring-your-own transformer as a tagger. Its own tokenizer reads the words joined by single spaces, cut and
+    padded to `maxTokens` tokens, and a word is tagged by the row of the first token that covers it
+    (`hf.word_positions`). A word no token covers (the text was cut before it, or the tokenizer dropped all of its
+    characters) was not read, so it gets the fallback tag with probability 0, like a word past a built-in tagger's
+    `maxTokens`."""
+
+    def __init__(self, net: torch.nn.Module, meta: dict[str, Any]) -> None:
+        super().__init__(net, meta)
+        from omnitrain.plugins.backends.pytorch import hf
+
+        self._tokenizer = hf.make_tokenizer(self._spec)  # type: ignore[arg-type]
+        self._encode_words = hf.encode_words
+
+    @staticmethod
+    def _read_spec(meta: dict[str, Any]) -> WordsSpec | HFTextSpec:
+        return HFTextSpec.from_meta(meta)
+
+    @property
+    def predict_batch(self) -> int:
+        return HF_TEXT_PREDICT_BATCH
+
+    def _encode(self, texts: list[str]) -> tuple[torch.Tensor, list[list[int]]]:
+        return self._encode_words(self._tokenizer, texts)
 
 
 class HFTextModel(PytorchLoadedModel):
@@ -361,7 +404,7 @@ def build_network(meta: dict[str, Any]) -> torch.nn.Module:
 def wrap(net: torch.nn.Module, meta: dict[str, Any]) -> PytorchLoadedModel:
     """`net` as the loaded model its `names.json` calls for."""
     if "hfTokenizer" in meta:
-        return HFTextModel(net, meta)
+        return (HFTaggerModel if meta["task"] == "tag" else HFTextModel)(net, meta)
     kinds = {
         "tabular": TabularModel, "audio": AudioModel, "image": ImageModel, "text": TextModel, "words": TaggerModel,
     }  # fmt: skip
@@ -377,7 +420,8 @@ def load(model_dir: str) -> PytorchLoadedModel:
         from omnitrain.plugins.backends.pytorch import hf
 
         if "hfTokenizer" in meta:
-            return wrap(hf.load_text(str(root), HFTextSpec.from_meta(meta).pad_id), meta)
+            task = "token" if meta["task"] == "tag" else "text"
+            return wrap(hf.load_text(str(root), HFTextSpec.from_meta(meta).pad_id, task=task), meta)
         return wrap(hf.load(str(root)), meta)
     net = build_network(meta)
     # weights_only: the file is a plain state dict, and nothing here should ever unpickle arbitrary objects.
