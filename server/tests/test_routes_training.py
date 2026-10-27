@@ -62,9 +62,9 @@ async def test_project_training_backends_gives_ludwig_its_task_specific_models_a
     c = await new_user()
     p = await project(c, "image_classification")
     backends = (await c.get(f"/api/projects/{p['id']}/training-backends")).json()["backends"]
-    # Sorted by id, so Ludwig (the default backend) stays first.
-    assert [b["id"] for b in backends] == ["ludwig", "yolo"]
-    ludwig = backends[0]
+    # PyTorch is the default for images, so it comes first; the others follow in id order.
+    assert [b["id"] for b in backends] == ["pytorch", "ludwig", "yolo"]
+    ludwig = next(b for b in backends if b["id"] == "ludwig")
     assert ludwig["models"][0]["id"] == "resnet18"
     assert ludwig["modelParamName"] == "encoderId"
     param_names = {p["name"] for p in ludwig["params"]}
@@ -100,8 +100,11 @@ async def test_starting_a_run_compiles_uploads_the_config_and_queues_it(client, 
 
     r = await c.post(
         f"/api/projects/{p['id']}/train",
-        json={"name": "first", "datasetVersionId": vid, "hyperparameters": {"epochs": 7, "encoderId": "resnet50"}},
-    )
+        json={
+            "name": "first", "datasetVersionId": vid, "backend": "ludwig",
+            "hyperparameters": {"epochs": 7, "encoderId": "resnet50"},
+        },
+    )  # fmt: skip
     assert r.status_code == 200, r.text
     run = r.json()["run"]
     assert (run["status"], run["name"], run["datasetVersionId"]) == ("queued", "first", vid)
@@ -141,7 +144,7 @@ async def test_a_config_that_cannot_compile_is_a_400_and_creates_no_run(client, 
     vid = await ready_version(db, fake_s3, p["id"])
     r = await c.post(
         f"/api/projects/{p['id']}/train",
-        json={"name": "x", "datasetVersionId": vid, "hyperparameters": {"encoderId": "nope"}},
+        json={"name": "x", "datasetVersionId": vid, "backend": "ludwig", "hyperparameters": {"encoderId": "nope"}},
     )
     assert r.status_code == 400 and "Failed to compile Ludwig config" in r.json()["error"]["message"]
     r = await c.post(
@@ -447,7 +450,7 @@ async def test_a_trial_that_cannot_compile_is_kept_as_a_failed_trial_not_silentl
     vid = await ready_version(db, fake_s3, p["id"])
     body = (await c.post(
         f"/api/projects/{p['id']}/sweeps",
-        json={"name": "enc", "datasetVersionId": vid, "strategy": "grid", "maxTrials": 5, "searchSpace": {"encoderId": ["nope", "resnet18"]}},  # noqa: E501
+        json={"name": "enc", "datasetVersionId": vid, "backend": "ludwig", "strategy": "grid", "maxTrials": 5, "searchSpace": {"encoderId": ["nope", "resnet18"]}},  # noqa: E501
     )).json()  # fmt: skip
     statuses = {t["trialIndex"]: t["status"] for t in body["trials"]}
     assert statuses == {0: "failed", 1: "queued"}

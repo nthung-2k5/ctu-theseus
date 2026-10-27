@@ -445,8 +445,9 @@ async def ready_version(db, project_id) -> uuid.UUID:
 async def queue_run(db, project_id, version_id, **hp):
     async with db() as s:
         return await queue_training(
-            s, project_id=uuid.UUID(project_id), name="r", task=TEXT, dataset_version_id=version_id, hyperparameters=hp
-        )
+            s, project_id=uuid.UUID(project_id), name="r", task=TEXT, dataset_version_id=version_id,
+            backend_id="ludwig", hyperparameters=hp,
+        )  # fmt: skip
 
 
 async def test_a_run_on_a_custom_model_records_it_and_compiles_its_path(new_user, db, training_env):

@@ -96,8 +96,7 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   exported. skl2onnx needs `onnx.helper.make_attribute` patched for a tree ensemble with missing values (bools in an int
   list); the patch is scoped to one conversion.
   It is the **default backend for the two tabular tasks** (`default_for`, honoured by `registry.preferred_first`: the
-  create-run list's first entry, and what a run uses when no backend is named). Ludwig stays offered for them, and stays
-  the default for text.
+  create-run list's first entry, and what a run uses when no backend is named). Ludwig stays offered for them.
 - **The PyTorch backend (`plugins/backends/pytorch/`, id `pytorch`) is the code-defined alternative to Ludwig.** It trains
   image classification (torchvision classifiers with a new head; the catalog keeps Ludwig's image encoder ids:
   `resnet18`, `resnet50`, `efficientnet_b0`, `mobilenet_v3_small`, `convnext_tiny`, `vit_base`) and tabular
@@ -116,8 +115,10 @@ for a leftover `pytest.exe` before re-running (Git Bash's `ps` cannot see native
   squared error in the target's own units whatever steered the optimiser (class weights, target scaling), because
   `events/writer.py` compares it across epochs. ONNX is exported straight from the `nn.Module` as logits (a number for a
   regressor), traced with two rows (a batch of 1 pins the batch axis for `convnext_tiny` and `vit_base`), and a table
-  takes one tensor per column named by the column. It is **not** a default for any task (`default_for` is empty:
-  scikit-learn is the tabular default, Ludwig the image one) until someone has compared it on a real run. A new input
+  takes one tensor per column named by the column. It is the **default for image, audio and text classification**
+  (`default_for`; scikit-learn keeps the two tabular tasks, and a tagger has no other backend). Ludwig is still offered
+  after it, and a run that names `ludwig` still trains: what is lost by default is Ludwig's pretrained text encoders, since
+  the built-in text models train from scratch (a pretrained one is brought, as `hf_text`). A new input
   kind needs a new spec beside the four.
   **Bring-your-own image models** are one kind, `hf_image` (`custom.py`, `hf.py`; image classification only): a Hugging
   Face classifier or bare backbone of ViT, DeiT, BEiT, Swin, Swinv2, ConvNeXt, ConvNeXtV2, ResNet or MobileNetV2. The

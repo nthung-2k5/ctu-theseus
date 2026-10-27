@@ -75,8 +75,14 @@ class TestRegistration:
         out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
         assert out.stdout.strip() == "False"
 
-    def test_it_does_not_replace_ludwig_or_scikit_learn_as_a_default(self):
-        assert PytorchBackend.default_for == frozenset()
+    def test_it_is_the_default_for_images_sounds_and_texts_but_not_tables(self):
+        assert PytorchBackend.default_for == {"image_classification", "audio_classification", "text_classification"}
+        for task_id in PytorchBackend.default_for:
+            task = get_task_descriptor(task_id)
+            assert trainable_backends(task)[0] is PytorchBackend
+            assert get_backend("ludwig") in trainable_backends(task)
+        for task_id in ("tabular_classification", "tabular_regression"):
+            assert trainable_backends(get_task_descriptor(task_id))[0] is get_backend("sklearn")
 
     def test_it_offers_three_perceptrons_for_a_table(self):
         for task_id in ("tabular_classification", "tabular_regression"):
@@ -848,10 +854,10 @@ class TestCompileText:
         assert [m.id for m in models] == ["text_bag", "text_cnn"]
         assert not any(m.pretrained for m in models)
 
-    def test_it_is_not_the_default_for_text_and_ludwig_stays_offered(self):
+    def test_it_is_the_default_for_text_and_ludwig_stays_offered(self):
         offered = trainable_backends(TEXT)
         assert PytorchBackend in offered and get_backend("ludwig") in offered
-        assert offered[0] is not PytorchBackend
+        assert offered[0] is PytorchBackend
 
 
 class TestTextManifest:

@@ -174,9 +174,11 @@ async def test_a_disabled_backend_is_not_trainable_for_that_task_only(admin):
     await put(admin, "backend", "ludwig", False, task=TASK)
     assert ludwig not in trainable_backends(get_task_descriptor(TASK))
     assert ludwig in trainable_backends(get_task_descriptor("text_classification"))
-    # YOLO still trains this task, so the project can be created; once it is off too, nothing can.
-    assert [b.id for b in trainable_backends(get_task_descriptor(TASK))] == ["yolo"]
+    # PyTorch and YOLO still train this task, so the project can be created; once they are off too, nothing can.
+    assert [b.id for b in trainable_backends(get_task_descriptor(TASK))] == ["pytorch", "yolo"]
     assert (await create_project(admin)).status_code == 200
+    await put(admin, "backend", "pytorch", False, task=TASK)
+    assert [b.id for b in trainable_backends(get_task_descriptor(TASK))] == ["yolo"]
     await put(admin, "backend", "yolo", False, task=TASK)
     assert (await create_project(admin)).status_code == 422  # nothing can train it now
 
@@ -184,7 +186,8 @@ async def test_a_disabled_backend_is_not_trainable_for_that_task_only(admin):
 async def test_a_disabled_builtin_model_leaves_the_picker(admin):
     await put(admin, "builtin_model", "ludwig:resnet18", False)
     project = (await create_project(admin)).json()["project"]
-    ludwig = (await admin.get(f"/api/projects/{project['id']}/training-backends")).json()["backends"][0]
+    backends = (await admin.get(f"/api/projects/{project['id']}/training-backends")).json()["backends"]
+    ludwig = next(b for b in backends if b["id"] == "ludwig")
     ids = [m["id"] for m in ludwig["models"]]
     assert "resnet18" not in ids and "resnet50" in ids
     assert "resnet18" in [m.id for m in get_backend("ludwig").models(get_task_descriptor(TASK))]  # still installed
@@ -236,13 +239,14 @@ async def test_queueing_refuses_a_disabled_backend_and_model(admin, db, monkeypa
     await put(admin, "builtin_model", "ludwig:resnet50", False)
     async with db() as s:
         err = await queue_training(
-            s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id,
+            s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id, backend_id="ludwig",
             hyperparameters={"encoderId": "resnet50"},
         )  # fmt: skip
         assert isinstance(err, QueueError) and err.code == 400 and "disabled" in err.message
 
     await put(admin, "backend", "ludwig", False, task=TASK)
-    await put(admin, "backend", "yolo", False, task=TASK)  # the other backend that trains this task
+    await put(admin, "backend", "pytorch", False, task=TASK)  # the other backends that train this task
+    await put(admin, "backend", "yolo", False, task=TASK)
     async with db() as s:
         # Unnamed: the default-backend lookup already skips the disabled backend, so none is left.
         err = await queue_training(s, project_id=project_id, name="r", task=TASK, dataset_version_id=version_id)

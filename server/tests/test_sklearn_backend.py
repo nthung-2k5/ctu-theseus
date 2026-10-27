@@ -66,9 +66,10 @@ class TestRegistration:
             assert default_backend(task.id) is SklearnBackend
             # Ludwig is still offered, right after it.
             assert "ludwig" in [b.id for b in trainable_backends(task)]
-        # Text keeps Ludwig's pretrained encoders as the default.
-        assert trainable_backends(TEXT)[0].id == "ludwig"
-        assert default_backend(TEXT.id).id == "ludwig"
+        # Text belongs to the PyTorch backend; scikit-learn is offered, but not first.
+        assert trainable_backends(TEXT)[0].id == "pytorch"
+        assert default_backend(TEXT.id).id == "pytorch"
+        assert SklearnBackend in trainable_backends(TEXT)
 
     def test_models_differ_per_task(self):
         assert [m.id for m in SklearnBackend.models(TABULAR)] == [

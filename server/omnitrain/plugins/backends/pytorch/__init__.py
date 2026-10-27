@@ -90,6 +90,9 @@ class PytorchBackend(TrainerBackend):
     # A bring-your-own model is saved as a self-contained Hugging Face folder (hf.py), so a trained model loads, serves
     # and exports from the run's results alone, wherever its base model's files were.
     remote_custom_models = True
+    # The first choice for the three classification tasks Ludwig also trains. Ludwig stays offered after it, so a run
+    # (or an old one's setup, reused) can still name it. Tables belong to scikit-learn, and a tagger has no other backend.
+    default_for = frozenset({"image_classification", "audio_classification", "text_classification"})
 
     @classmethod
     def available(cls) -> str | None:
