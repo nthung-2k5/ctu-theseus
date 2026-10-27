@@ -15,6 +15,7 @@ import pytest
 import omnitrain.plugins.export
 from omnitrain.domain.task_registry import ColumnSpec, SnapshotContext, get_task_descriptor
 from omnitrain.domain.token_report import entities, is_bio
+from omnitrain.domain.token_tags import WHITESPACE_RANGES
 from omnitrain.plugins.backends.base import ConfigError, CustomModelRef, TrainContext
 from omnitrain.plugins.backends.pytorch import PytorchBackend, network, tagging, tasks
 from omnitrain.plugins.backends.pytorch import train as train_mod
@@ -432,6 +433,7 @@ def test_the_manifest_describes_the_recipe_and_the_tags(trained):
     ids = (recipe["recipe"], recipe["padId"], recipe["unknownId"], recipe["firstWordId"])
     assert ids == ("tag_word_ids_v1", 0, 1, 2)
     assert recipe["fallbackTag"] == "O" and recipe["vocabulary"] == meta["vocabulary"]
+    assert recipe["whitespaceRanges"] == [list(r) for r in WHITESPACE_RANGES]
 
 
 def test_the_onnx_graph_and_the_shipped_client_agree_with_the_platform(trained, tmp_path):
@@ -500,11 +502,12 @@ class TestBundle:
         )  # fmt: skip
         return {f.path: f.data for f in made}
 
-    def test_every_format_is_offered_the_model_and_only_python_implements_it(self, trained, tmp_path, monkeypatch):
+    def test_every_format_is_offered_the_model_and_every_client_implements_it(self, trained, tmp_path, monkeypatch):
+        # The clients themselves are held to the platform's tags in `test_export_tag_clients.py`.
         assert {f.id for f in list_export_formats(TASK, PytorchBackend)} >= set(self.FORMATS)
-        for fmt in self.FORMATS[1:]:
+        for fmt in self.FORMATS:
             readme = self.files(trained, tmp_path, fmt, monkeypatch)["README.md"].decode()
-            assert "tags every word" in readme and "does not implement" in readme, fmt
+            assert "Token classification" in readme and "does not implement" not in readme, fmt
 
     def test_the_golden_sample_carries_the_tags_and_the_python_bundle_verifies_them(
         self, trained, tmp_path, monkeypatch

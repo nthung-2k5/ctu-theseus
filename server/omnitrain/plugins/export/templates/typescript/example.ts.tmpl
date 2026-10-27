@@ -6,9 +6,11 @@
  *
  *     bun example.ts cat.jpg
  *     bun example.ts '{"age": 34, "income": 52000}'
+ *
+ * A text model takes the text itself: `bun example.ts "what a great film"`. A tagger prints one line per word.
  */
 
-import { OmniTrainClient } from './client'
+import { type Detection, OmniTrainClient, type TaggedWord } from './client'
 
 const arg = process.argv[2]
 if (!arg) {
@@ -31,9 +33,12 @@ if (client.isTabular) {
 }
 
 const predictions = await client.predict(input)
-if (Array.isArray(predictions)) {
+if (client.isTagger) {
+  // A token classifier: one line per word, the word, its tag and the model's confidence.
+  for (const { token, tag, confidence } of predictions as TaggedWord[]) console.log(`${token}\t${tag}\t${confidence.toFixed(4)}`)
+} else if (Array.isArray(predictions)) {
   // An object detector: one line per box.
-  for (const { label, confidence, box } of predictions) {
+  for (const { label, confidence, box } of predictions as Detection[]) {
     console.log(
       `${label}: ${confidence.toFixed(4)}  x=${box.x.toFixed(3)} y=${box.y.toFixed(3)} w=${box.w.toFixed(3)} h=${box.h.toFixed(3)}`,
     )

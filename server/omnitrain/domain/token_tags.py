@@ -17,6 +17,14 @@ MAX_TAG_LENGTH = 64
 # the tag set has it.
 OUTSIDE = "O"
 
+# The code points (inclusive ranges) `str.split()` separates words on: exactly those `str.isspace()` is true for. All
+# are in the Basic Multilingual Plane, so a client that reads UTF-16 code units splits a text the same way as one that
+# reads code points. The export manifest hands this list to a client; a test holds it to `str.isspace()`.
+WHITESPACE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x09, 0x0D), (0x1C, 0x20), (0x85, 0x85), (0xA0, 0xA0), (0x1680, 0x1680), (0x2000, 0x200A),
+    (0x2028, 0x2029), (0x202F, 0x202F), (0x205F, 0x205F), (0x3000, 0x3000),
+)  # fmt: skip
+
 
 def words(text: str) -> list[str]:
     return text.split()

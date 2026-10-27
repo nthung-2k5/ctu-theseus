@@ -150,3 +150,15 @@ async def test_tags_can_be_replaced_but_not_by_a_list_that_does_not_fit(client, 
     assert r.status_code == 422 and "4 words but 1 tag" in r.text
     stored = (await c.get(f"/api/items/{item}/annotations")).json()["annotations"][0]["labelStructured"]
     assert stored == ["B-PER", "O", "O", "B-LOC"]
+
+
+def test_the_whitespace_ranges_are_exactly_what_str_split_separates_on():
+    from omnitrain.domain.token_tags import WHITESPACE_RANGES, words
+
+    listed = {c for low, high in WHITESPACE_RANGES for c in range(low, high + 1)}
+    assert listed == {c for c in range(0x110000) if chr(c).isspace()}
+    assert max(high for _, high in WHITESPACE_RANGES) < 0x10000  # a client reading UTF-16 splits the same way
+    # And a text really is cut at each of them, with nothing else.
+    for code in sorted(listed):
+        assert words(f"a{chr(code)}b") == ["a", "b"]
+    assert words("a​b,c") == ["a​b,c"]  # a zero-width space is not whitespace

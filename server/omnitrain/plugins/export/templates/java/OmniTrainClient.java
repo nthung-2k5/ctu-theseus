@@ -25,6 +25,9 @@
  * A {@code text} input that carries a {@code textTokens} recipe (text classification) is
  * supported as well: {@link #predictText} takes the text itself, splits it into words and
  * looks them up in the vocabulary that ships in preprocessing.json.
+ *
+ * A {@code text} input that carries a {@code tagWords} recipe and a {@code tags} output (token
+ * classification) is supported too: {@link #tag} takes the text itself and returns a tag for every word.
  */
 import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OnnxValue;
@@ -115,6 +118,77 @@ final class TextFrontEnd {
         List<String> tokens = tokenize(text, r);
         for (int i = 0; i < Math.min(tokens.size(), r.maxTokens); i++) {
             ids[i] = r.ids.getOrDefault(tokens.get(i), r.unknownId);
+        }
+        return ids;
+    }
+}
+
+/**
+ * {@code inputs[0].tagWords} (recipe "tag_word_ids_v1") spelled out: how a text becomes one id per word.
+ */
+final class TagFrontEnd {
+    private TagFrontEnd() {}
+
+    static final class Recipe {
+        final String recipe;
+        final int lowerFrom;
+        final int lowerTo;
+        final int lowerAdd;
+        final boolean[] whitespace = new boolean[0x10000];
+        final int maxTokens;
+        final int padId;
+        final int unknownId;
+        final String fallbackTag;
+        final java.util.HashMap<String, Integer> ids = new java.util.HashMap<>();
+
+        Recipe(JsonNode node) {
+            recipe = node.path("recipe").asText();
+            lowerFrom = node.path("lowercase").path("from").asInt();
+            lowerTo = node.path("lowercase").path("to").asInt();
+            lowerAdd = node.path("lowercase").path("add").asInt();
+            for (JsonNode range : node.path("whitespaceRanges")) {
+                for (int unit = range.get(0).asInt(); unit <= Math.min(range.get(1).asInt(), 0xFFFF); unit++) {
+                    whitespace[unit] = true;
+                }
+            }
+            maxTokens = node.path("maxTokens").asInt();
+            padId = node.path("padId").asInt();
+            unknownId = node.path("unknownId").asInt(1);
+            fallbackTag = node.path("fallbackTag").asText("O");
+            int first = node.path("firstWordId").asInt(2);
+            int i = 0;
+            for (JsonNode word : node.path("vocabulary")) ids.put(word.asText(), first + i++);
+        }
+    }
+
+    /** The words of a text: the runs of code units that are not whitespace (the ranges are the ones {@code str.split()} cuts at). */
+    static List<String> words(String text, Recipe r) {
+        List<String> words = new ArrayList<>();
+        int start = -1;
+        for (int i = 0; i < text.length(); i++) {
+            if (r.whitespace[text.charAt(i)]) {
+                if (start >= 0) words.add(text.substring(start, i));
+                start = -1;
+            } else if (start < 0) {
+                start = i;
+            }
+        }
+        if (start >= 0) words.add(text.substring(start));
+        return words;
+    }
+
+    /** {@code maxTokens} word ids: the first maxTokens words, ASCII capitals lower-cased, looked up in the vocabulary, padded at the end. */
+    static long[] wordIds(List<String> words, Recipe r) {
+        long[] ids = new long[r.maxTokens];
+        java.util.Arrays.fill(ids, r.padId);
+        for (int i = 0; i < Math.min(words.size(), r.maxTokens); i++) {
+            String word = words.get(i);
+            StringBuilder form = new StringBuilder(word.length());
+            for (int k = 0; k < word.length(); k++) {
+                char unit = word.charAt(k);
+                form.append(unit >= r.lowerFrom && unit <= r.lowerTo ? (char) (unit + r.lowerAdd) : unit);
+            }
+            ids[i] = r.ids.getOrDefault(form.toString(), r.unknownId);
         }
         return ids;
     }
@@ -346,6 +420,9 @@ public final class OmniTrainClient implements AutoCloseable {
     /** One object found in an image. */
     public record Detection(String label, double confidence, Box box) {}
 
+    /** One word of a tagged text, the tag the model gave it and how sure it was (0..1). */
+    public record TaggedWord(String token, String tag, double confidence) {}
+
     private final OrtEnvironment env;
     private final OrtSession session;
     private final JsonNode inputSpec;
@@ -354,6 +431,7 @@ public final class OmniTrainClient implements AutoCloseable {
     private final String onnxOutputName;
     private final AudioFrontEnd.Recipe audioRecipe;
     private final TextFrontEnd.Recipe textRecipe;
+    private final TagFrontEnd.Recipe tagRecipe;
 
     public OmniTrainClient() throws OrtException, IOException {
         this(Path.of("model.onnx"), Path.of("preprocessing.json"));
@@ -384,6 +462,19 @@ public final class OmniTrainClient implements AutoCloseable {
                 "Unknown text recipe '" + textRecipe.recipe + "'. " +
                 "See preprocessing.json's inputs[0].textTokens and adapt this client.");
         }
+        this.tagRecipe = "text".equals(inputSpec.path("type").asText()) && inputSpec.has("tagWords")
+                && "tags".equals(outputSpec.path("type").asText())
+            ? new TagFrontEnd.Recipe(inputSpec.get("tagWords")) : null;
+        if (tagRecipe != null && !"tag_word_ids_v1".equals(tagRecipe.recipe)) {
+            throw new UnsupportedOperationException(
+                "Unknown tagging recipe '" + tagRecipe.recipe + "'. " +
+                "See preprocessing.json's inputs[0].tagWords and adapt this client.");
+        }
+    }
+
+    /** A token classifier: use {@link #tag}, which takes the text itself and returns a tag for every word. */
+    public boolean isTagger() {
+        return tagRecipe != null;
     }
 
     /** A text classifier: use {@link #predictText}, which takes the text itself. */
@@ -676,6 +767,9 @@ public final class OmniTrainClient implements AutoCloseable {
         if (isText()) {
             throw new UnsupportedOperationException("This model takes text: call predictText(text, topK).");
         }
+        if (isTagger()) {
+            throw new UnsupportedOperationException("This model tags every word of a text: call tag(text), which returns a tag for each.");
+        }
         String inputType = inputSpec.get("type").asText();
         if (!"image".equals(inputType)) {
             throw new UnsupportedOperationException(
@@ -713,6 +807,44 @@ public final class OmniTrainClient implements AutoCloseable {
             logits = flatten(outputValue.getValue());
         }
         return decode(logits, topK);
+    }
+
+    /**
+     * One {@link TaggedWord} per word of {@code text} (the runs of characters that are not whitespace, as {@code str.split()}
+     * cuts them): the highest of the word's row of logits and its softmax probability. The first maxTokens words are read;
+     * a later word was not, and gets the recipe's fallbackTag with confidence 0.
+     */
+    public List<TaggedWord> tag(String text) throws OrtException {
+        if (tagRecipe == null) {
+            throw new UnsupportedOperationException("This model does not tag words: call predict() or predictText().");
+        }
+        List<String> words = TagFrontEnd.words(text, tagRecipe);
+        if (words.isEmpty()) return new ArrayList<>();
+        long[] ids = TagFrontEnd.wordIds(words, tagRecipe);
+        float[] logits;
+        try (OnnxTensor tensor = OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(ids), new long[] {1, ids.length});
+             OrtSession.Result result = session.run(Collections.singletonMap(onnxInputName, tensor))) {
+            OnnxValue outputValue = result.get(onnxOutputName)
+                .orElseThrow(() -> new IllegalStateException("Session produced no output named '" + onnxOutputName + "'"));
+            logits = flatten(outputValue.getValue());
+        }
+        List<String> classes = new ArrayList<>();
+        outputSpec.path("classes").forEach(n -> classes.add(n.asText()));
+        List<TaggedWord> tagged = new ArrayList<>(words.size());
+        for (int i = 0; i < words.size(); i++) {
+            if (i >= tagRecipe.maxTokens) {
+                tagged.add(new TaggedWord(words.get(i), tagRecipe.fallbackTag, 0.0));
+                continue;
+            }
+            float[] row = java.util.Arrays.copyOfRange(logits, i * classes.size(), (i + 1) * classes.size());
+            float[] probs = softmax(row);
+            int best = 0;
+            for (int k = 1; k < probs.length; k++) {
+                if (probs[k] > probs[best]) best = k;
+            }
+            tagged.add(new TaggedWord(words.get(i), classes.get(best), Math.round(probs[best] * 10000.0) / 10000.0));
+        }
+        return tagged;
     }
 
     /** Class probabilities of a recording: each window's logits through a softmax, averaged over the windows. */

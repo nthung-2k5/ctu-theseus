@@ -31,6 +31,10 @@
  *     itself, a string, not a file path. It is split into words and looked up in the
  *     vocabulary that ships in preprocessing.json; no library is needed.
  *
+ *   - a `text` input with a `tagWords` recipe and a `tags` output (token classification) — pass
+ *     the text itself; `predict()` returns `[{token, tag, confidence}]`, one per word, the
+ *     words being what the whitespace ranges in preprocessing.json cut the text into.
+ *
  * Every other input type (video, Ludwig's text and audio, a scikit-learn text model) throws
  * with a pointer to preprocessing.json so you can adapt preprocessing yourself — text
  * tokenization in particular depends on the chosen encoder's own
@@ -69,12 +73,33 @@ interface TextRecipe {
   vocabulary: string[]
 }
 
+/** `inputs[0].tagWords` (recipe "tag_word_ids_v1"): how a text becomes one id per word, and how the tags come back. */
+interface TagRecipe {
+  recipe: string
+  whitespaceRanges: [number, number][]
+  lowercase: { from: number; to: number; add: number }
+  maxTokens: number
+  padId: number
+  unknownId: number
+  firstWordId: number
+  fallbackTag: string
+  vocabulary: string[]
+}
+
+/** One word of a tagged text, the tag the model gave it and how sure it was (0..1). */
+export interface TaggedWord {
+  token: string
+  tag: string
+  confidence: number
+}
+
 interface PreprocessingInput {
   name: string
   type: string
   column: string
   audioSpectrogram?: AudioRecipe
   textTokens?: TextRecipe
+  tagWords?: TagRecipe
   ludwigPreprocessing?: Record<string, unknown>
   /** Absent: squash the whole image to height x width. */
   imageResize?: { mode?: string; size?: [number, number]; padValue?: number }
@@ -417,6 +442,32 @@ function separatorTable(ranges: [number, number][]): Uint8Array {
   return table
 }
 
+/** The words of a text: runs of code units that are not whitespace (the ranges are the ones `str.split()` cuts at). */
+function splitWords(text: string, whitespace: Uint8Array): string[] {
+  const words: string[] = []
+  let start = -1
+  for (let i = 0; i < text.length; i++) {
+    if (whitespace[text.charCodeAt(i)] === 1) {
+      if (start >= 0) words.push(text.slice(start, i))
+      start = -1
+    } else if (start < 0) {
+      start = i
+    }
+  }
+  if (start >= 0) words.push(text.slice(start))
+  return words
+}
+
+/** A word as the vocabulary has it: the ASCII letters A-Z lower-cased, nothing else changed. */
+function lowerAscii(word: string, lowercase: TagRecipe['lowercase']): string {
+  let out = ''
+  for (let i = 0; i < word.length; i++) {
+    const unit = word.charCodeAt(i)
+    out += String.fromCharCode(unit >= lowercase.from && unit <= lowercase.to ? unit + lowercase.add : unit)
+  }
+  return out
+}
+
 /** The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units. */
 function tokenize(text: string, recipe: TextRecipe, separators: Uint8Array): string[] {
   const { from, to, add } = recipe.lowercase
@@ -452,8 +503,12 @@ export class OmniTrainClient {
   readonly isAudio: boolean
   /** A text classifier: `predict()` takes the text itself, not a path. */
   readonly isText: boolean
+  /** A token classifier: `predict()` takes the text itself and returns a tag for every word. */
+  readonly isTagger: boolean
   private textSeparators = new Uint8Array(0)
   private textIds = new Map<string, number>()
+  private tagWhitespace = new Uint8Array(0)
+  private tagIds = new Map<string, number>()
 
   constructor(
     private modelPath = join(import.meta.dirname, 'model.onnx'),
@@ -482,6 +537,18 @@ export class OmniTrainClient {
       }
       this.textSeparators = separatorTable(recipe.separatorRanges)
       recipe.vocabulary.forEach((word, i) => this.textIds.set(word, recipe.firstWordId + i))
+    }
+    this.isTagger =
+      this.inputSpec.type === 'text' && this.inputSpec.tagWords !== undefined && this.outputSpec.type === 'tags'
+    if (this.isTagger) {
+      const recipe = this.inputSpec.tagWords as TagRecipe
+      if (recipe.recipe !== 'tag_word_ids_v1') {
+        throw new Error(
+          `Unknown tagging recipe '${recipe.recipe}'. See preprocessing.json's inputs[0].tagWords and adapt this client.`,
+        )
+      }
+      this.tagWhitespace = separatorTable(recipe.whitespaceRanges)
+      recipe.vocabulary.forEach((word, i) => this.tagIds.set(word, recipe.firstWordId + i))
     }
     this.ready = this.init()
   }
@@ -700,6 +767,34 @@ export class OmniTrainClient {
     return new ort.Tensor('int64', ids, [1, recipe.maxTokens])
   }
 
+  /**
+   * One `{token, tag, confidence}` per word of `text`: the highest of the word's row of logits and its softmax
+   * probability. The first maxTokens words are read; a later word was not, and gets the recipe's fallbackTag with
+   * confidence 0.
+   */
+  private async tagWords(text: string): Promise<TaggedWord[]> {
+    const recipe = this.inputSpec.tagWords as TagRecipe
+    const words = splitWords(text, this.tagWhitespace)
+    if (words.length === 0) return []
+    const ids = new BigInt64Array(recipe.maxTokens).fill(BigInt(recipe.padId))
+    words.slice(0, recipe.maxTokens).forEach((word, i) => {
+      ids[i] = BigInt(this.tagIds.get(lowerAscii(word, recipe.lowercase)) ?? recipe.unknownId)
+    })
+    const feed = { [this.onnxInputNames[this.inputSpec.name]]: new ort.Tensor('int64', ids, [1, recipe.maxTokens]) }
+    const outputs = await this.session.run(feed)
+    const logits = outputs[this.onnxOutputName].data as Float32Array
+    const classes = this.outputSpec.classes ?? []
+    return words.map((token, i) => {
+      if (i >= recipe.maxTokens) return { token, tag: recipe.fallbackTag, confidence: 0 }
+      const probs = softmax(logits.slice(i * classes.length, (i + 1) * classes.length))
+      let best = 0
+      probs.forEach((p, k) => {
+        if (p > probs[best]) best = k
+      })
+      return { token, tag: classes[best], confidence: Math.round(probs[best] * 10000) / 10000 }
+    })
+  }
+
   private preprocessRecord(record: Record<string, number>): Record<string, ort.Tensor> {
     const feed: Record<string, ort.Tensor> = {}
     for (const spec of this.inputSpecs) {
@@ -725,10 +820,18 @@ export class OmniTrainClient {
    * `input` is a file path for a single `image` or `audio` input, the text itself for a
    * `text` input, or a `{column: value}` record — one entry per input feature — for a
    * tabular (`number`-only) model. An object detector returns its boxes
-   * (see `detect`) instead of a `{className: probability}` record.
+   * (see `detect`) instead of a `{className: probability}` record, and a token classifier
+   * (the input is the text) a `TaggedWord` for every word.
    */
-  async predict(input: string | Record<string, number>, topK = 5): Promise<Record<string, number> | Detection[]> {
+  async predict(
+    input: string | Record<string, number>,
+    topK = 5,
+  ): Promise<Record<string, number> | Detection[] | TaggedWord[]> {
     await this.ready
+    if (this.isTagger) {
+      if (typeof input !== 'string') throw new Error('This model takes a text input — pass the text as a string.')
+      return this.tagWords(input)
+    }
     if (this.outputSpec.type === 'detections') {
       if (typeof input !== 'string') throw new Error('This model takes an image input — pass a file path.')
       return this.detect(input)

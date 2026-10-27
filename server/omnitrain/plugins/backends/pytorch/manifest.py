@@ -14,7 +14,7 @@ assigned each class, so guessing wrong silently mislabels every prediction a gen
 
 from typing import Any
 
-from omnitrain.domain.token_tags import OUTSIDE
+from omnitrain.domain.token_tags import OUTSIDE, WHITESPACE_RANGES
 from omnitrain.plugins.backends.pytorch import audio, text
 from omnitrain.plugins.backends.pytorch.runtime import METADATA_FILENAME
 from omnitrain.plugins.backends.pytorch.spec import AudioSpec, HFTextSpec, ImageSpec, TextSpec, WordsSpec
@@ -123,9 +123,10 @@ def _text_input(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 TAG_WORDS_SPLIT = (
-    "A word is a maximal run of characters that are not whitespace, whitespace being what Python's str.split() "
-    "separates on (str.isspace()), so punctuation stays attached to its word. Lower-case the ASCII letters A-Z only "
-    "(add 32 to a code unit between 65 and 90) and change nothing else."
+    "A word is a maximal run of characters none of which is in whitespaceRanges (what Python's str.split() separates "
+    "on, str.isspace()), so punctuation stays attached to its word; the text is read as UTF-16 code units or as code "
+    "points, which gives the same words because every whitespace character is in the Basic Multilingual Plane. "
+    "Lower-case the ASCII letters A-Z only (add 32 to a code unit between 65 and 90) and change nothing else."
 )
 TAG_WORDS_IDS = (
     "Take the first maxTokens words. Each becomes its position in vocabulary plus firstWordId, or unknownId when it is "
@@ -150,6 +151,7 @@ def _words_input(meta: dict[str, Any]) -> dict[str, Any]:
         "tagWords": {
             "recipe": "tag_word_ids_v1",
             "split": TAG_WORDS_SPLIT,
+            "whitespaceRanges": [list(r) for r in WHITESPACE_RANGES],
             "lowercase": {"from": ord("A"), "to": ord("Z"), "add": 32},
             "ids": TAG_WORDS_IDS,
             "maxTokens": spec.max_tokens,

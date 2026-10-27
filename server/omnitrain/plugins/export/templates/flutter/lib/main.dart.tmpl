@@ -59,6 +59,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // A text classifier reads what is typed here.
   final _textController = TextEditingController();
   Map<String, double>? _predictions;
+  // A token classifier's result: a tag for every word.
+  List<TaggedWord>? _tagged;
   // An object detector's result: the boxes, and the picture's size to lay them over it.
   List<Detection>? _detections;
   double? _imageAspect;
@@ -123,11 +125,17 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _predicting = true;
       _predictions = null;
+      _tagged = null;
       _error = null;
     });
     try {
-      final predictions = await _client.predictText(text);
-      setState(() => _predictions = predictions);
+      if (_client.isTagger) {
+        final tagged = await _client.tag(text);
+        setState(() => _tagged = tagged);
+      } else {
+        final predictions = await _client.predictText(text);
+        setState(() => _predictions = predictions);
+      }
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -188,15 +196,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 4),
                         const Text('Runs fully on-device — nothing is uploaded.', style: TextStyle(fontSize: 12, color: Colors.grey)),
                         const SizedBox(height: 16),
-                        if (_client.isText) ...[
+                        if (_client.isText || _client.isTagger) ...[
                           TextField(
                             controller: _textController,
                             minLines: 4,
                             maxLines: 8,
                             keyboardType: TextInputType.multiline,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              labelText: 'Text to classify',
+                            decoration: InputDecoration(
+                              border: const OutlineInputBorder(),
+                              labelText: _client.isTagger ? 'Text to tag' : 'Text to classify',
                               hintText: 'Type or paste a text',
                             ),
                           ),
@@ -204,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           FilledButton.icon(
                             onPressed: _predicting ? null : _classifyText,
                             icon: const Icon(Icons.text_snippet_outlined),
-                            label: const Text('Classify'),
+                            label: Text(_client.isTagger ? 'Tag' : 'Classify'),
                           ),
                         ] else if (_client.isAudio) ...[
                           if (_audioName != null)
@@ -280,6 +288,32 @@ class _HomeScreenState extends State<HomeScreen> {
                                       child: Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [Text(d.label), Text(d.confidence.toStringAsFixed(4))],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        if (_tagged != null)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('Tags', style: TextStyle(fontWeight: FontWeight.w600)),
+                                  const SizedBox(height: 8),
+                                  if (_tagged!.isEmpty) const Text('No words found.'),
+                                  for (final word in _tagged!)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 2),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Flexible(child: Text(word.token)),
+                                          Text('${word.tag}  ${word.confidence.toStringAsFixed(4)}'),
+                                        ],
                                       ),
                                     ),
                                 ],
@@ -442,6 +476,33 @@ class _VerifyScreenState extends State<VerifyScreen> {
           final (found, passed) = verifyDetections(platform, await widget.client.detect(sampleBytes));
           lines.addAll(found);
           ok = passed;
+        }
+        setState(() {
+          _lines = lines;
+          _ok = ok;
+          _running = false;
+        });
+        return;
+      }
+      if (widget.client.isTagger) {
+        // A token classifier returns one tag per word, which must be the platform's, word for word.
+        final tags = (expected['tags'] as List?)?.cast<String>();
+        if (tags == null) {
+          lines.add('expected.json has no tags to compare against.');
+        } else {
+          final sample = utf8.decode((await rootBundle.load('assets/${expected['sampleFile'] as String}')).buffer.asUint8List());
+          final found = [for (final w in await widget.client.tag(sample)) w.tag];
+          if (found.length != tags.length) {
+            ok = false;
+            lines.add('MISMATCH expected ${tags.length} tags, got ${found.length}');
+          }
+          for (var i = 0; i < math.min(found.length, tags.length); i++) {
+            if (found[i] != tags[i]) {
+              ok = false;
+              lines.add("MISMATCH word $i: expected '${tags[i]}', got '${found[i]}'");
+            }
+          }
+          if (ok) lines.add("OK — all ${found.length} tags match the platform's output.");
         }
         setState(() {
           _lines = lines;

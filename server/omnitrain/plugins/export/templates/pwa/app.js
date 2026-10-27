@@ -19,6 +19,10 @@
  * A `text` input that carries a `textTokens` recipe (text classification) is supported as
  * well: `predict()` takes the text itself (a string), splits it into words and looks them
  * up in the vocabulary that ships in preprocessing.json; the page shows a text box.
+ *
+ * A `text` input that carries a `tagWords` recipe and a `tags` output (token classification) is
+ * supported too: `predict()` takes the text and returns `[{token, tag, confidence}]`, one per word;
+ * the page shows a text box and a line per word.
  */
 
 const HERE = new URL('.', import.meta.url)
@@ -357,6 +361,64 @@ function isText() {
 let textSeparators = null
 let textIds = null
 
+/** A token classifier: `predict()` takes the text itself and returns a tag for every word. */
+function isTagger() {
+  return inputSpec?.type === 'text' && inputSpec.tagWords !== undefined && outputSpec?.type === 'tags'
+}
+
+let tagWhitespace = null
+let tagIds = null
+
+/** The words of a text: runs of code units that are not whitespace (the ranges are the ones `str.split()` cuts at). */
+function splitWords(text) {
+  const words = []
+  let start = -1
+  for (let i = 0; i < text.length; i++) {
+    if (tagWhitespace[text.charCodeAt(i)] === 1) {
+      if (start >= 0) words.push(text.slice(start, i))
+      start = -1
+    } else if (start < 0) {
+      start = i
+    }
+  }
+  if (start >= 0) words.push(text.slice(start))
+  return words
+}
+
+/**
+ * One `{token, tag, confidence}` per word of the text: the highest of the word's row of logits and its softmax
+ * probability. The first maxTokens words are read; a later word was not, and gets the recipe's fallbackTag with
+ * confidence 0.
+ */
+async function tagText(source) {
+  const text = typeof source === 'string' ? source : await source.text()
+  const recipe = inputSpec.tagWords
+  const words = splitWords(text)
+  if (words.length === 0) return []
+  const { from, to, add } = recipe.lowercase
+  const ids = new BigInt64Array(recipe.maxTokens).fill(BigInt(recipe.padId))
+  words.slice(0, recipe.maxTokens).forEach((word, i) => {
+    let form = ''
+    for (let k = 0; k < word.length; k++) {
+      const unit = word.charCodeAt(k)
+      form += String.fromCharCode(unit >= from && unit <= to ? unit + add : unit)
+    }
+    ids[i] = BigInt(tagIds.get(form) ?? recipe.unknownId)
+  })
+  const outputs = await session.run({ [onnxInputName]: new ort.Tensor('int64', ids, [1, recipe.maxTokens]) })
+  const logits = Array.from(outputs[onnxOutputName].data)
+  const classes = outputSpec.classes ?? []
+  return words.map((token, i) => {
+    if (i >= recipe.maxTokens) return { token, tag: recipe.fallbackTag, confidence: 0 }
+    const probs = softmax(logits.slice(i * classes.length, (i + 1) * classes.length))
+    let best = 0
+    probs.forEach((p, k) => {
+      if (p > probs[best]) best = k
+    })
+    return { token, tag: classes[best], confidence: Math.round(probs[best] * 10000) / 10000 }
+  })
+}
+
 /** The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units. */
 function tokenize(text, recipe) {
   const { from, to, add } = recipe.lowercase
@@ -430,6 +492,17 @@ async function load() {
     textSeparators = new Uint8Array(0x10000)
     for (const [lo, hi] of recipe.separatorRanges) textSeparators.fill(1, lo, Math.min(hi, 0xffff) + 1)
     textIds = new Map(recipe.vocabulary.map((word, i) => [word, recipe.firstWordId + i]))
+  }
+  if (isTagger()) {
+    const recipe = inputSpec.tagWords
+    if (recipe.recipe !== 'tag_word_ids_v1') {
+      throw new Error(
+        `Unknown tagging recipe '${recipe.recipe}'. See preprocessing.json's inputs[0].tagWords and adapt app.js.`,
+      )
+    }
+    tagWhitespace = new Uint8Array(0x10000)
+    for (const [lo, hi] of recipe.whitespaceRanges) tagWhitespace.fill(1, lo, Math.min(hi, 0xffff) + 1)
+    tagIds = new Map(recipe.vocabulary.map((word, i) => [word, recipe.firstWordId + i]))
   }
 
   session = await ort.InferenceSession.create(new URL('model.onnx', HERE).toString())
@@ -622,6 +695,7 @@ export async function predict(imageSource, topK = 5) {
   if (outputSpec.type === 'detections') return detect(imageSource)
   if (isAudio()) return classifyAudio(imageSource, topK)
   if (isText()) return classifyText(imageSource, topK)
+  if (isTagger()) return tagText(imageSource)
 
   if (inputSpec.type !== 'image') {
     throw new Error(
@@ -665,9 +739,13 @@ const classifyBtn = document.getElementById('classify-btn')
 // An audio model asks for audio files and a text model for a text; the rest of the page is the same.
 init()
   .then(() => {
-    if (isText()) {
+    if (isText() || isTagger()) {
       dropzone.hidden = true
       textSection.hidden = false
+      if (isTagger()) {
+        document.querySelector('label[for="text-box"]').textContent = 'Text to tag'
+        classifyBtn.textContent = 'Tag'
+      }
       return
     }
     if (!isAudio()) return
@@ -705,7 +783,7 @@ async function handleFile(file) {
   if (!file) return
   statusEl.textContent = 'Running inference…'
   overlay.hidden = true
-  if (isText()) {
+  if (isText() || isTagger()) {
     // Nothing to preview: the text is in the box.
   } else if (isAudio()) {
     audioPreview.src = URL.createObjectURL(file)
@@ -718,7 +796,15 @@ async function handleFile(file) {
   try {
     const predictions = await predict(file)
     predictionsList.innerHTML = ''
-    if (Array.isArray(predictions)) {
+    if (isTagger()) {
+      // A token classifier: one line per word, the word, its tag and the model's confidence.
+      for (const { token, tag, confidence } of predictions) {
+        const li = document.createElement('li')
+        li.textContent = `${token}: ${tag} (${confidence.toFixed(4)})`
+        predictionsList.appendChild(li)
+      }
+      if (predictions.length === 0) predictionsList.innerHTML = '<li>No words found.</li>'
+    } else if (Array.isArray(predictions)) {
       // An object detector: one line per box, and the boxes drawn on the picture.
       await preview.decode()
       drawBoxes(predictions)
@@ -821,7 +907,24 @@ verifyBtn.addEventListener('click', async () => {
     }
     const sampleRes = await fetch(new URL(expected.sampleFile, HERE))
     // A text model is given the text in the sample file (UTF-8), the rest the file itself.
-    const sampleBlob = isText() ? await sampleRes.text() : await sampleRes.blob()
+    const sampleBlob = isText() || isTagger() ? await sampleRes.text() : await sampleRes.blob()
+
+    if (isTagger()) {
+      // A token classifier returns one tag per word, which must be the platform's, word for word.
+      if (!expected.tags) {
+        verifyResult.textContent = 'expected.json has no tags to compare against.'
+        return
+      }
+      const found = (await predict(sampleBlob)).map((w) => w.tag)
+      const wrong = []
+      if (found.length !== expected.tags.length) wrong.push(`expected ${expected.tags.length} tags, got ${found.length}`)
+      expected.tags.forEach((want, i) => {
+        if (i < found.length && found[i] !== want) wrong.push(`word ${i}: expected '${want}', got '${found[i]}'`)
+      })
+      verifyResult.textContent =
+        wrong.length === 0 ? `OK — all ${found.length} tags match the platform's output.` : `MISMATCH — ${wrong.join('; ')}`
+      return
+    }
 
     if (outputSpec?.type === 'detections' || expected.outputType === 'detections') {
       if (!expected.detections) {

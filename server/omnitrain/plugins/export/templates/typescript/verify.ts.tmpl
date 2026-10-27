@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type Detection, OmniTrainClient } from './client'
+import { type Detection, OmniTrainClient, type TaggedWord } from './client'
 
 const TOLERANCE = 1e-3
 const expectedPath = join(import.meta.dirname, 'expected.json')
@@ -70,6 +70,7 @@ const expected = JSON.parse(readFileSync(expectedPath, 'utf-8')) as {
   sampleFile: string
   predictions: Record<string, number>
   detections?: Detection[]
+  tags?: string[]
 }
 const samplePath = join(import.meta.dirname, expected.sampleFile)
 
@@ -84,6 +85,24 @@ if (client.isDetector) {
     process.exit(0)
   }
   process.exit(verifyDetections(expected.detections, await client.detect(samplePath)) ? 0 : 1)
+}
+if (client.isTagger) {
+  // A token classifier is given the text and returns one tag per word, which must be the platform's, word for word.
+  if (!expected.tags) {
+    console.log('expected.json has no tags to compare against.')
+    process.exit(0)
+  }
+  const found = ((await client.predict(readFileSync(samplePath, 'utf-8'))) as TaggedWord[]).map((w) => w.tag)
+  let same = found.length === expected.tags.length
+  if (!same) console.log(`MISMATCH expected ${expected.tags.length} tags, got ${found.length}`)
+  expected.tags.forEach((want, i) => {
+    if (i < found.length && found[i] !== want) {
+      same = false
+      console.log(`MISMATCH word ${i}: expected '${want}', got '${found[i]}'`)
+    }
+  })
+  if (same) console.log(`OK — all ${found.length} tags match the platform's output.`)
+  process.exit(same ? 0 : 1)
 }
 // A tabular model takes the record in the sample file, a text model the text in it; the rest take the path.
 const sampleInput: string | Record<string, number> = client.isTabular

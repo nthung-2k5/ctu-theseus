@@ -6,7 +6,7 @@ from omnitrain.plugins.export.readme import (
     DETECTION_LIMITATION,
     HF_TAGS_OTHER_LIMITATION,
     HF_TEXT_OTHER_LIMITATION,
-    TAGS_OTHER_LIMITATION,
+    TAGS_APP_LIMITATION,
     TEXT_APP_LIMITATION,
 )
 
@@ -26,7 +26,7 @@ class PwaApp(AppFormat):
             "detection": {"limitation": DETECTION_LIMITATION},
             "audio": {"limitation": AUDIO_APP_LIMITATION},
             "hf_text": {"limitation": HF_TEXT_OTHER_LIMITATION},
-            "tags": {"limitation": TAGS_OTHER_LIMITATION},
+            "tags": {"limitation": TAGS_APP_LIMITATION},
             "hf_tags": {"limitation": HF_TAGS_OTHER_LIMITATION},
             "text": {"limitation": TEXT_APP_LIMITATION},
         },

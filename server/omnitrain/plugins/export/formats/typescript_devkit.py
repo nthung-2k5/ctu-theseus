@@ -5,8 +5,8 @@ from omnitrain.plugins.export.readme import (
     HF_TAGS_OTHER_LIMITATION,
     HF_TEXT_OTHER_LIMITATION,
     LIMITATION_FULL,
-    TAGS_OTHER_LIMITATION,
     TEXT_LIMITATION,
+    tags_limitation,
 )
 
 
@@ -26,7 +26,10 @@ class TypeScriptDevkit(DevkitFormat):
         "kinds": {
             "audio": {"run_cmd": "bun example.ts <path-to-wav-file>", "limitation": AUDIO_LIMITATION},
             "hf_text": {"limitation": HF_TEXT_OTHER_LIMITATION},
-            "tags": {"limitation": TAGS_OTHER_LIMITATION},
+            "tags": {
+                "run_cmd": 'bun example.ts "<the text to tag>"   # one line per word: word, tag, confidence',
+                "limitation": tags_limitation("predict"),
+            },
             "hf_tags": {"limitation": HF_TAGS_OTHER_LIMITATION},
             "text": {"run_cmd": 'bun example.ts "<the text to classify>"', "limitation": TEXT_LIMITATION},
             "detection": {

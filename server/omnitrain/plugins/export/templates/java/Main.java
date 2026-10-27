@@ -47,6 +47,14 @@ public final class Main {
                 if (found.isEmpty()) System.out.println("No objects found.");
                 return;
             }
+            if (client.isTagger()) {
+                // One line per word: the word, its tag and the model's confidence (in the platform's default charset:
+                // for anything but plain ASCII, call tag from code with a String).
+                for (OmniTrainClient.TaggedWord word : client.tag(args[0])) {
+                    System.out.printf("%s\t%s\t%.4f%n", word.token(), word.tag(), word.confidence());
+                }
+                return;
+            }
             // A text model is given the text itself (in the platform's default charset: for anything but plain
             // ASCII, call predictText from code with a String).
             Map<String, Double> predictions = client.isText() ? client.predictText(args[0], 5) : client.predict(Path.of(args[0]), 5);
@@ -124,6 +132,27 @@ public final class Main {
                     new OmniTrainClient.Box(b.get("x").asDouble(), b.get("y").asDouble(), b.get("w").asDouble(), b.get("h").asDouble())));
             }
             return verifyDetections(platform, client.detect(samplePath)) ? 0 : 1;
+        }
+
+        if (client.isTagger()) {
+            // A token classifier is given the text and returns one tag per word, which must be the platform's, word for word.
+            JsonNode tags = expected.get("tags");
+            if (tags == null || tags.isNull()) {
+                System.out.println("expected.json has no tags to compare against.");
+                return 0;
+            }
+            List<OmniTrainClient.TaggedWord> found =
+                client.tag(java.nio.file.Files.readString(samplePath, java.nio.charset.StandardCharsets.UTF_8));
+            boolean same = found.size() == tags.size();
+            if (!same) System.out.printf("MISMATCH expected %d tags, got %d%n", tags.size(), found.size());
+            for (int i = 0; i < Math.min(found.size(), tags.size()); i++) {
+                if (!found.get(i).tag().equals(tags.get(i).asText())) {
+                    same = false;
+                    System.out.printf("MISMATCH word %d: expected '%s', got '%s'%n", i, tags.get(i).asText(), found.get(i).tag());
+                }
+            }
+            if (same) System.out.printf("OK — all %d tags match the platform's output.%n", found.size());
+            return same ? 0 : 1;
         }
 
         if (expectedPredictions.size() == 0) {

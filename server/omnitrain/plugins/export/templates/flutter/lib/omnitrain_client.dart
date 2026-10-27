@@ -26,6 +26,9 @@
 // `predictText()` takes the text itself, splits it into words and looks them up in the
 // vocabulary that ships in preprocessing.json.
 //
+// A `text` input that carries a `tagWords` recipe and a `tags` output (token classification) is
+// supported too: `tag()` takes the text itself and returns a tag for every word.
+//
 // model.onnx / preprocessing.json are loaded as Flutter assets (declared in
 // pubspec.yaml under assets/), not filesystem paths — that's why this client
 // reads them through rootBundle rather than dart:io.
@@ -180,12 +183,134 @@ Int64List textTokenIds(String text, TextRecipe recipe) {
   return ids;
 }
 
+/// `inputs[0].tagWords` (recipe "tag_word_ids_v1"): how a text becomes one id per word.
+class TagRecipe {
+  TagRecipe({
+    required this.recipe,
+    required this.lowerFrom,
+    required this.lowerTo,
+    required this.lowerAdd,
+    required this.whitespaceRanges,
+    required this.maxTokens,
+    required this.padId,
+    required this.unknownId,
+    required this.firstWordId,
+    required this.fallbackTag,
+    required this.vocabulary,
+  }) {
+    for (final (lo, hi) in whitespaceRanges) {
+      for (var unit = lo; unit <= math.min(hi, 0xFFFF); unit++) {
+        whitespace[unit] = 1;
+      }
+    }
+    for (var i = 0; i < vocabulary.length; i++) {
+      ids[vocabulary[i]] = firstWordId + i;
+    }
+  }
+
+  factory TagRecipe.fromJson(Map<String, dynamic> json) {
+    final lower = json['lowercase'] as Map<String, dynamic>;
+    final ranges = [
+      for (final r in json['whitespaceRanges'] as List) (r as List).map((e) => (e as num).toInt()).toList(),
+    ];
+    return TagRecipe(
+      recipe: json['recipe'] as String,
+      lowerFrom: (lower['from'] as num).toInt(),
+      lowerTo: (lower['to'] as num).toInt(),
+      lowerAdd: (lower['add'] as num).toInt(),
+      whitespaceRanges: [for (final r in ranges) (r[0], r[1])],
+      maxTokens: (json['maxTokens'] as num).toInt(),
+      padId: (json['padId'] as num).toInt(),
+      unknownId: (json['unknownId'] as num).toInt(),
+      firstWordId: (json['firstWordId'] as num).toInt(),
+      fallbackTag: json['fallbackTag'] as String? ?? 'O',
+      vocabulary: [for (final w in json['vocabulary'] as List) w as String],
+    );
+  }
+
+  final String recipe;
+  final int lowerFrom;
+  final int lowerTo;
+  final int lowerAdd;
+  final List<(int, int)> whitespaceRanges;
+  final int maxTokens;
+  final int padId;
+  final int unknownId;
+  final int firstWordId;
+  final String fallbackTag;
+  final List<String> vocabulary;
+
+  /// Which UTF-16 code units separate words (what `str.split()` cuts at), as a lookup table built from the ranges.
+  final Uint8List whitespace = Uint8List(0x10000);
+
+  /// A word's id.
+  final Map<String, int> ids = {};
+}
+
+/// One word of a tagged text, the tag the model gave it and how sure it was (0..1).
+class TaggedWord {
+  const TaggedWord(this.token, this.tag, this.confidence);
+  final String token;
+  final String tag;
+  final double confidence;
+}
+
+/// The words of a text: the runs of code units that are not whitespace.
+List<String> splitTagWords(String text, TagRecipe recipe) {
+  final words = <String>[];
+  var start = -1;
+  for (var i = 0; i < text.length; i++) {
+    if (recipe.whitespace[text.codeUnitAt(i)] == 1) {
+      if (start >= 0) words.add(text.substring(start, i));
+      start = -1;
+    } else if (start < 0) {
+      start = i;
+    }
+  }
+  if (start >= 0) words.add(text.substring(start));
+  return words;
+}
+
+/// `maxTokens` word ids: the first maxTokens words, ASCII capitals lower-cased, looked up in the vocabulary, padded at the end.
+Int64List tagWordIds(List<String> words, TagRecipe recipe) {
+  final ids = Int64List(recipe.maxTokens)..fillRange(0, recipe.maxTokens, recipe.padId);
+  for (var i = 0; i < math.min(words.length, recipe.maxTokens); i++) {
+    final form = StringBuffer();
+    for (final unit in words[i].codeUnits) {
+      form.writeCharCode(unit >= recipe.lowerFrom && unit <= recipe.lowerTo ? unit + recipe.lowerAdd : unit);
+    }
+    ids[i] = recipe.ids[form.toString()] ?? recipe.unknownId;
+  }
+  return ids;
+}
+
+/// A tag for each word from the model's `[maxTokens, tags]` logits (flattened): the highest of the word's row and its
+/// softmax probability. A word past maxTokens was not read and gets the recipe's fallbackTag with confidence 0.
+List<TaggedWord> decodeTags(List<double> logits, List<String> words, List<String> classes, TagRecipe recipe) {
+  return [
+    for (var i = 0; i < words.length; i++)
+      if (i >= recipe.maxTokens)
+        TaggedWord(words[i], recipe.fallbackTag, 0.0)
+      else
+        _bestTag(words[i], _softmax(logits.sublist(i * classes.length, (i + 1) * classes.length)), classes),
+  ];
+}
+
+TaggedWord _bestTag(String word, List<double> probs, List<String> classes) {
+  var best = 0;
+  for (var k = 1; k < probs.length; k++) {
+    if (probs[k] > probs[best]) best = k;
+  }
+  return TaggedWord(word, classes[best], (probs[best] * 10000).round() / 10000);
+}
+
 class PreprocessingInput {
   PreprocessingInput({
     required this.type,
     required this.column,
     this.audio,
     this.text,
+    this.tags,
     this.ludwigPreprocessing,
     this.imageResizeMode,
     this.letterboxSize,
@@ -203,6 +328,7 @@ class PreprocessingInput {
           ? null
           : AudioRecipe.fromJson(json['audioSpectrogram'] as Map<String, dynamic>),
       text: json['textTokens'] == null ? null : TextRecipe.fromJson(json['textTokens'] as Map<String, dynamic>),
+      tags: json['tagWords'] == null ? null : TagRecipe.fromJson(json['tagWords'] as Map<String, dynamic>),
       ludwigPreprocessing: json['ludwigPreprocessing'] as Map<String, dynamic>?,
       imageResizeMode: (json['imageResize'] as Map<String, dynamic>?)?['mode'] as String?,
       letterboxSize: ((json['imageResize'] as Map<String, dynamic>?)?['size'] as List?)
@@ -220,6 +346,8 @@ class PreprocessingInput {
   final AudioRecipe? audio;
   /// `textTokens`, for a text classifier.
   final TextRecipe? text;
+  /// `tagWords`, for a token classifier.
+  final TagRecipe? tags;
   final Map<String, dynamic>? ludwigPreprocessing;
   /// `imageResize.mode`. Null: squash the whole image to width x height.
   final String? imageResizeMode;
@@ -686,6 +814,9 @@ class OmniTrainClient {
   /// A text classifier: use [predictText], which takes the text itself.
   bool get isText => _inputSpec.type == 'text' && _inputSpec.text != null;
 
+  /// A token classifier: use [tag], which takes the text itself and returns a tag for every word.
+  bool get isTagger => _inputSpec.type == 'text' && _inputSpec.tags != null && _outputSpec.type == 'tags';
+
   Future<void> load({
     String modelAssetPath = 'assets/model.onnx',
     String preprocessingAssetPath = 'assets/preprocessing.json',
@@ -710,6 +841,31 @@ class OmniTrainClient {
         'See preprocessing.json inputs[0].textTokens and adapt this client.',
       );
     }
+    if (isTagger && _inputSpec.tags!.recipe != 'tag_word_ids_v1') {
+      throw UnsupportedError(
+        "Unknown tagging recipe '${_inputSpec.tags!.recipe}'. "
+        'See preprocessing.json inputs[0].tagWords and adapt this client.',
+      );
+    }
+  }
+
+  /// One [TaggedWord] per word of [text] (the runs of characters that are not whitespace, as `str.split()` cuts
+  /// them). The first maxTokens words are read; a later word was not, and gets the recipe's fallbackTag.
+  Future<List<TaggedWord>> tag(String text) async {
+    if (!isTagger) {
+      throw UnsupportedError('This model does not tag words: call predict() or predictText().');
+    }
+    final recipe = _inputSpec.tags!;
+    final words = splitTagWords(text, recipe);
+    if (words.isEmpty) return const [];
+    final inputTensor = OrtValueTensor.createTensorWithDataList(tagWordIds(words, recipe), [1, recipe.maxTokens]);
+    final runOptions = OrtRunOptions();
+    final outputs = await _session.runAsync(runOptions, {_onnxInputName: inputTensor}, [_onnxOutputName]);
+    final raw = outputs?.first?.value;
+    inputTensor.release();
+    runOptions.release();
+    outputs?.first?.release();
+    return decodeTags(_flatten(raw), words, _outputSpec.classes ?? const <String>[], recipe);
   }
 
   /// Class probabilities of a text: the logits of its one row through a softmax, sorted descending.
@@ -912,6 +1068,7 @@ class OmniTrainClient {
     }
     if (isAudio) return _classifyAudio(imageBytes, topK);
     if (isText) throw UnsupportedError('This model takes text: call predictText(text).');
+    if (isTagger) throw UnsupportedError('This model tags every word of a text: call tag(text), which returns a tag for each.');
     if (_inputSpec.type != 'image') {
       throw UnsupportedError(
         "No preprocessing implemented for input type '${_inputSpec.type}'. "

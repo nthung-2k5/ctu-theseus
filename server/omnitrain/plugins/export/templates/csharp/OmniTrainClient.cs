@@ -23,6 +23,9 @@
 // A `text` input that carries a `textTokens` recipe (text classification) is supported as well:
 // `Predict()` takes the text itself (not a file path), splits it into words and looks them up in
 // the vocabulary that ships in preprocessing.json.
+//
+// A `text` input that carries a `tagWords` recipe and a `tags` output (token classification) is supported
+// too: `Tag()` takes the text itself and returns a tag for every word.
 
 using System.Buffers.Binary;
 using System.Text.Json;
@@ -93,12 +96,27 @@ internal sealed class TextRecipe
     public List<string> Vocabulary { get; set; } = [];
 }
 
+/// <summary>`inputs[0].tagWords` (recipe "tag_word_ids_v1"): how a text becomes one id per word.</summary>
+internal sealed class TagRecipe
+{
+    public string Recipe { get; set; } = "";
+    public List<int[]> WhitespaceRanges { get; set; } = [];
+    public LowercaseSpec Lowercase { get; set; } = new();
+    public int MaxTokens { get; set; }
+    public int PadId { get; set; }
+    public int UnknownId { get; set; } = 1;
+    public int FirstWordId { get; set; } = 2;
+    public string FallbackTag { get; set; } = "O";
+    public List<string> Vocabulary { get; set; } = [];
+}
+
 internal sealed class PreprocessingInput
 {
     public string Type { get; set; } = "";
     public string Column { get; set; } = "";
     public AudioRecipe? AudioSpectrogram { get; set; }
     public TextRecipe? TextTokens { get; set; }
+    public TagRecipe? TagWords { get; set; }
     public Dictionary<string, JsonElement>? LudwigPreprocessing { get; set; }
     // Absent: squash the whole image to height x width.
     public Dictionary<string, JsonElement>? ImageResize { get; set; }
@@ -118,6 +136,9 @@ public sealed record Box(double X, double Y, double W, double H);
 
 /// <summary>One object found in an image.</summary>
 public sealed record Detection(string Label, double Confidence, Box Box);
+
+/// <summary>One word of a tagged text, the tag the model gave it and how sure it was (0..1).</summary>
+public sealed record TaggedWord(string Token, string Tag, double Confidence);
 
 internal sealed class PreprocessingManifest
 {
@@ -366,8 +387,13 @@ public sealed class OmniTrainClient : IDisposable
     /// <summary>A text classifier: <see cref="Predict"/> takes the text itself, not a path.</summary>
     public bool IsText => _inputSpec.Type == "text" && _inputSpec.TextTokens is not null;
 
+    /// <summary>A token classifier: call <see cref="Tag"/> with the text, which returns a tag for every word.</summary>
+    public bool IsTagger => _inputSpec.Type == "text" && _inputSpec.TagWords is not null && _outputSpec.Type == "tags";
+
     private readonly bool[] _separators = new bool[0x10000];
     private readonly Dictionary<string, int> _wordIds = new(StringComparer.Ordinal);
+    private readonly bool[] _whitespace = new bool[0x10000];
+    private readonly Dictionary<string, int> _tagIds = new(StringComparer.Ordinal);
 
     public OmniTrainClient(string? modelPath = null, string? preprocessingPath = null)
     {
@@ -403,6 +429,21 @@ public sealed class OmniTrainClient : IDisposable
                 for (var unit = range[0]; unit <= Math.Min(range[1], 0xFFFF); unit++) _separators[unit] = true;
             }
             for (var i = 0; i < recipe.Vocabulary.Count; i++) _wordIds[recipe.Vocabulary[i]] = recipe.FirstWordId + i;
+        }
+        if (IsTagger)
+        {
+            var recipe = _inputSpec.TagWords!;
+            if (recipe.Recipe != "tag_word_ids_v1")
+            {
+                throw new NotSupportedException(
+                    $"Unknown tagging recipe '{recipe.Recipe}'. " +
+                    "See preprocessing.json's inputs[0].tagWords and adapt this client.");
+            }
+            foreach (var range in recipe.WhitespaceRanges)
+            {
+                for (var unit = range[0]; unit <= Math.Min(range[1], 0xFFFF); unit++) _whitespace[unit] = true;
+            }
+            for (var i = 0; i < recipe.Vocabulary.Count; i++) _tagIds[recipe.Vocabulary[i]] = recipe.FirstWordId + i;
         }
     }
 
@@ -706,6 +747,71 @@ public sealed class OmniTrainClient : IDisposable
             .ToDictionary(p => p.name, p => Math.Round(p.prob, 4));
     }
 
+    /// <summary>
+    /// One <see cref="TaggedWord"/> per word of `text` (the words are the runs of characters that are not whitespace,
+    /// as `str.split()` cuts them): the highest of the word's row of logits and its softmax probability. The first
+    /// maxTokens words are read; a later word was not, and gets the recipe's fallbackTag with confidence 0.
+    /// </summary>
+    public List<TaggedWord> Tag(string text)
+    {
+        if (!IsTagger)
+        {
+            throw new NotSupportedException("This model does not tag words: call Predict() instead.");
+        }
+        var recipe = _inputSpec.TagWords!;
+        var words = new List<string>();
+        var start = -1;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (_whitespace[text[i]])
+            {
+                if (start >= 0) words.Add(text[start..i]);
+                start = -1;
+            }
+            else if (start < 0)
+            {
+                start = i;
+            }
+        }
+        if (start >= 0) words.Add(text[start..]);
+        if (words.Count == 0) return [];
+
+        var ids = new long[recipe.MaxTokens];
+        Array.Fill(ids, (long)recipe.PadId);
+        var lower = recipe.Lowercase;
+        for (var i = 0; i < Math.Min(words.Count, recipe.MaxTokens); i++)
+        {
+            var form = new System.Text.StringBuilder(words[i].Length);
+            foreach (var unit in words[i]) form.Append(unit >= lower.From && unit <= lower.To ? (char)(unit + lower.Add) : unit);
+            ids[i] = _tagIds.TryGetValue(form.ToString(), out var id) ? id : recipe.UnknownId;
+        }
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor(_onnxInputName, new DenseTensor<long>(ids, [1, recipe.MaxTokens])),
+        };
+        using var results = _session.Run(inputs);
+        var logits = results.First(r => r.Name == _onnxOutputName).AsEnumerable<float>().ToArray();
+        var classes = _outputSpec.Classes ?? [];
+
+        var tagged = new List<TaggedWord>(words.Count);
+        for (var i = 0; i < words.Count; i++)
+        {
+            if (i >= recipe.MaxTokens)
+            {
+                tagged.Add(new TaggedWord(words[i], recipe.FallbackTag, 0.0));
+                continue;
+            }
+            var probs = Softmax(logits.Skip(i * classes.Count).Take(classes.Count).ToArray());
+            var best = 0;
+            for (var k = 1; k < probs.Length; k++)
+            {
+                if (probs[k] > probs[best]) best = k;
+            }
+            tagged.Add(new TaggedWord(words[i], classes[best], (double)MathF.Round(probs[best], 4)));
+        }
+        return tagged;
+    }
+
     /// <summary>The tokens of a text: the ASCII letters A-Z lower-cased, cut at every run of separator code units.</summary>
     private List<string> Tokenize(string text)
     {
@@ -760,6 +866,10 @@ public sealed class OmniTrainClient : IDisposable
         if (IsDetector)
         {
             throw new NotSupportedException("This model is an object detector: call Detect(), which returns boxes.");
+        }
+        if (IsTagger)
+        {
+            throw new NotSupportedException("This model tags every word of a text: call Tag(), which returns a tag for each.");
         }
         if (IsAudio) return ClassifyAudio(imagePath, topK);
         if (IsText) return ClassifyText(imagePath, topK);

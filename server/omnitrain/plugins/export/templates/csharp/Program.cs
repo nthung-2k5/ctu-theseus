@@ -1,4 +1,4 @@
-// Usage: dotnet run -- <path-to-image | path-to-wav-file | "text to classify">
+// Usage: dotnet run -- <path-to-image | path-to-wav-file | "text to classify | text to tag">
 //        dotnet run -- verify
 
 using System.Text.Json;
@@ -26,6 +26,17 @@ if (client.IsDetector)
         Console.WriteLine($"{d.Label}: {d.Confidence:F4}  x={d.Box.X:F3} y={d.Box.Y:F3} w={d.Box.W:F3} h={d.Box.H:F3}");
     }
     if (found.Count == 0) Console.WriteLine("No objects found.");
+    return 0;
+}
+
+if (client.IsTagger)
+{
+    // One line per word: the word, its tag and the model's confidence (in the console's encoding: for anything but
+    // plain ASCII, call `Tag` from code with a string).
+    foreach (var word in client.Tag(args[0]))
+    {
+        Console.WriteLine($"{word.Token}\t{word.Tag}\t{word.Confidence:F4}");
+    }
     return 0;
 }
 
@@ -68,6 +79,27 @@ static int Verify(OmniTrainClient client)
             return 0;
         }
         return VerifyDetections(expected.Detections, client.Detect(samplePath)) ? 0 : 1;
+    }
+
+    if (client.IsTagger)
+    {
+        // A token classifier is given the text and returns one tag per word, which must be the platform's, word for word.
+        if (expected.Tags is null)
+        {
+            Console.WriteLine("expected.json has no tags to compare against.");
+            return 0;
+        }
+        var found = client.Tag(File.ReadAllText(samplePath, System.Text.Encoding.UTF8)).Select(w => w.Tag).ToList();
+        var same = found.Count == expected.Tags.Count;
+        if (!same) Console.WriteLine($"MISMATCH expected {expected.Tags.Count} tags, got {found.Count}");
+        for (var i = 0; i < Math.Min(found.Count, expected.Tags.Count); i++)
+        {
+            if (found[i] == expected.Tags[i]) continue;
+            same = false;
+            Console.WriteLine($"MISMATCH word {i}: expected '{expected.Tags[i]}', got '{found[i]}'");
+        }
+        if (same) Console.WriteLine($"OK — all {found.Count} tags match the platform's output.");
+        return same ? 0 : 1;
     }
 
     if (expected.Predictions.Count == 0)
@@ -168,4 +200,5 @@ file sealed class ExpectedJson
     public string SampleFile { get; init; } = "";
     public Dictionary<string, double> Predictions { get; init; } = [];
     public List<Detection>? Detections { get; init; }
+    public List<string>? Tags { get; init; }
 }
